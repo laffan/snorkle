@@ -25,11 +25,13 @@ objc2-foundation = { version = "=0.3.2", features = [
 ] }
 objc2-ui-kit = { version = "=0.3.2", features = [
   "std", "objc2-core-foundation", "UIApplication", "UIResponder", "UIView", "UIScrollView",
+  "UIGestureRecognizer", "UITapGestureRecognizer",
 ] }
 objc2-web-kit = { version = "=0.3.2", features = [
   "std", "block2", "objc2-core-foundation",
   "WKContentRuleList", "WKContentRuleListStore", "WKFrameInfo", "WKNavigation",
   "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences",
   "WKSecurityOrigin", "WKUIDelegate", "WKUserContentController", "WKWebViewConfiguration",
+  "WKUserScript", "WKContentWorld", "WKWebsiteDataRecord",
   "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences",
 ] }

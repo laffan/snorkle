@@ -48,7 +48,8 @@ pub enum Effect {
         tab: TabId,
         keep_state: bool,
     },
-    ShowView(TabId),
+    /// Show the tab's web view in the given part of the content area.
+    ShowView { tab: TabId, pane: Pane },
     HideView(TabId),
     Load {
         tab: TabId,
@@ -69,6 +70,22 @@ pub enum Effect {
     PersistSession(Session),
     /// Chrome state changed; re-render from [`Browser::view`].
     NotifyChrome,
+}
+
+/// Where a visible content view is placed within the content area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pane {
+    Full,
+    Left,
+    Right,
+}
+
+/// Two tabs shown side by side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct SplitView {
+    pub left: TabId,
+    pub right: TabId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -162,6 +179,7 @@ pub struct ChromeState {
     pub active: Option<TabId>,
     pub os: OsSupport,
     pub content_visible: bool,
+    pub split: Option<SplitView>,
     pub max_live_tabs: usize,
     pub adblock: AdblockStatus,
 }
@@ -179,7 +197,8 @@ pub struct Browser {
     http_ok_private: HttpExceptions,
     search: SearchEngine,
     chrome_overlay: bool,
-    shown: Option<TabId>,
+    shown: Vec<(TabId, Pane)>,
+    split: Option<SplitView>,
     adblock_allowed: BTreeSet<String>,
     adblock_status: AdblockStatus,
 }
@@ -196,7 +215,8 @@ impl Browser {
             http_ok_private: HttpExceptions::default(),
             search: input::DEFAULT_SEARCH,
             chrome_overlay: false,
-            shown: None,
+            shown: Vec::new(),
+            split: None,
             adblock_allowed: BTreeSet::new(),
             adblock_status: AdblockStatus::Off,
         }
@@ -293,12 +313,52 @@ impl Browser {
     }
 
     fn activate_into(&mut self, id: TabId, now: u64, out: &mut Vec<Effect>) {
+        // Choosing a tab outside the split ends the split.
+        if self.split.is_some_and(|s| s.left != id && s.right != id) {
+            self.split = None;
+        }
         if let Some(prev) = self.active {
             if let Some(t) = self.tab_mut(prev) {
                 t.last_active_ms = now;
             }
         }
+        if self.tab(id).is_none() {
+            return;
+        }
         self.active = Some(id);
+        self.restore_if_unloaded(id, now, out);
+        self.enforce_budget(now, out);
+        self.sync_visibility(out);
+    }
+
+    /// Shows `dragged` beside `target` (target left, dragged right) and
+    /// focuses `dragged`. Both get live web views.
+    pub fn split(&mut self, dragged: TabId, target: TabId, now: u64) -> Vec<Effect> {
+        let mut out = Vec::new();
+        // Both panes need live web views; never exceed the memory budget.
+        if dragged == target || self.budget.max_live < 2 || self.tab(dragged).is_none() || self.tab(target).is_none() {
+            return out;
+        }
+        self.split = Some(SplitView { left: target, right: dragged });
+        self.restore_if_unloaded(target, now, &mut out);
+        self.activate_into(dragged, now, &mut out);
+        out.push(Effect::NotifyChrome);
+        out
+    }
+
+    pub fn unsplit(&mut self) -> Vec<Effect> {
+        let mut out = Vec::new();
+        self.split = None;
+        self.sync_visibility(&mut out);
+        out.push(Effect::NotifyChrome);
+        out
+    }
+
+    pub fn split_view(&self) -> Option<SplitView> {
+        self.split
+    }
+
+    fn restore_if_unloaded(&mut self, id: TabId, now: u64, out: &mut Vec<Effect>) {
         let restore = match self.tab_mut(id) {
             Some(t) => {
                 t.last_active_ms = now;
@@ -307,23 +367,23 @@ impl Browser {
             None => return,
         };
         if let Some(url) = restore {
-            self.ensure_live(
-                id,
-                AfterCreate::Restore { fallback: Some(url.clone()) },
-                Some((url, Source::History)),
-                out,
-            );
+            self.ensure_live(id, AfterCreate::Restore { fallback: Some(url.clone()) }, Some((url, Source::History)), out);
         }
-        self.enforce_budget(now, out);
-        self.sync_visibility(out);
+    }
+
+    /// The active tab and its split partner are never discarded by the
+    /// budget or memory warnings.
+    fn is_protected(&self, id: TabId) -> bool {
+        Some(id) == self.active || self.split.is_some_and(|s| s.left == id || s.right == id)
     }
 
     pub fn close(&mut self, id: TabId, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
         let Some(idx) = self.tabs.iter().position(|t| t.id == id) else { return out };
         let tab = self.tabs.remove(idx);
-        if self.shown == Some(id) {
-            self.shown = None;
+        self.shown.retain(|(t, _)| *t != id);
+        if self.split.is_some_and(|s| s.left == id || s.right == id) {
+            self.split = None;
         }
         if tab.life == Life::Live {
             out.push(Effect::DestroyView { tab: id, keep_state: false });
@@ -763,7 +823,7 @@ impl Browser {
     /// number of times, discard background tabs.
     pub fn on_process_terminated(&mut self, id: TabId, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
-        if self.active == Some(id) {
+        if self.is_protected(id) {
             let Some(t) = self.tab_mut(id) else { return out };
             t.crash_times_ms.retain(|&c| now.saturating_sub(c) < CRASH_WINDOW_MS);
             t.crash_times_ms.push(now);
@@ -786,7 +846,7 @@ impl Browser {
     pub fn on_memory_warning(&mut self) -> Vec<Effect> {
         let mut out = Vec::new();
         let victims: Vec<TabId> =
-            self.tabs.iter().filter(|t| t.life == Life::Live && Some(t.id) != self.active).map(|t| t.id).collect();
+            self.tabs.iter().filter(|t| t.life == Life::Live && !self.is_protected(t.id)).map(|t| t.id).collect();
         for id in victims {
             self.discard(id, &mut out);
         }
@@ -810,11 +870,12 @@ impl Browser {
         let mut background: Vec<(u64, TabId)> = self
             .tabs
             .iter()
-            .filter(|t| t.life == Life::Live && Some(t.id) != self.active)
+            .filter(|t| t.life == Life::Live && !self.is_protected(t.id))
             .map(|t| (t.last_active_ms, t.id))
             .collect();
         background.sort_by_key(|b| std::cmp::Reverse(b.0)); // most recently used first
-        let allowed = self.budget.max_live.saturating_sub(1);
+        let protected = if self.split.is_some() { 2 } else { 1 };
+        let allowed = self.budget.max_live.saturating_sub(protected);
         for (i, (last, id)) in background.into_iter().enumerate() {
             if i >= allowed || now.saturating_sub(last) > self.budget.background_ttl_ms {
                 self.discard(id, out);
@@ -831,8 +892,8 @@ impl Browser {
         t.loading = false;
         t.provisional = false;
         t.expected_load = None;
-        if self.shown == Some(id) {
-            self.shown = None;
+        if self.shown.iter().any(|(t, _)| *t == id) {
+            self.shown.retain(|(t, _)| *t != id);
             out.push(Effect::HideView(id));
         }
         out.push(Effect::DestroyView { tab: id, keep_state: true });
@@ -845,12 +906,20 @@ impl Browser {
         }
     }
 
-    fn desired_shown(&self) -> Option<TabId> {
+    fn showable(&self, id: TabId) -> bool {
+        self.tab(id).is_some_and(|t| t.life == Life::Live && t.notice.is_none() && t.committed_url.is_some())
+    }
+
+    fn desired_shown(&self) -> Vec<(TabId, Pane)> {
         if self.chrome_overlay {
-            return None;
+            return Vec::new();
         }
-        let t = self.tab(self.active?)?;
-        (t.life == Life::Live && t.notice.is_none() && t.committed_url.is_some()).then_some(t.id)
+        let wanted = match (self.split, self.active) {
+            (Some(s), _) => vec![(s.left, Pane::Left), (s.right, Pane::Right)],
+            (None, Some(a)) => vec![(a, Pane::Full)],
+            (None, None) => Vec::new(),
+        };
+        wanted.into_iter().filter(|(t, _)| self.showable(*t)).collect()
     }
 
     fn sync_visibility(&mut self, out: &mut Vec<Effect>) {
@@ -858,11 +927,15 @@ impl Browser {
         if want == self.shown {
             return;
         }
-        if let Some(old) = self.shown {
-            out.push(Effect::HideView(old));
+        for (old, _) in &self.shown {
+            if !want.iter().any(|(t, _)| t == old) {
+                out.push(Effect::HideView(*old));
+            }
         }
-        if let Some(new) = want {
-            out.push(Effect::ShowView(new));
+        for (tab, pane) in &want {
+            if !self.shown.contains(&(*tab, *pane)) {
+                out.push(Effect::ShowView { tab: *tab, pane: *pane });
+            }
         }
         self.shown = want;
     }
@@ -907,7 +980,8 @@ impl Browser {
             tabs: self.tabs.iter().map(|t| tab_view(t, &self.adblock_allowed)).collect(),
             active: self.active,
             os: self.os,
-            content_visible: self.shown.is_some(),
+            content_visible: !self.shown.is_empty(),
+            split: self.split,
             max_live_tabs: self.budget.max_live,
             adblock: self.adblock_status.clone(),
         }

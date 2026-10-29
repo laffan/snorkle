@@ -2,7 +2,7 @@
 //! address bar shows committed URLs only, HTTPS-first never downgrades
 //! silently, private tabs never reach storage, and the memory budget holds.
 
-use snorkle_core::browser::{AfterCreate, Browser, Effect, NavErrorKind, NavKind, Verdict};
+use snorkle_core::browser::{AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, SplitView, Verdict};
 use snorkle_core::os::{OsSupport, OsVersion};
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, SessionTab};
@@ -209,12 +209,12 @@ fn notices_hide_content_view() {
     let (t, _) = b.new_tab(Profile::Default, 0);
     b.navigate_input(t, "https://a.example/", 0).unwrap();
     let out = webkit_load(&mut b, t, "https://a.example/");
-    assert!(out.contains(&Effect::ShowView(t)));
+    assert!(out.contains(&Effect::ShowView { tab: t, pane: Pane::Full }));
     let out = b.navigate_input(t, "javascript:x", 0).unwrap();
     assert!(out.contains(&Effect::HideView(t)));
     assert!(!b.view().content_visible);
     let out = b.go_back(t);
-    assert!(out.contains(&Effect::ShowView(t)));
+    assert!(out.contains(&Effect::ShowView { tab: t, pane: Pane::Full }));
 }
 
 // ---- private mode ----------------------------------------------------------
@@ -401,4 +401,73 @@ fn adblock_state_per_site_and_private_tabs_cannot_toggle() {
     assert!(a.can_toggle);
     let pa = view.tabs.iter().find(|x| x.id == p).unwrap().adblock.clone().unwrap();
     assert!(!pa.can_toggle, "private tabs must not persist per-site settings");
+}
+
+// ---- split view ----------------------------------------------------------------
+
+#[test]
+fn split_shows_both_tabs_side_by_side() {
+    let mut b = browser(4);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
+    let out = b.split(c, a, 2);
+    assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }));
+    assert!(out.contains(&Effect::ShowView { tab: c, pane: Pane::Right }));
+    assert_eq!(b.view().split, Some(SplitView { left: a, right: c }));
+    assert_eq!(b.active(), Some(c));
+    // Focusing the other pane keeps the split.
+    b.activate(a, 3);
+    assert!(b.view().split.is_some());
+}
+
+#[test]
+fn split_ends_when_a_tab_outside_it_is_chosen_or_a_pane_closes() {
+    let mut b = browser(6);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
+    let (d, _) = open_and_load(&mut b, "https://d.example/", 2);
+    b.split(c, a, 3);
+    let out = b.activate(d, 4);
+    assert!(b.view().split.is_none());
+    assert!(out.contains(&Effect::HideView(a)) && out.contains(&Effect::HideView(c)));
+    assert!(out.contains(&Effect::ShowView { tab: d, pane: Pane::Full }));
+    b.split(d, a, 5);
+    b.close(a, 6);
+    assert!(b.view().split.is_none());
+}
+
+#[test]
+fn split_partner_is_never_discarded_and_restores_when_unloaded() {
+    let mut b = browser(2);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    open_and_load(&mut b, "https://b.example/", 1);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 2);
+    // With a budget of 2, `a` was discarded; splitting brings it back.
+    let out = b.split(c, a, 3);
+    assert!(out.iter().any(|e| matches!(e, Effect::CreateView { tab, .. } if *tab == a)));
+    b.on_memory_warning();
+    assert_eq!(b.live_count(), 2, "both panes stay live under memory pressure");
+    assert!(b.live_count() <= 2);
+    for _ in 0..5 {
+        b.tick(10_000_000);
+    }
+    assert_eq!(b.live_count(), 2);
+}
+
+#[test]
+fn split_refused_when_budget_cannot_hold_two_views() {
+    // Found by fuzzing (fuzz/fuzz_targets/browser_events.rs).
+    let mut b = browser(1);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
+    assert!(b.split(c, a, 2).is_empty());
+    assert!(b.live_count() <= 1);
+}
+
+#[test]
+fn split_with_self_is_ignored() {
+    let mut b = browser(4);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    assert!(b.split(a, a, 1).is_empty());
+    assert!(b.view().split.is_none());
 }

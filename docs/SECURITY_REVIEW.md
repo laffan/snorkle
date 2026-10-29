@@ -13,6 +13,7 @@ review on every change.
 | `crates/snorkle-core/src/url_display.rs`, `idn.rs` | Anti-spoofing display |
 | `crates/snorkle-core/src/input.rs` | Address-bar input → URL |
 | `crates/snorkle-core/src/storage.rs` | Persistence |
+| `crates/snorkle-core/src/userscripts.rs`, `crates/snorkle-content/src/ios/injection.rs` | Script injection into content (user scripts, black-and-white mode) |
 | `crates/snorkle-core/src/blocking.rs`, `crates/snorkle-content/src/ios/rules.rs`, `src-tauri/src/adblock.rs` | Content blocking, allowlist regex generation, WebKit rule store |
 | `crates/snorkle-content/src/lib.rs` (`CONTENT_VIEW_SPEC`) | Content web view configuration |
 | `crates/snorkle-content/src/ios/*.rs` | Native boundary, unsafe FFI, hand-written bindings |
@@ -44,12 +45,21 @@ Current channels (all carry WebKit-generated data, none carry page-chosen messag
 | C7 | Media capture / device-motion permission | Request type | Page triggers it | WebKit system prompt (`.prompt`) |
 | C8 | `webViewWebContentProcessDidTerminate` | Tab id | Page can cause a crash | Bounded reload, then a notice |
 | C9 | Auth challenge / deprecated TLS | Challenge | Server | Always default handling / refuse |
+| C10 | Tap on a content pane (`UITapGestureRecognizer`) | Tab id only | None (native UI event, not page-generated) | Focuses that tab in split view |
+
+Native → page code paths (not channels back to native, but reviewed the same way):
+
+| # | Path | What runs | Constraints |
+|---|---|---|---|
+| I1 | User scripts and styles (`WKUserScript`) | User-written CSS/JS for domains they chose | Isolated default client world; main frame only; guarded by the document's real `location.hostname`; CSS and domain embedded as escaped JSON literals; no message handler or `GM_*` API. Every saved script's source is present (guarded) in every page's client world. |
+| I2 | Black-and-white mode | Constant `html{filter:grayscale(1)}` style, via user script and one `evaluateJavaScript` (no completion handler) | Same world and frame constraints; takes no input |
 
 Sign-off log:
 
 | Date | Change | Approved by |
 |---|---|---|
 | 2026-10-29 | Content web views built with objc2-web-kit instead of wry (Tauri/wry cannot host child webviews on iOS) | Owner (in session) |
+| 2026-10-29 | Script injection into content: user scripts/styles per domain and black-and-white mode (I1, I2), confined to `ios/injection.rs` (tripwire allowlist) | Owner (feature request in session) |
 
 ## Checklist for AI-assisted changes in review-required areas
 

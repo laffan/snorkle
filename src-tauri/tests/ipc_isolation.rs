@@ -49,6 +49,13 @@ fn args(cmd: &str) -> serde_json::Value {
         "set_chrome_layout" => json!({ "top": 80.0, "left": 264.0, "overlay": false }),
         "remove_bookmark" => json!({ "url": "https://example.com/" }),
         "list_history" => json!({ "limit": 10 }),
+        "bookmark_tab" => json!({ "tab": 1, "index": 0 }),
+        "move_bookmark" => json!({ "url": "https://example.com/", "index": 0 }),
+        "split_tabs" => json!({ "tab": 1, "with": 2 }),
+        "set_grayscale" => json!({ "on": false }),
+        "delete_user_script" => json!({ "domain": "example.com" }),
+        "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),
+        "unsplit" | "get_settings" | "empty_cache" | "list_user_scripts" => json!({}),
         "get_state" | "list_bookmarks" | "clear_history" => json!({}),
         _ => json!({ "tab": 1 }),
     }

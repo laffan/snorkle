@@ -16,6 +16,7 @@
 
 mod bindings;
 mod delegates;
+mod injection;
 mod rules;
 
 use std::cell::Cell;
@@ -30,26 +31,28 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSDate, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
+    NSDate, NSDictionary, NSSet, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSString, NSURLRequest,
     NSURL, NSUUID,
 };
 use objc2_ui_kit::{
     UIApplication, UIApplicationDidEnterBackgroundNotification, UIApplicationDidReceiveMemoryWarningNotification,
-    UIView, UIViewAutoresizing,
+    UITapGestureRecognizer, UIView, UIViewAutoresizing,
 };
 use objc2_web_kit::{
-    WKContentMode, WKInactiveSchedulingPolicy,
+    WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController, WKWebsiteDataTypeDiskCache,
+    WKWebsiteDataTypeMemoryCache,
     WKWebViewConfiguration, WKWebsiteDataStore,
 };
-use snorkle_core::browser::{AfterCreate, Effect};
+use snorkle_core::browser::{AfterCreate, Effect, Pane};
+use snorkle_core::userscripts::Injection;
 use snorkle_core::os::OsVersion;
 use snorkle_core::policy::INTERNAL_SCHEMES;
 use snorkle_core::tabs::{Profile, TabId};
 use url::Url;
 
 use self::bindings::WKWebView;
-use self::delegates::{NavDelegate, Observer, TabIvars, UiDelegate, KVO_KEYS};
+use self::delegates::{NavDelegate, Observer, TabIvars, TapFocus, UiDelegate, KVO_KEYS};
 use crate::{clamp_inset, ContentEvents, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
 
 // Adding any page-to-native channel requires writing installation code
@@ -63,6 +66,10 @@ const _: () = assert!(
 struct View {
     container: Retained<UIView>,
     web: Retained<WKWebView>,
+    controller: Retained<WKUserContentController>,
+    pane: Cell<Pane>,
+    _tap: Retained<TapFocus>,
+    _tap_recognizer: Retained<UITapGestureRecognizer>,
     _nav: Retained<NavDelegate>,
     _ui: Retained<UiDelegate>,
     kvo: Retained<Observer>,
@@ -95,6 +102,7 @@ pub struct ContentHost {
     events: Rc<dyn ContentEvents>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     user_agent: Retained<NSString>,
+    scripts: injection::Scripts,
 }
 
 impl ContentHost {
@@ -140,6 +148,7 @@ impl ContentHost {
             events,
             observers,
             user_agent: NSString::from_str(&crate::safari_desktop_user_agent(os_version())),
+            scripts: injection::Scripts::default(),
         }
     }
 
@@ -157,6 +166,22 @@ impl ContentHost {
         )
     }
 
+    /// Frame of one pane: the whole content area, or one half of it with a
+    /// 2 pt divider in split view.
+    fn pane_frame(&self, pane: Pane) -> CGRect {
+        let area = self.content_frame();
+        const GAP: f64 = 2.0;
+        let half = ((area.size.width - GAP) / 2.0).floor().max(0.0);
+        match pane {
+            Pane::Full => area,
+            Pane::Left => CGRect::new(area.origin, CGSize::new(half, area.size.height)),
+            Pane::Right => CGRect::new(
+                CGPoint::new(area.origin.x + area.size.width - half, area.origin.y),
+                CGSize::new(half, area.size.height),
+            ),
+        }
+    }
+
     /// Insets of the content area, in points, reported by the trusted
     /// chrome UI: `top` is the bottom edge of the toolbar, `left` the right
     /// edge of the docked tab sidebar (0 when collapsed). Content containers
@@ -164,9 +189,34 @@ impl ContentHost {
     pub fn set_insets(&mut self, top: f64, left: f64) {
         self.top.set(top);
         self.left.set(left);
-        let frame = self.content_frame();
         for v in self.views.values() {
-            v.container.setFrame(frame);
+            v.container.setFrame(self.pane_frame(v.pane.get()));
+        }
+    }
+
+    /// Replaces the injected scripts (user scripts, black-and-white mode) in
+    /// every content view; they apply from the next load. `run_now`, if
+    /// given, is run once in every loaded page (used to toggle
+    /// black-and-white without reloading).
+    pub fn set_injections(&mut self, injections: &[Injection], run_now: Option<&str>) {
+        self.scripts = injection::make_scripts(self.mtm, injections);
+        for v in self.views.values() {
+            injection::install(&v.controller, &self.scripts);
+            if let Some(js) = run_now {
+                injection::run_now(self.mtm, &v.web, js);
+            }
+        }
+    }
+
+    /// Empties the HTTP disk and memory caches of every profile's store.
+    /// Cookies, storage and logins are kept.
+    pub fn clear_cache(&mut self) {
+        unsafe {
+            let types = NSSet::from_slice(&[WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache]);
+            for store in std::iter::once(&self.default_store).chain(self.private_store.as_ref()) {
+                let done = RcBlock::new(|| {});
+                store.removeDataOfTypes_modifiedSince_completionHandler(&types, &NSDate::distantPast(), &done);
+            }
         }
     }
 
@@ -205,9 +255,10 @@ impl ContentHost {
                         self.saved.remove(tab);
                     }
                 }
-                Effect::ShowView(tab) => {
+                Effect::ShowView { tab, pane } => {
                     if let Some(v) = self.views.get(tab) {
-                        v.container.setFrame(self.content_frame());
+                        v.pane.set(*pane);
+                        v.container.setFrame(self.pane_frame(*pane));
                         self.root.bringSubviewToFront(&v.container);
                         v.container.setHidden(false);
                     }
@@ -338,8 +389,30 @@ impl ContentHost {
 
         container.addSubview(&web);
         self.root.addSubview(&container);
-        rules::register(tab, controller);
-        View { container, web, _nav: nav, _ui: ui, kvo }
+        injection::install(&controller, &self.scripts);
+        rules::register(tab, controller.clone());
+
+        let tap = TapFocus::new(mtm, TabIvars::new(tab, self.events.clone()));
+        let recognizer = UITapGestureRecognizer::initWithTarget_action(
+            UITapGestureRecognizer::alloc(mtm),
+            Some(&tap),
+            Some(sel!(tapped:)),
+        );
+        recognizer.setCancelsTouchesInView(false);
+        recognizer.setDelegate(Some(ProtocolObject::from_ref(&*tap)));
+        container.addGestureRecognizer(&recognizer);
+
+        View {
+            container,
+            web,
+            controller,
+            pane: Cell::new(Pane::Full),
+            _tap: tap,
+            _tap_recognizer: recognizer,
+            _nav: nav,
+            _ui: ui,
+            kvo,
+        }
     }
 
     /// Installs content-blocking rule lists for `key` into every content

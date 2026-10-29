@@ -5,6 +5,7 @@
 
 mod adblock;
 mod command_list;
+mod scripts;
 pub mod commands;
 pub mod state;
 
@@ -46,6 +47,16 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::list_history,
         commands::clear_history,
         commands::toggle_site_adblock,
+        commands::bookmark_tab,
+        commands::move_bookmark,
+        commands::split_tabs,
+        commands::unsplit,
+        commands::get_settings,
+        commands::set_grayscale,
+        commands::empty_cache,
+        commands::list_user_scripts,
+        commands::save_user_script,
+        commands::delete_user_script,
     ])
 }
 
@@ -93,6 +104,8 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     #[cfg(all(debug_assertions, desktop))]
     window.open_devtools();
 
+    // Injected scripts first, so restored views are created with them.
+    scripts::apply(&shared, None);
     let effects = shared.browser().restore_session(&session, state::now_ms());
     shared.run(effects);
 

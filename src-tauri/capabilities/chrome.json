@@ -28,6 +28,16 @@
     "allow-remove-bookmark",
     "allow-list-history",
     "allow-clear-history",
-    "allow-toggle-site-adblock"
+    "allow-toggle-site-adblock",
+    "allow-bookmark-tab",
+    "allow-move-bookmark",
+    "allow-split-tabs",
+    "allow-unsplit",
+    "allow-get-settings",
+    "allow-set-grayscale",
+    "allow-empty-cache",
+    "allow-list-user-scripts",
+    "allow-save-user-script",
+    "allow-delete-user-script"
   ]
 }

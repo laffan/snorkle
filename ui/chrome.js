@@ -7,6 +7,8 @@
 //   hosts) must never be interpreted as markup.
 // - The address bar shows only what Rust's DisplayUrl provides.
 // - Never load remote resources (CSP also forbids it).
+// - Anything drawn over the content area must set `overlay` (see
+//   reportLayout) so native page views are hidden while it is open.
 'use strict';
 
 (() => {
@@ -16,10 +18,18 @@
 
   let state = null;
   let editing = false;
-  let panel = null; // null | 'bookmarks' | 'history'
+  let panel = null; // null | 'history'
+  let modalOpen = false;
+  let scriptsOpen = false;
+  let menuOpen = false;
+  let bookmarks = [];
+  let settings = { grayscale: false };
+  let scripts = [];
+  let editingDomain = null; // domain of the script open in the editor, or '' for new
   let tabsKey = '';
   let toastTimer = 0;
   let clearArmed = false;
+  let suppressClick = false;
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -87,9 +97,12 @@
   }
 
   function renderTabs() {
-    const key = JSON.stringify(
-      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable]).concat([state.active]),
-    );
+    const split = state.split;
+    const key = JSON.stringify([
+      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable]),
+      state.active,
+      split,
+    ]);
     if (key === tabsKey) return;
     tabsKey = key;
     const normal = $('tabs');
@@ -98,6 +111,7 @@
     priv.replaceChildren();
     for (const t of state.tabs) {
       const node = el('div', 'tab' + (t.id === state.active ? ' active' : '') + (t.private ? ' private' : '') + (t.live ? '' : ' discarded'));
+      node.dataset.tab = String(t.id);
       node.setAttribute('role', 'tab');
       node.setAttribute('aria-selected', String(t.id === state.active));
       const open = el('button', 'open');
@@ -108,52 +122,26 @@
         open.appendChild(host);
       }
       open.addEventListener('click', () => {
+        if (suppressClick) return;
         invoke('activate_tab', { tab: t.id });
         if (narrow) setSidebar(false);
       });
-      const close = el('button', 'close', '\u00D7');
+      node.appendChild(open);
+      if (split && (split.left === t.id || split.right === t.id)) {
+        const b = el('span', 'badge', split.left === t.id ? 'L' : 'R');
+        b.title = 'Shown in split view';
+        node.appendChild(b);
+      }
+      const close = el('button', 'close', '×');
       close.setAttribute('aria-label', 'Close tab');
       close.addEventListener('click', (ev) => { ev.stopPropagation(); invoke('close_tab', { tab: t.id }); });
-      node.append(open, close);
+      node.appendChild(close);
+      node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'tab', id: t.id, private: t.private }));
       (t.private ? priv : normal).appendChild(node);
     }
     $('private-head').hidden = !priv.childElementCount;
     const act = $('sidebar').querySelector('.tab.active');
-    if (act) act.scrollIntoView({ block: 'nearest' });
-  }
-
-  // ---- sidebar ----------------------------------------------------------
-
-  // Wide windows: the sidebar is docked and content starts to its right.
-  // Narrow windows (Split View / Slide Over): it slides over the content
-  // area, which is hidden while it is open (overlay), and closes after a
-  // tab is chosen.
-  const NARROW_PX = 700;
-  let narrow = window.innerWidth < NARROW_PX;
-  let sidebarOpen = loadSidebarPref();
-
-  function loadSidebarPref() {
-    try {
-      const v = localStorage.getItem('sidebarOpen');
-      if (v !== null) return v === '1' && !narrow;
-    } catch (e) { /* storage unavailable: use default */ }
-    return !narrow;
-  }
-
-  function setSidebar(open) {
-    sidebarOpen = open;
-    if (!narrow) {
-      try { localStorage.setItem('sidebarOpen', open ? '1' : '0'); } catch (e) { /* ignore */ }
-    }
-    applySidebar();
-  }
-
-  function applySidebar() {
-    document.body.classList.toggle('narrow', narrow);
-    document.body.classList.toggle('sidebar-closed', !sidebarOpen);
-    $('sidebar').setAttribute('aria-hidden', String(!sidebarOpen));
-    $('sidebar-toggle').setAttribute('aria-expanded', String(sidebarOpen));
-    reportLayout();
+    if (act && !dragState) act.scrollIntoView({ block: 'nearest' });
   }
 
   function renderToolbar(tab) {
@@ -163,6 +151,7 @@
     reload.textContent = tab && tab.loading ? '×' : '↻';
     reload.setAttribute('aria-label', tab && tab.loading ? 'Stop' : 'Reload');
     $('bookmark').disabled = !(tab && tab.url && !tab.private);
+    $('unsplit').hidden = !state.split;
     renderShield(tab);
     $('private-pill').hidden = !(tab && tab.private);
 
@@ -252,17 +241,12 @@
     }
   }
 
-  let startKey = '';
   function renderStart(tab) {
     $('start-title').textContent = tab && tab.private ? 'New Private Tab' : 'New Tab';
     $('start-private').hidden = !(tab && tab.private);
-    const key = String(tab && tab.id);
-    if (key === startKey) return;
-    startKey = key;
-    T.core.invoke('list_bookmarks').then((items) => fillList($('start-bookmarks'), items, null));
   }
 
-  function fillList(list, items, onRemove) {
+  function fillList(list, items) {
     list.replaceChildren();
     if (!items.length) {
       list.appendChild(el('li', 'muted', 'Nothing here yet.'));
@@ -284,39 +268,362 @@
         if (tab) invoke('navigate', { tab: tab.id, input: it.url });
       });
       li.appendChild(open);
-      if (onRemove) {
-        const rm = el('button', 'remove', '×');
-        rm.setAttribute('aria-label', 'Remove');
-        rm.addEventListener('click', () => onRemove(it));
-        li.appendChild(rm);
-      }
       list.appendChild(li);
     }
   }
 
-  // ---- panels (bookmarks / history) ----------------------------------
+  // ---- bookmarks bar ------------------------------------------------------
 
-  function openPanel(which) {
-    panel = which;
-    clearArmed = false;
-    $('panel-bookmarks').classList.toggle('on', which === 'bookmarks');
-    $('panel-history').classList.toggle('on', which === 'history');
-    $('panel-clear').hidden = which !== 'history';
-    $('panel-clear').textContent = 'Clear history';
-    const list = $('panel-list');
-    if (which === 'bookmarks') {
-      T.core.invoke('list_bookmarks').then((items) =>
-        fillList(list, items, (it) => invoke('remove_bookmark', { url: it.url }).then(() => openPanel('bookmarks'))));
-    } else {
-      T.core.invoke('list_history', { limit: 300 }).then((items) => fillList(list, items, null));
+  function loadBookmarks() {
+    return T.core.invoke('list_bookmarks').then((items) => { bookmarks = items; renderBookmarks(); }).catch(() => {});
+  }
+
+  function renderBookmarks() {
+    const list = $('bookmarks');
+    list.replaceChildren();
+    if (!bookmarks.length) {
+      list.appendChild(el('div', 'hint', 'Drag a tab here to bookmark it.'));
+      return;
     }
+    bookmarks.forEach((b, index) => {
+      const node = el('div', 'bm');
+      node.dataset.index = String(index);
+      const open = el('button', 'open');
+      open.appendChild(el('span', 't', b.title || b.display.registrable));
+      const host = el('span', 'h');
+      fillLabels(host, b.display.registrable, false);
+      open.appendChild(host);
+      open.addEventListener('click', () => {
+        if (suppressClick) return;
+        const tab = activeTab();
+        if (tab) invoke('navigate', { tab: tab.id, input: b.url });
+        if (narrow) setSidebar(false);
+      });
+      const rm = el('button', 'close', '×');
+      rm.setAttribute('aria-label', 'Remove bookmark');
+      rm.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        invoke('remove_bookmark', { url: b.url }).then(loadBookmarks);
+      });
+      node.append(open, rm);
+      node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'bookmark', url: b.url, index }));
+      list.appendChild(node);
+    });
+  }
+
+  // ---- drag and drop ------------------------------------------------------
+  //
+  // Long-press (or mouse press) then move. Tab → bookmarks bar: bookmark it
+  // at that position. Tab → another tab: split view. Bookmark → bookmarks
+  // bar: reorder. A move before the long-press fires is a scroll.
+
+  const DRAG_DELAY_MS = 280;
+  const MOVE_TOLERANCE_PX = 8;
+  let pendingDrag = null;
+  let dragState = null;
+
+  function armDrag(ev, node, item) {
+    if (ev.button > 0 || ev.target.closest('.close')) return;
+    cancelPending();
+    const delay = ev.pointerType === 'mouse' ? 120 : DRAG_DELAY_MS;
+    pendingDrag = { node, item, x: ev.clientX, y: ev.clientY, timer: setTimeout(startDrag, delay) };
+  }
+
+  function cancelPending() {
+    if (pendingDrag) clearTimeout(pendingDrag.timer);
+    pendingDrag = null;
+  }
+
+  function startDrag() {
+    const p = pendingDrag;
+    pendingDrag = null;
+    if (!p) return;
+    const rect = p.node.getBoundingClientRect();
+    const ghost = p.node.cloneNode(true);
+    ghost.classList.add('ghost');
+    ghost.style.width = rect.width + 'px';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    document.body.appendChild(ghost);
+    p.node.classList.add('drag-src');
+    document.body.classList.add('dragging');
+    dragState = { item: p.item, node: p.node, ghost, dx: p.x - rect.left, dy: p.y - rect.top, target: null };
+  }
+
+  function dropTargetAt(x, y) {
+    const hit = document.elementFromPoint(x, y);
+    if (!hit) return null;
+    const list = hit.closest('#bookmarks');
+    if (list) {
+      if (dragState.item.kind === 'tab' && dragState.item.private) return null; // never persist private tabs
+      const items = [...list.querySelectorAll('.bm')];
+      let index = items.length;
+      for (let i = 0; i < items.length; i++) {
+        const r = items[i].getBoundingClientRect();
+        if (y < r.top + r.height / 2) { index = i; break; }
+      }
+      return { kind: 'bookmarks', index, list, items };
+    }
+    const tabNode = hit.closest('.tab');
+    if (tabNode && dragState.item.kind === 'tab') {
+      const id = Number(tabNode.dataset.tab);
+      if (id !== dragState.item.id) return { kind: 'tab', id, node: tabNode };
+    }
+    return null;
+  }
+
+  function showDropFeedback(target) {
+    document.querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+    const line = $('drop-line');
+    line.hidden = true;
+    if (!target) return;
+    if (target.kind === 'tab') {
+      target.node.classList.add('drop-target');
+    } else {
+      target.list.classList.add('drop-target');
+      const lr = target.list.getBoundingClientRect();
+      let y;
+      if (!target.items.length) y = lr.top + lr.height / 2;
+      else if (target.index < target.items.length) y = target.items[target.index].getBoundingClientRect().top - 1;
+      else y = target.items[target.items.length - 1].getBoundingClientRect().bottom + 1;
+      line.style.left = lr.left + 6 + 'px';
+      line.style.width = lr.width - 12 + 'px';
+      line.style.top = y + 'px';
+      line.hidden = false;
+    }
+  }
+
+  function endDrag(commit) {
+    const d = dragState;
+    dragState = null;
+    document.body.classList.remove('dragging');
+    d.ghost.remove();
+    d.node.classList.remove('drag-src');
+    showDropFeedback(null);
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 0);
+    const t = d.target;
+    if (!commit || !t) return;
+    if (d.item.kind === 'tab' && t.kind === 'tab') {
+      invoke('split_tabs', { tab: d.item.id, with: t.id });
+    } else if (d.item.kind === 'tab' && t.kind === 'bookmarks') {
+      T.core.invoke('bookmark_tab', { tab: d.item.id, index: t.index })
+        .then((added) => { if (!added) toast('Already bookmarked, or nothing to bookmark yet.'); return loadBookmarks(); })
+        .catch((e) => toast(String(e)));
+    } else if (d.item.kind === 'bookmark' && t.kind === 'bookmarks') {
+      const to = t.index > d.item.index ? t.index - 1 : t.index;
+      if (to !== d.item.index) invoke('move_bookmark', { url: d.item.url, index: to }).then(loadBookmarks);
+    }
+  }
+
+  document.addEventListener('pointermove', (ev) => {
+    if (pendingDrag && Math.hypot(ev.clientX - pendingDrag.x, ev.clientY - pendingDrag.y) > MOVE_TOLERANCE_PX) {
+      cancelPending(); // the user is scrolling
+    }
+    if (!dragState) return;
+    dragState.ghost.style.left = ev.clientX - dragState.dx + 'px';
+    dragState.ghost.style.top = ev.clientY - dragState.dy + 'px';
+    dragState.target = dropTargetAt(ev.clientX, ev.clientY);
+    showDropFeedback(dragState.target);
+  });
+  document.addEventListener('pointerup', () => { cancelPending(); if (dragState) endDrag(true); });
+  document.addEventListener('pointercancel', () => { cancelPending(); if (dragState) endDrag(false); });
+  // Once a drag has started, stop the sidebar from scrolling under it.
+  document.addEventListener('touchmove', (ev) => { if (dragState) ev.preventDefault(); }, { passive: false });
+
+  // ---- sidebar ----------------------------------------------------------
+
+  // Wide windows: the sidebar is docked and content starts to its right.
+  // Narrow windows (Split View / Slide Over): it slides over the content
+  // area, which is hidden while it is open (overlay), and closes after a
+  // tab is chosen.
+  const NARROW_PX = 700;
+  const MIN_SIDEBAR = 200;
+  const MAX_SIDEBAR = 420;
+  let narrow = window.innerWidth < NARROW_PX;
+  let sidebarOpen = loadSidebarPref();
+
+  function pref(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+  function setPref(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ }
+  }
+
+  function loadSidebarPref() {
+    const v = pref('sidebarOpen');
+    if (v !== null) return v === '1' && !narrow;
+    return !narrow;
+  }
+
+  function clampWidth(w) {
+    return Math.round(Math.max(MIN_SIDEBAR, Math.min(MAX_SIDEBAR, w, window.innerWidth * 0.5)));
+  }
+
+  function setSidebarWidth(w) {
+    document.documentElement.style.setProperty('--sidebar-w', clampWidth(w) + 'px');
+  }
+
+  function setSidebar(open) {
+    sidebarOpen = open;
+    if (!narrow) setPref('sidebarOpen', open ? '1' : '0');
+    closeMenu();
+    applySidebar();
+  }
+
+  function applySidebar() {
+    document.body.classList.toggle('narrow', narrow);
+    document.body.classList.toggle('sidebar-closed', !sidebarOpen);
+    $('sidebar').setAttribute('aria-hidden', String(!sidebarOpen));
+    $('sidebar-toggle').setAttribute('aria-expanded', String(sidebarOpen));
+    reportLayout();
+  }
+
+  // Resizing: the content view follows the edge, one layout report per
+  // animation frame.
+  let resize = null;
+  let layoutQueued = false;
+  function queueLayout() {
+    if (layoutQueued) return;
+    layoutQueued = true;
+    requestAnimationFrame(() => { layoutQueued = false; reportLayout(); });
+  }
+  $('sidebar-resize').addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    const handle = $('sidebar-resize');
+    handle.setPointerCapture(ev.pointerId);
+    const w = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 264;
+    resize = { x: ev.clientX, w };
+    document.body.classList.add('resizing');
+  });
+  $('sidebar-resize').addEventListener('pointermove', (ev) => {
+    if (!resize) return;
+    setSidebarWidth(resize.w + ev.clientX - resize.x);
+    queueLayout();
+  });
+  const endResize = () => {
+    if (!resize) return;
+    resize = null;
+    document.body.classList.remove('resizing');
+    setPref('sidebarWidth', getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w').trim());
+    reportLayout();
+  };
+  $('sidebar-resize').addEventListener('pointerup', endResize);
+  $('sidebar-resize').addEventListener('pointercancel', endResize);
+
+  // ---- menu, settings, history ----------------------------------------------
+
+  function openMenu() { menuOpen = true; $('menu-pop').hidden = false; }
+  function closeMenu() { menuOpen = false; $('menu-pop').hidden = true; }
+
+  function openPanel() {
+    closeMenu();
+    panel = 'history';
+    clearArmed = false;
+    $('panel-clear').textContent = 'Clear history';
+    T.core.invoke('list_history', { limit: 300 }).then((items) => fillList($('panel-list'), items));
+    if (narrow) setSidebar(false);
     render();
   }
 
   function closePanel() {
     panel = null;
-    startKey = '';
     render();
+  }
+
+  function setModal(open) {
+    closeMenu();
+    modalOpen = open;
+    $('modal').hidden = !open;
+    reportLayout();
+  }
+
+  // ---- site scripts -------------------------------------------------------
+
+  function loadScripts() {
+    return T.core.invoke('list_user_scripts').then((items) => { scripts = items; renderScripts(); }).catch((e) => toast(String(e)));
+  }
+
+  function renderScripts() {
+    const list = $('scripts-list');
+    list.replaceChildren();
+    if (!scripts.length) {
+      list.appendChild(el('li', 'muted', 'No site scripts yet.'));
+    }
+    for (const s of scripts) {
+      const li = el('li');
+      const enabled = el('input');
+      enabled.type = 'checkbox';
+      enabled.checked = s.enabled;
+      enabled.setAttribute('aria-label', `Enable scripts for ${s.domain}`);
+      enabled.addEventListener('change', () => saveScript({ ...s, enabled: enabled.checked }));
+      const open = el('button', 'open');
+      open.appendChild(el('span', 't', s.domain));
+      const parts = [s.css.trim() ? 'CSS' : '', s.js.trim() ? 'JS' : ''].filter(Boolean).join(' + ') || 'empty';
+      open.appendChild(el('span', 'u', parts + (s.enabled ? '' : ' (off)')));
+      open.addEventListener('click', () => openEditor(s));
+      const rm = el('button', 'remove', '×');
+      rm.setAttribute('aria-label', `Delete scripts for ${s.domain}`);
+      rm.addEventListener('click', () => deleteScript(s.domain));
+      li.append(enabled, open, rm);
+      list.appendChild(li);
+    }
+  }
+
+  function openEditor(s) {
+    editingDomain = s ? s.domain : '';
+    $('script-editor').hidden = false;
+    $('se-domain').value = s ? s.domain : currentSite();
+    $('se-enabled').checked = s ? s.enabled : true;
+    $('se-css').value = s ? s.css : '';
+    $('se-js').value = s ? s.js : '';
+    $('se-delete').hidden = !s;
+  }
+
+  function currentSite() {
+    const t = activeTab();
+    return (t && t.adblock && t.adblock.site) || '';
+  }
+
+  function saveScript(s) {
+    return T.core.invoke('save_user_script', s)
+      .then((saved) => {
+        // Renaming the domain in the editor replaces the old entry.
+        const renamed = editingDomain && editingDomain !== saved.domain ? T.core.invoke('delete_user_script', { domain: editingDomain }) : null;
+        editingDomain = saved.domain;
+        $('se-domain').value = saved.domain;
+        $('se-delete').hidden = false;
+        return Promise.resolve(renamed).then(loadScripts).then(() => reloadIfMatching(saved.domain));
+      })
+      .catch((e) => toast(String(e)));
+  }
+
+  function deleteScript(domain) {
+    invoke('delete_user_script', { domain }).then(() => {
+      if (editingDomain === domain) $('script-editor').hidden = true;
+      return loadScripts();
+    }).then(() => reloadIfMatching(domain));
+  }
+
+  function reloadIfMatching(domain) {
+    const t = activeTab();
+    const site = t && t.adblock && t.adblock.site;
+    if (site && (site === domain || site.endsWith('.' + domain) || domain.endsWith('.' + site))) {
+      invoke('reload', { tab: t.id });
+      toast(`Saved. Reloading ${site}…`);
+    } else {
+      toast('Saved. Applies the next time a matching page loads.');
+    }
+  }
+
+  function setScripts(open) {
+    scriptsOpen = open;
+    $('scripts-pop').hidden = !open;
+    if (open) {
+      $('script-editor').hidden = true;
+      loadScripts();
+    }
+    reportLayout();
   }
 
   // ---- address bar ------------------------------------------------------
@@ -349,9 +656,22 @@
     const left = sidebarOpen && !narrow ? Math.ceil($('sidebar').offsetWidth) : 0;
     $('chrome').style.left = left + 'px';
     const top = Math.ceil($('chrome').getBoundingClientRect().bottom);
-    $('surface').style.top = top + 'px';
-    $('surface').style.left = left + 'px';
-    const overlay = !!panel || (narrow && sidebarOpen);
+    const overlay = !!panel || modalOpen || scriptsOpen || (narrow && sidebarOpen);
+    // The chrome surface (start page, notices) covers the focused pane: in
+    // split view that is one half of the content area (matching the native
+    // pane frames: 2 pt divider, halves floored).
+    let sLeft = left;
+    let sRight = 0;
+    if (state && state.split && !overlay) {
+      const w = window.innerWidth - left;
+      const half = Math.floor((w - 2) / 2);
+      if (state.active === state.split.left) sRight = w - half;
+      else sLeft = left + w - half;
+    }
+    const s = $('surface');
+    s.style.top = top + 'px';
+    s.style.left = sLeft + 'px';
+    s.style.right = sRight + 'px';
     const key = top + ':' + left + ':' + overlay;
     if (key === lastLayout) return;
     lastLayout = key;
@@ -377,7 +697,7 @@
       return;
     }
     if (status.state === 'compiling') {
-      b.textContent = 'Blocker\u2026';
+      b.textContent = 'Blocker…';
       b.disabled = true;
       return;
     }
@@ -388,7 +708,13 @@
     b.disabled = !a.can_toggle;
     b.title = a.can_toggle
       ? (a.blocking ? `Allow ads on ${a.site}` : `Block ads on ${a.site} again`)
-      : 'Per-site settings can\u2019t be changed in a private tab';
+      : 'Per-site settings can’t be changed in a private tab';
+  }
+
+  function renderGrayscale() {
+    const b = $('grayscale');
+    b.classList.toggle('on', settings.grayscale);
+    b.setAttribute('aria-pressed', String(settings.grayscale));
   }
 
   function toast(msg) {
@@ -417,29 +743,59 @@
     if (narrow) setSidebar(false);
     invoke('new_tab', { private: true }).then(beginEdit);
   });
+  $('grayscale').addEventListener('click', () => {
+    const on = !settings.grayscale;
+    T.core.invoke('set_grayscale', { on })
+      .then(() => { settings.grayscale = on; renderGrayscale(); })
+      .catch((e) => toast(String(e)));
+  });
   $('sidebar-toggle').addEventListener('click', () => setSidebar(!sidebarOpen));
-  // Narrow windows: a tap anywhere outside the overlaid sidebar closes it.
+  $('unsplit').addEventListener('click', () => invoke('unsplit'));
+  $('menu').addEventListener('click', () => (menuOpen ? closeMenu() : openMenu()));
+  $('menu-history').addEventListener('click', openPanel);
+  $('menu-settings').addEventListener('click', () => setModal(true));
+  $('modal-close').addEventListener('click', () => setModal(false));
+  $('modal').addEventListener('click', (ev) => { if (ev.target === $('modal')) setModal(false); });
+  $('empty-cache').addEventListener('click', () => invoke('empty_cache').then(() => toast('Cache emptied.')));
+  $('scripts-btn').addEventListener('click', () => setScripts(!scriptsOpen));
+  $('scripts-close').addEventListener('click', () => setScripts(false));
+  $('scripts-new').addEventListener('click', () => {
+    const existing = scripts.find((s) => s.domain === currentSite());
+    openEditor(existing || null);
+  });
+  $('se-save').addEventListener('click', () =>
+    saveScript({ domain: $('se-domain').value, css: $('se-css').value, js: $('se-js').value, enabled: $('se-enabled').checked }));
+  $('se-delete').addEventListener('click', () => { if (editingDomain) deleteScript(editingDomain); });
+
+  // Taps outside close the menu, and the overlaid sidebar in narrow windows.
   document.addEventListener('pointerdown', (ev) => {
+    if (menuOpen && !$('menu-pop').contains(ev.target) && ev.target !== $('menu')) closeMenu();
     if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('sidebar-toggle')) {
       setSidebar(false);
     }
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape' || editing) return;
+    if (menuOpen) closeMenu();
+    else if (modalOpen) setModal(false);
+    else if (scriptsOpen) setScripts(false);
+    else if (panel) closePanel();
   });
   $('shield').addEventListener('click', withTab((t) => {
     const a = t.adblock;
     if (!a || !a.can_toggle) return;
     T.core.invoke('toggle_site_adblock', { tab: t.id })
-      .then((blocking) => toast(blocking ? `Blocking ads on ${a.site} again. Reloading\u2026` : `Ads allowed on ${a.site}. Reloading\u2026`))
+      .then((blocking) => toast(blocking ? `Blocking ads on ${a.site} again. Reloading…` : `Ads allowed on ${a.site}. Reloading…`))
       .catch((e) => toast(String(e)));
   }));
   $('bookmark').addEventListener('click', withTab((t) =>
-    T.core.invoke('toggle_bookmark', { tab: t.id }).then((on) => toast(on ? 'Bookmarked' : 'Bookmark removed'))));
-  $('menu').addEventListener('click', () => (panel ? closePanel() : openPanel('bookmarks')));
-  $('panel-bookmarks').addEventListener('click', () => openPanel('bookmarks'));
-  $('panel-history').addEventListener('click', () => openPanel('history'));
+    T.core.invoke('toggle_bookmark', { tab: t.id })
+      .then((on) => { toast(on ? 'Bookmarked' : 'Bookmark removed'); return loadBookmarks(); })
+      .catch((e) => toast(String(e)))));
   $('panel-close').addEventListener('click', closePanel);
   $('panel-clear').addEventListener('click', () => {
     if (!clearArmed) { clearArmed = true; $('panel-clear').textContent = 'Tap again to clear'; return; }
-    invoke('clear_history').then(() => openPanel('history'));
+    invoke('clear_history').then(openPanel);
   });
 
   $('url-display').addEventListener('click', beginEdit);
@@ -463,11 +819,17 @@
       narrow = nowNarrow;
       sidebarOpen = nowNarrow ? false : loadSidebarPref();
     }
+    setSidebarWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 264);
     applySidebar();
   });
+  const savedWidth = parseFloat(pref('sidebarWidth') || '');
+  if (savedWidth) setSidebarWidth(savedWidth);
   applySidebar();
+  renderBookmarks();
 
   T.event.listen('state', (e) => { state = e.payload; render(); });
   T.event.listen('toast', (e) => toast(String(e.payload)));
   T.core.invoke('get_state').then((s) => { state = s; render(); });
+  loadBookmarks();
+  T.core.invoke('get_settings').then((s) => { settings = s; renderGrayscale(); }).catch(() => {});
 })();

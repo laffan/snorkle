@@ -12,7 +12,8 @@ Priorities: security first, speed second.
 │  │     Has the Tauri IPC bridge. Capability "chrome" only.                      │
 │  └─ container UIView per live tab (clipsToBounds, placed BELOW the toolbar)     │
 │        └─ WKWebView  ← created by snorkle-content via objc2. Untrusted pages.   │
-│              No IPC bridge, no user scripts, no message handlers, no schemes.   │
+│              No IPC bridge, no message handlers, no schemes. User scripts only  │
+│              in the isolated client world (see §5c).                            │
 └─────────────────────────────────────────────────────────────────────────────────┘
           ▲ commands (ACL-checked)              ▲ WebKit delegate callbacks (metadata only)
           │                                     │
@@ -47,7 +48,7 @@ linked. Two copies would register duplicate Objective-C classes.
 
 | # | Boundary | Direction | Mechanism | Enforced by |
 |---|---|---|---|---|
-| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler`, `WKUserScript` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
+| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the black-and-white style, in the isolated client world with no way to send messages back (§5c). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
 | B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants the 18 app commands and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews below the toolbar, `clipsToBounds`. Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs`, `Browser::sync_visibility`, `browser_invariants.rs` |
@@ -128,7 +129,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   compiled lists instead of converting again; lists for other keys are deleted
   (`snorkle-content/src/ios/rules.rs`).
 - **Enforcement:** WebKit blocks network loads and hides elements with `css-display-none`,
-  inside its own processes, with no per-request work in the app. No scripts are injected, so
+  inside its own processes, with no per-request work in the app. Blocking injects no scripts, so
   scriptlet filters are unsupported.
 - **Per-site toggle:** stored by registrable domain (`adblock-allow.json`). It becomes one
   trailing `ignore-previous-rules` rule with `if-top-url`, then the lists are rebuilt and the tab
@@ -137,9 +138,22 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   entries are validated to `[a-z0-9-.]` domains before they go into a regex. Rule lists are not a
   page-to-native channel.
 
+## 5c. User scripts, black-and-white mode, split view
+
+- **User scripts and styles** (`snorkle_core::userscripts`, `snorkle-content/src/ios/injection.rs`)
+  are the one owner-approved exception to "no scripts in content". They are installed as
+  main-frame `WKUserScript`s in WebKit's isolated client world and guarded by
+  `location.hostname`. There is no native bridge. See SECURITY_REVIEW I1/I2.
+- **Black-and-white** uses the same mechanism with a constant style, plus one
+  `evaluateJavaScript` to toggle already-loaded pages.
+- **Split view:** the core keeps `split: Option<SplitView>`. Visibility effects carry a `Pane`
+  (`Full`, `Left` or `Right`), and the host places each container in its half, with a 2 pt
+  divider. Both panes are protected from discard. Choosing a tab outside the pair, or closing
+  one of its tabs, ends the split. A tap in a pane focuses it.
+
 ## 5b. Chrome layout
 
-Tabs are listed in a sidebar along the left edge. In windows at least 700 pt wide the sidebar is
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, and dragging one tab onto another opens split view. The bottom bar holds the menu (History, Settings), new tab, new private tab and black-and-white. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both

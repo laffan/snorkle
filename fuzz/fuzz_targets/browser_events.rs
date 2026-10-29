@@ -93,6 +93,10 @@ fuzz_target!(|data: &[u8]| {
                     e
                 })
                 .unwrap_or_default(),
+            13 if c & 2 == 0 => match (pick(&tabs), tabs.get(c as usize % tabs.len().max(1)).copied()) {
+                (Some((x, _)), Some((y, _))) => b.split(x, y, now),
+                _ => vec![],
+            },
             _ => {
                 if c & 1 == 0 { b.on_memory_warning() } else { b.tick(now) }
             }

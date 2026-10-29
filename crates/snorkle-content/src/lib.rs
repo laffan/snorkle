@@ -56,6 +56,8 @@ pub trait ContentEvents: 'static {
     fn process_terminated(&self, tab: TabId);
     /// A JavaScript alert/confirm/prompt was suppressed (no dialog UI yet).
     fn dialog_suppressed(&self, tab: TabId, origin_host: String);
+    /// The user tapped inside a content pane (focus it in split view).
+    fn focus_requested(&self, tab: TabId);
     fn memory_warning(&self);
     fn did_enter_background(&self);
 }

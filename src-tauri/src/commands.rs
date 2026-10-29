@@ -20,7 +20,7 @@ use crate::state::{now_ms, with_host, Shared};
 
 type S<'a> = tauri::State<'a, Arc<Shared>>;
 
-fn with<F>(s: &S<'_>, f: F)
+fn with_browser<F>(s: &S<'_>, f: F)
 where
     F: FnOnce(&mut snorkle_core::browser::Browser) -> Vec<snorkle_core::browser::Effect>,
 {
@@ -56,49 +56,49 @@ pub fn new_tab(s: S<'_>, private: bool) -> u64 {
 
 #[tauri::command]
 pub fn close_tab(s: S<'_>, tab: u64) {
-    with(&s, |b| b.close(TabId(tab), now_ms()));
+    with_browser(&s, |b| b.close(TabId(tab), now_ms()));
 }
 
 #[tauri::command]
 pub fn activate_tab(s: S<'_>, tab: u64) {
-    with(&s, |b| b.activate(TabId(tab), now_ms()));
+    with_browser(&s, |b| b.activate(TabId(tab), now_ms()));
 }
 
 #[tauri::command]
 pub fn go_back(s: S<'_>, tab: u64) {
-    with(&s, |b| b.go_back(TabId(tab)));
+    with_browser(&s, |b| b.go_back(TabId(tab)));
 }
 
 #[tauri::command]
 pub fn go_forward(s: S<'_>, tab: u64) {
-    with(&s, |b| b.go_forward(TabId(tab)));
+    with_browser(&s, |b| b.go_forward(TabId(tab)));
 }
 
 #[tauri::command]
 pub fn reload(s: S<'_>, tab: u64) {
-    with(&s, |b| b.reload(TabId(tab)));
+    with_browser(&s, |b| b.reload(TabId(tab)));
 }
 
 #[tauri::command]
 pub fn stop(s: S<'_>, tab: u64) {
-    with(&s, |b| b.stop(TabId(tab)));
+    with_browser(&s, |b| b.stop(TabId(tab)));
 }
 
 /// The user clicked "Continue to HTTP" on the HTTPS-first interstitial.
 #[tauri::command]
 pub fn proceed_http(s: S<'_>, tab: u64) {
-    with(&s, |b| b.proceed_http(TabId(tab), now_ms()));
+    with_browser(&s, |b| b.proceed_http(TabId(tab), now_ms()));
 }
 
 /// The user confirmed opening another app.
 #[tauri::command]
 pub fn confirm_external(s: S<'_>, tab: u64) {
-    with(&s, |b| b.confirm_external(TabId(tab)));
+    with_browser(&s, |b| b.confirm_external(TabId(tab)));
 }
 
 #[tauri::command]
 pub fn dismiss_notice(s: S<'_>, tab: u64) {
-    with(&s, |b| b.dismiss_notice(TabId(tab)));
+    with_browser(&s, |b| b.dismiss_notice(TabId(tab)));
 }
 
 /// `top`: bottom edge of the toolbar, `left`: right edge of the docked tab
@@ -108,7 +108,7 @@ pub fn dismiss_notice(s: S<'_>, tab: u64) {
 #[tauri::command]
 pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, overlay: bool) {
     snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left)));
-    with(&s, |b| b.set_chrome_overlay(overlay));
+    with_browser(&s, |b| b.set_chrome_overlay(overlay));
 }
 
 #[derive(Serialize)]
@@ -205,4 +205,99 @@ pub async fn toggle_site_adblock(s: S<'_>, tab: u64) -> Result<bool, String> {
     s.run(effects);
     crate::adblock::rebuild(&s, Some(TabId(tab)));
     Ok(currently_allowed)
+}
+
+/// Bookmarks the tab's committed URL at `index` in the bookmarks bar
+/// (dragging a tab into the bar). Private tabs cannot be bookmarked.
+#[tauri::command]
+pub async fn bookmark_tab(s: S<'_>, tab: u64, index: usize) -> Result<bool, String> {
+    let (url, title) = {
+        let b = s.browser();
+        match b.tab(TabId(tab)) {
+            Some(t) if !t.is_private() => match &t.committed_url {
+                Some(u) => (u.to_string(), t.title.clone()),
+                None => return Ok(false),
+            },
+            _ => return Ok(false),
+        }
+    };
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    store.insert_bookmark(&url, &title, index, wall_ms()).map_err(|e| e.to_string())
+}
+
+/// Reorders the bookmarks bar.
+#[tauri::command]
+pub async fn move_bookmark(s: S<'_>, url: String, index: usize) -> Result<(), String> {
+    match s.store.clone() {
+        Some(store) => store.move_bookmark(&url, index).map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
+}
+
+/// Shows `tab` beside `with` (dragging one tab onto another).
+#[tauri::command]
+pub fn split_tabs(s: S<'_>, tab: u64, with: u64) {
+    with_browser(&s, |b| b.split(TabId(tab), TabId(with), now_ms()));
+}
+
+#[tauri::command]
+pub fn unsplit(s: S<'_>) {
+    with_browser(&s, |b| b.unsplit());
+}
+
+#[tauri::command]
+pub fn get_settings(s: S<'_>) -> snorkle_core::storage::Settings {
+    s.store.as_ref().map(|st| st.settings()).unwrap_or_default()
+}
+
+/// Black-and-white rendering for all pages, applied immediately.
+#[tauri::command]
+pub async fn set_grayscale(s: S<'_>, on: bool) -> Result<(), String> {
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    let mut settings = store.settings();
+    settings.grayscale = on;
+    store.set_settings(settings).map_err(|e| e.to_string())?;
+    crate::scripts::apply(&s, Some(snorkle_core::userscripts::grayscale_toggle_js(on)));
+    Ok(())
+}
+
+/// Empties the HTTP caches (not cookies or site data).
+#[tauri::command]
+pub fn empty_cache() {
+    snorkle_content::dispatch_main(|| with_host(|h| h.clear_cache()));
+}
+
+#[tauri::command]
+pub fn list_user_scripts(s: S<'_>) -> Vec<snorkle_core::userscripts::UserScript> {
+    s.store.as_ref().map(|st| st.user_scripts()).unwrap_or_default()
+}
+
+/// Saves (adds or replaces by domain) a user script. Returns the stored,
+/// normalised entry. Applies from the next load of matching pages.
+#[tauri::command]
+pub async fn save_user_script(
+    s: S<'_>,
+    domain: String,
+    css: String,
+    js: String,
+    enabled: bool,
+) -> Result<snorkle_core::userscripts::UserScript, String> {
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    let saved = store
+        .save_user_script(snorkle_core::userscripts::UserScript { domain, css, js, enabled })
+        .map_err(|e| e.to_string())?;
+    crate::scripts::apply(&s, None);
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn delete_user_script(s: S<'_>, domain: String) -> Result<(), String> {
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    store.delete_user_script(&domain).map_err(|e| e.to_string())?;
+    crate::scripts::apply(&s, None);
+    Ok(())
+}
+
+fn wall_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }

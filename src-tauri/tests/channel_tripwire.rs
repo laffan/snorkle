@@ -31,6 +31,12 @@ fn code(p: &Path) -> String {
 }
 
 fn scan(dirs: &[&str], ext: &str, forbidden: &[&str]) {
+    scan_allowing(dirs, ext, forbidden, &[]);
+}
+
+/// Like `scan`, but `allowed` lists (file path suffix, token) pairs that were
+/// security-reviewed and signed off (docs/SECURITY_REVIEW.md).
+fn scan_allowing(dirs: &[&str], ext: &str, forbidden: &[&str], allowed: &[(&str, &str)]) {
     let mut hits = Vec::new();
     for d in dirs {
         let mut fs_ = Vec::new();
@@ -39,7 +45,8 @@ fn scan(dirs: &[&str], ext: &str, forbidden: &[&str]) {
         for f in fs_ {
             let src = code(&f);
             for tok in forbidden {
-                if src.contains(tok) {
+                let ok = allowed.iter().any(|(suffix, t)| t == tok && f.ends_with(suffix));
+                if src.contains(tok) && !ok {
                     hits.push(format!("{}: {tok}", f.display()));
                 }
             }
@@ -48,9 +55,13 @@ fn scan(dirs: &[&str], ext: &str, forbidden: &[&str]) {
     assert!(hits.is_empty(), "security-review tripwire:\n{}", hits.join("\n"));
 }
 
+/// Owner sign-off 2026-10-29: user scripts/styles and black-and-white mode,
+/// injected into the isolated client world from this one file only.
+const INJECTION_FILE: &str = "crates/snorkle-content/src/ios/injection.rs";
+
 #[test]
 fn no_webkit_page_to_native_channels() {
-    scan(
+    scan_allowing(
         &["crates/snorkle-content/src", "src-tauri/src"],
         "rs",
         &[
@@ -70,6 +81,13 @@ fn no_webkit_page_to_native_channels() {
             "WKWebExtension",
             // Downloads are a file-system channel; not supported yet
             "WKDownload",
+            // Page world access for injected code
+            "pageWorld",
+        ],
+        &[
+            (INJECTION_FILE, "addUserScript"),
+            (INJECTION_FILE, "WKUserScript"),
+            (INJECTION_FILE, "evaluateJavaScript"),
         ],
     );
 }

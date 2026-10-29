@@ -139,3 +139,31 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     the page (pages are hidden while it is open). The 700 pt threshold, safe-area handling in
     Stage Manager, and the moment the native page view moves (instantly, while the sidebar
     animates) need checking on hardware.
+33. **[decide] User scripts run in an isolated world.** Pages can't see or interfere with them,
+    but scripts can't read page JavaScript variables either (only the DOM). Many Greasemonkey
+    scripts expect page access (`unsafeWindow`). Running in the page world would be more
+    compatible and more exposed; that change needs a review.
+34. **[decide] User scripts also run in private tabs.** They persist nothing about browsing, but
+    a script could itself send data somewhere. Currently they apply in private tabs.
+35. **[verify] User scripts on device.** Check: a `<style>` added at document start in the
+    client world applies before first paint; `removeAllUserScripts` + re-adding takes effect on
+    the next load; scripts do not run in iframes.
+36. **[verify] Black-and-white mode.** `html{filter:grayscale(1)}` should not break fixed
+    positioning (the CSS spec exempts the root element) and should cost little GPU on long
+    pages. Video and canvas get the filter too. Pages can remove the style element (cosmetic
+    only).
+37. **[verify] Split view.** Tap-to-focus uses a gesture recognizer that fires simultaneously with
+    WebKit's own and does not cancel touches. Confirm links and scrolling are unaffected. The
+    50/50 split has no draggable divider yet. The memory budget counts both panes as protected;
+    split is refused when the budget is below 2 live views.
+38. **[verify] Sidebar resizing** reports the new content inset once per animation frame, so the
+    page re-lays out continuously while dragging. Check smoothness on heavy pages; if it is
+    choppy, move the content view only on release and show a placeholder edge while dragging.
+39. **[verify] Drag and drop on touch.** Uses long-press (280 ms) then pointer events, with
+    `touchmove.preventDefault()` once dragging. Verify there is no conflict with iPadOS
+    long-press menus or text selection in the chrome webview. Private tabs cannot be dropped
+    into bookmarks. Tabs themselves cannot be reordered yet.
+40. **[decide] "Empty Cache"** clears the HTTP disk and memory caches of the default and current
+    private stores. It does not clear cookies, local storage or service-worker caches. A fuller
+    "Clear website data" option is a separate decision.
+

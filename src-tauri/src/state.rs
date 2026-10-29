@@ -243,6 +243,12 @@ impl ContentEvents for Events {
             self.shared.toast(&format!("{host} tried to show a dialog. Dialogs are not supported yet."));
         }
     }
+    fn focus_requested(&self, tab: TabId) {
+        // Only meaningful in split view; otherwise the tab is already active.
+        if self.shared.browser().active() != Some(tab) {
+            self.apply(|b| b.activate(tab, now_ms()));
+        }
+    }
     fn memory_warning(&self) {
         self.apply(|b| b.on_memory_warning());
     }

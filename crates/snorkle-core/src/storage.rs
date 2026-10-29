@@ -26,6 +26,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use url::Url;
 
 use crate::text::{sanitize_page_text, MAX_PAGE_TEXT_CHARS};
+use crate::userscripts::{self, UserScript, UserScriptError};
 
 pub const MAX_HISTORY: usize = 5_000;
 pub const MAX_BOOKMARKS: usize = 5_000;
@@ -81,12 +82,25 @@ struct Data {
     bookmarks: Vec<Bookmark>,
     /// Sites (registrable domains) where the user turned ad blocking off.
     adblock_allowed: BTreeSet<String>,
+    settings: Settings,
+    user_scripts: Vec<UserScript>,
+}
+
+/// User preferences that native code needs (UI-only preferences such as the
+/// sidebar width stay in the chrome's localStorage).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Render pages in black and white.
+    pub grayscale: bool,
 }
 
 const HISTORY_FILE: &str = "history.json";
 const BOOKMARKS_FILE: &str = "bookmarks.json";
 const SESSION_FILE: &str = "session.json";
 const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
+const SETTINGS_FILE: &str = "settings.json";
+const USER_SCRIPTS_FILE: &str = "user-scripts.json";
 
 impl Store {
     /// Opens (or creates) the store. Corrupt files are moved aside to
@@ -119,7 +133,13 @@ impl Store {
             .filter_map(|s| crate::blocking::normalise_site(s))
             .take(MAX_BOOKMARKS)
             .collect();
-        Ok(Store { dir, inner: Mutex::new(Data { history, bookmarks, adblock_allowed }) })
+        let settings: Settings = load_or_reset(&dir.join(SETTINGS_FILE));
+        let mut user_scripts: Vec<UserScript> = load_or_reset::<Vec<UserScript>>(&dir.join(USER_SCRIPTS_FILE))
+            .into_iter()
+            .filter_map(|s| userscripts::validate(s).ok())
+            .collect();
+        user_scripts.truncate(userscripts::MAX_SCRIPTS);
+        Ok(Store { dir, inner: Mutex::new(Data { history, bookmarks, adblock_allowed, settings, user_scripts }) })
     }
 
     fn data(&self) -> std::sync::MutexGuard<'_, Data> {
@@ -168,6 +188,79 @@ impl Store {
         };
         atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)?;
         Ok(true)
+    }
+
+    /// Bookmarks `url` at position `index` (clamped). Returns false if the
+    /// URL is not storable or already bookmarked.
+    pub fn insert_bookmark(&self, url: &str, title: &str, index: usize, now_ms: u64) -> std::io::Result<bool> {
+        let Some(url) = storable_url(url) else { return Ok(false) };
+        let snapshot = {
+            let mut d = self.data();
+            if d.bookmarks.iter().any(|b| b.url == url) || d.bookmarks.len() >= MAX_BOOKMARKS {
+                return Ok(false);
+            }
+            let at = index.min(d.bookmarks.len());
+            d.bookmarks.insert(at, Bookmark { url, title: clean_title(title), created_ms: now_ms });
+            serde_json::to_vec(&d.bookmarks)?
+        };
+        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)?;
+        Ok(true)
+    }
+
+    /// Moves the bookmark for `url` to position `index` (clamped).
+    pub fn move_bookmark(&self, url: &str, index: usize) -> std::io::Result<()> {
+        let snapshot = {
+            let mut d = self.data();
+            let Some(from) = d.bookmarks.iter().position(|b| b.url == url) else { return Ok(()) };
+            let b = d.bookmarks.remove(from);
+            let at = index.min(d.bookmarks.len());
+            d.bookmarks.insert(at, b);
+            serde_json::to_vec(&d.bookmarks)?
+        };
+        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.data().settings.clone()
+    }
+
+    pub fn set_settings(&self, settings: Settings) -> std::io::Result<()> {
+        let snapshot = {
+            let mut d = self.data();
+            d.settings = settings;
+            serde_json::to_vec(&d.settings)?
+        };
+        atomic_write(&self.dir.join(SETTINGS_FILE), &snapshot)
+    }
+
+    pub fn user_scripts(&self) -> Vec<UserScript> {
+        self.data().user_scripts.clone()
+    }
+
+    /// Adds or replaces (by domain) a user script after validation.
+    pub fn save_user_script(&self, script: UserScript) -> Result<UserScript, UserScriptError> {
+        let script = userscripts::validate(script)?;
+        let snapshot = {
+            let mut d = self.data();
+            match d.user_scripts.iter().position(|s| s.domain == script.domain) {
+                Some(i) => d.user_scripts[i] = script.clone(),
+                None if d.user_scripts.len() >= userscripts::MAX_SCRIPTS => return Err(UserScriptError::TooMany),
+                None => d.user_scripts.push(script.clone()),
+            }
+            d.user_scripts.sort_by(|a, b| a.domain.cmp(&b.domain));
+            serde_json::to_vec(&d.user_scripts).map_err(|_| UserScriptError::TooLarge)?
+        };
+        atomic_write(&self.dir.join(USER_SCRIPTS_FILE), &snapshot).map_err(|_| UserScriptError::TooLarge)?;
+        Ok(script)
+    }
+
+    pub fn delete_user_script(&self, domain: &str) -> std::io::Result<()> {
+        let snapshot = {
+            let mut d = self.data();
+            d.user_scripts.retain(|s| s.domain != domain);
+            serde_json::to_vec(&d.user_scripts)?
+        };
+        atomic_write(&self.dir.join(USER_SCRIPTS_FILE), &snapshot)
     }
 
     pub fn remove_bookmark(&self, url: &str) -> std::io::Result<()> {
@@ -329,6 +422,47 @@ mod tests {
         assert_eq!(s.adblock_allowed().into_iter().collect::<Vec<_>>(), vec!["ok.example".to_string()]);
         s.set_adblock_allowed("ok.example", false).unwrap();
         assert!(s.adblock_allowed().is_empty());
+    }
+
+    #[test]
+    fn bookmark_insert_and_move() {
+        let dir = tmpdir("bm-order");
+        let s = Store::open(&dir).unwrap();
+        for (i, u) in ["https://a.example/", "https://b.example/", "https://c.example/"].iter().enumerate() {
+            assert!(s.insert_bookmark(u, "t", 99, i as u64).unwrap());
+        }
+        assert!(s.insert_bookmark("https://z.example/", "t", 0, 9).unwrap());
+        assert!(!s.insert_bookmark("https://a.example/", "dup", 0, 9).unwrap());
+        s.move_bookmark("https://z.example/", 99).unwrap();
+        s.move_bookmark("https://c.example/", 0).unwrap();
+        let order: Vec<String> = s.bookmarks().into_iter().map(|b| b.url).collect();
+        assert_eq!(order, ["https://c.example/", "https://a.example/", "https://b.example/", "https://z.example/"]);
+        drop(s);
+        assert_eq!(Store::open(&dir).unwrap().bookmarks().len(), 4);
+    }
+
+    #[test]
+    fn user_scripts_and_settings_roundtrip() {
+        let dir = tmpdir("userscripts");
+        let s = Store::open(&dir).unwrap();
+        let us = |d: &str, js: &str| UserScript { domain: d.into(), css: String::new(), js: js.into(), enabled: true };
+        assert_eq!(s.save_user_script(us("Example.com", "a()")).unwrap().domain, "example.com");
+        s.save_user_script(us("example.com", "b()")).unwrap();
+        assert!(s.save_user_script(us("not a domain", "c()")).is_err());
+        assert_eq!(s.user_scripts().len(), 1);
+        assert_eq!(s.user_scripts()[0].js, "b()");
+        s.set_settings(Settings { grayscale: true }).unwrap();
+        drop(s);
+        fs::write(
+            dir.join(USER_SCRIPTS_FILE),
+            r#"[{"domain":"ok.example","css":"","js":"x()","enabled":true},{"domain":"bad\"]","css":"","js":"","enabled":true}]"#,
+        )
+        .unwrap();
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.user_scripts().len(), 1, "tampered entries are dropped on load");
+        assert!(s.settings().grayscale);
+        s.delete_user_script("ok.example").unwrap();
+        assert!(s.user_scripts().is_empty());
     }
 
     #[test]

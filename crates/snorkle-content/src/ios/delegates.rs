@@ -25,6 +25,7 @@ use objc2_foundation::{
     NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
     NSURLSessionAuthChallengeDisposition, NSURL,
 };
+use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate};
 use objc2_web_kit::{
     WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
     WKNavigationResponse, WKNavigationResponsePolicy, WKNavigationType, WKPermissionDecision, WKSecurityOrigin,
@@ -377,6 +378,40 @@ define_class!(
 );
 
 impl Observer {
+    pub fn new(mtm: MainThreadMarker, ivars: TabIvars) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+define_class!(
+    /// Tap on a content pane → focus that tab (split view). Recognises
+    /// simultaneously with WebKit's own gestures and never cancels touches,
+    /// so the page still receives the tap. Carries only the tab id.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "SnorkleTapFocus"]
+    #[ivars = TabIvars]
+    pub struct TapFocus;
+
+    unsafe impl NSObjectProtocol for TapFocus {}
+
+    unsafe impl UIGestureRecognizerDelegate for TapFocus {
+        #[unsafe(method(gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:))]
+        fn simultaneous(&self, _g: &UIGestureRecognizer, _other: &UIGestureRecognizer) -> bool {
+            true
+        }
+    }
+
+    impl TapFocus {
+        #[unsafe(method(tapped:))]
+        fn tapped(&self, _g: &UIGestureRecognizer) {
+            self.ivars().events.focus_requested(self.ivars().tab);
+        }
+    }
+);
+
+impl TapFocus {
     pub fn new(mtm: MainThreadMarker, ivars: TabIvars) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
