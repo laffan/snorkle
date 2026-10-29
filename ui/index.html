@@ -11,17 +11,27 @@
   <!--
     Trusted browser chrome. Everything rendered here comes from Rust state;
     page-controlled strings (titles, hosts) are only ever set via
-    textContent. Web content is drawn by native WKWebViews placed BELOW
-    #chrome (Rust positions them using the height reported from here).
+    textContent. Web content is drawn by native WKWebViews placed below
+    #chrome and to the right of a docked #sidebar (Rust positions them using
+    the insets reported from here, and never over the chrome).
   -->
+  <!-- Tab sidebar along the left edge. Docked (content starts to its
+       right) in wide windows; slides over a hidden content area in narrow
+       ones (Split View, Slide Over). -->
+  <aside id="sidebar" aria-label="Tabs">
+    <div class="side-head">
+      <button id="new-tab" class="side-btn" aria-label="New tab">+ New Tab</button>
+      <button id="new-private" class="side-btn" aria-label="New private tab">+ Private</button>
+    </div>
+    <div id="tabs" class="tablist" role="tablist" aria-orientation="vertical"></div>
+    <div id="private-head" class="side-section" hidden>Private</div>
+    <div id="private-tabs" class="tablist" role="tablist" aria-orientation="vertical"></div>
+  </aside>
+
   <header id="chrome">
     <div id="os-banner" class="banner" hidden></div>
-    <nav id="tabstrip" aria-label="Tabs">
-      <div id="tabs" role="tablist"></div>
-      <button id="new-tab" class="icon" title="New tab" aria-label="New tab">+</button>
-      <button id="new-private" class="icon text" title="New private tab" aria-label="New private tab">Private +</button>
-    </nav>
     <div id="toolbar">
+      <button id="sidebar-toggle" class="icon" aria-label="Show or hide tabs" aria-controls="sidebar">&#x25E7;</button>
       <button id="back" class="icon" aria-label="Back">&#x2039;</button>
       <button id="forward" class="icon" aria-label="Forward">&#x203A;</button>
       <button id="reload" class="icon" aria-label="Reload">&#x21BB;</button>
@@ -35,6 +45,7 @@
         <input id="url-input" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
                enterkeyhint="go" placeholder="Search or enter address" aria-label="Search or enter address" hidden>
       </div>
+      <button id="shield" class="pillbtn" aria-label="Ad blocking for this site"></button>
       <button id="bookmark" class="icon" aria-label="Bookmark this page">&#x2606;</button>
       <button id="menu" class="icon" aria-label="Bookmarks and history">&#x2630;</button>
     </div>
@@ -50,6 +61,7 @@
       <p id="start-private" class="muted" hidden>Private tab: history, cookies and site data are kept in memory only and are discarded when you close your last private tab.</p>
       <h2>Bookmarks</h2>
       <ul id="start-bookmarks" class="list"></ul>
+      <p class="muted credit">Ad and tracker blocking uses EasyList and EasyPrivacy by The EasyList authors (easylist.to), licensed CC BY-SA 3.0.</p>
     </section>
 
     <section id="notice" class="notice" hidden>

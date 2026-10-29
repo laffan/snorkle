@@ -36,6 +36,7 @@ scripts                 check-ios.sh (iOS type-check without Xcode), check-deps.
 cargo test --workspace          # unit, URL-spoofing, browser invariants, IPC isolation, config, tripwires
 scripts/check-ios.sh            # clippy -D warnings for aarch64-apple-ios (no SDK; stub C compiler)
 scripts/check-deps.sh           # cargo deny + cargo audit + graph checks
+scripts/update-filter-lists.sh  # refresh bundled EasyList/EasyPrivacy, record versions + hashes
 cd fuzz && cargo +nightly fuzz run url_display     # also: input, nav_policy, browser_events
 ```
 

@@ -87,26 +87,73 @@
   }
 
   function renderTabs() {
-    const key = JSON.stringify(state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable]).concat([state.active]));
+    const key = JSON.stringify(
+      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable]).concat([state.active]),
+    );
     if (key === tabsKey) return;
     tabsKey = key;
-    const strip = $('tabs');
-    strip.replaceChildren();
+    const normal = $('tabs');
+    const priv = $('private-tabs');
+    normal.replaceChildren();
+    priv.replaceChildren();
     for (const t of state.tabs) {
       const node = el('div', 'tab' + (t.id === state.active ? ' active' : '') + (t.private ? ' private' : '') + (t.live ? '' : ' discarded'));
       node.setAttribute('role', 'tab');
       node.setAttribute('aria-selected', String(t.id === state.active));
-      const label = t.title || (t.url ? t.url.registrable : (t.private ? 'Private Tab' : 'New Tab'));
-      const title = el('button', 'title', label);
-      title.addEventListener('click', () => invoke('activate_tab', { tab: t.id }));
-      const close = el('button', 'close', '×');
+      const open = el('button', 'open');
+      open.appendChild(el('span', 't', t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
+      if (t.url) {
+        const host = el('span', 'h');
+        fillLabels(host, t.url.registrable, false);
+        open.appendChild(host);
+      }
+      open.addEventListener('click', () => {
+        invoke('activate_tab', { tab: t.id });
+        if (narrow) setSidebar(false);
+      });
+      const close = el('button', 'close', '\u00D7');
       close.setAttribute('aria-label', 'Close tab');
       close.addEventListener('click', (ev) => { ev.stopPropagation(); invoke('close_tab', { tab: t.id }); });
-      node.append(title, close);
-      strip.appendChild(node);
+      node.append(open, close);
+      (t.private ? priv : normal).appendChild(node);
     }
-    const act = strip.querySelector('.tab.active');
-    if (act) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    $('private-head').hidden = !priv.childElementCount;
+    const act = $('sidebar').querySelector('.tab.active');
+    if (act) act.scrollIntoView({ block: 'nearest' });
+  }
+
+  // ---- sidebar ----------------------------------------------------------
+
+  // Wide windows: the sidebar is docked and content starts to its right.
+  // Narrow windows (Split View / Slide Over): it slides over the content
+  // area, which is hidden while it is open (overlay), and closes after a
+  // tab is chosen.
+  const NARROW_PX = 700;
+  let narrow = window.innerWidth < NARROW_PX;
+  let sidebarOpen = loadSidebarPref();
+
+  function loadSidebarPref() {
+    try {
+      const v = localStorage.getItem('sidebarOpen');
+      if (v !== null) return v === '1' && !narrow;
+    } catch (e) { /* storage unavailable: use default */ }
+    return !narrow;
+  }
+
+  function setSidebar(open) {
+    sidebarOpen = open;
+    if (!narrow) {
+      try { localStorage.setItem('sidebarOpen', open ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+    applySidebar();
+  }
+
+  function applySidebar() {
+    document.body.classList.toggle('narrow', narrow);
+    document.body.classList.toggle('sidebar-closed', !sidebarOpen);
+    $('sidebar').setAttribute('aria-hidden', String(!sidebarOpen));
+    $('sidebar-toggle').setAttribute('aria-expanded', String(sidebarOpen));
+    reportLayout();
   }
 
   function renderToolbar(tab) {
@@ -116,6 +163,7 @@
     reload.textContent = tab && tab.loading ? '×' : '↻';
     reload.setAttribute('aria-label', tab && tab.loading ? 'Stop' : 'Reload');
     $('bookmark').disabled = !(tab && tab.url && !tab.private);
+    renderShield(tab);
     $('private-pill').hidden = !(tab && tab.private);
 
     const d = tab && tab.url;
@@ -296,13 +344,51 @@
   // covering it (content views are hidden while `overlay` is true).
   let lastLayout = '';
   function reportLayout() {
+    // Use the sidebar's layout width (unaffected by the slide transform) so
+    // the content area moves once, to its final position.
+    const left = sidebarOpen && !narrow ? Math.ceil($('sidebar').offsetWidth) : 0;
+    $('chrome').style.left = left + 'px';
     const top = Math.ceil($('chrome').getBoundingClientRect().bottom);
     $('surface').style.top = top + 'px';
-    const overlay = !!panel;
-    const key = top + ':' + overlay;
+    $('surface').style.left = left + 'px';
+    const overlay = !!panel || (narrow && sidebarOpen);
+    const key = top + ':' + left + ':' + overlay;
     if (key === lastLayout) return;
     lastLayout = key;
-    invoke('set_chrome_layout', { top, overlay });
+    invoke('set_chrome_layout', { top, left, overlay });
+  }
+
+  // ---- ad blocking ------------------------------------------------------
+
+  let lastAdblockFailure = '';
+  function renderShield(tab) {
+    const b = $('shield');
+    const a = tab && tab.adblock;
+    const status = state.adblock;
+    b.className = 'pillbtn';
+    if (status.state === 'failed') {
+      b.textContent = 'Blocker failed';
+      b.classList.add('off');
+      b.disabled = true;
+      if (status.message !== lastAdblockFailure) {
+        lastAdblockFailure = status.message;
+        toast('Ad blocker could not start: ' + status.message);
+      }
+      return;
+    }
+    if (status.state === 'compiling') {
+      b.textContent = 'Blocker\u2026';
+      b.disabled = true;
+      return;
+    }
+    b.hidden = !a;
+    if (!a) return;
+    b.textContent = a.blocking ? 'Blocking Ads' : 'Ads Allowed';
+    b.classList.add(a.blocking ? 'on' : 'off');
+    b.disabled = !a.can_toggle;
+    b.title = a.can_toggle
+      ? (a.blocking ? `Allow ads on ${a.site}` : `Block ads on ${a.site} again`)
+      : 'Per-site settings can\u2019t be changed in a private tab';
   }
 
   function toast(msg) {
@@ -323,8 +409,28 @@
   $('back').addEventListener('click', withTab((t) => invoke('go_back', { tab: t.id })));
   $('forward').addEventListener('click', withTab((t) => invoke('go_forward', { tab: t.id })));
   $('reload').addEventListener('click', withTab((t) => invoke(t.loading ? 'stop' : 'reload', { tab: t.id })));
-  $('new-tab').addEventListener('click', () => invoke('new_tab', { private: false }).then(beginEdit));
-  $('new-private').addEventListener('click', () => invoke('new_tab', { private: true }).then(beginEdit));
+  $('new-tab').addEventListener('click', () => {
+    if (narrow) setSidebar(false);
+    invoke('new_tab', { private: false }).then(beginEdit);
+  });
+  $('new-private').addEventListener('click', () => {
+    if (narrow) setSidebar(false);
+    invoke('new_tab', { private: true }).then(beginEdit);
+  });
+  $('sidebar-toggle').addEventListener('click', () => setSidebar(!sidebarOpen));
+  // Narrow windows: a tap anywhere outside the overlaid sidebar closes it.
+  document.addEventListener('pointerdown', (ev) => {
+    if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('sidebar-toggle')) {
+      setSidebar(false);
+    }
+  });
+  $('shield').addEventListener('click', withTab((t) => {
+    const a = t.adblock;
+    if (!a || !a.can_toggle) return;
+    T.core.invoke('toggle_site_adblock', { tab: t.id })
+      .then((blocking) => toast(blocking ? `Blocking ads on ${a.site} again. Reloading\u2026` : `Ads allowed on ${a.site}. Reloading\u2026`))
+      .catch((e) => toast(String(e)));
+  }));
   $('bookmark').addEventListener('click', withTab((t) =>
     T.core.invoke('toggle_bookmark', { tab: t.id }).then((on) => toast(on ? 'Bookmarked' : 'Bookmark removed'))));
   $('menu').addEventListener('click', () => (panel ? closePanel() : openPanel('bookmarks')));
@@ -351,7 +457,15 @@
   input.addEventListener('blur', () => { if (editing) endEdit(); });
 
   new ResizeObserver(reportLayout).observe($('chrome'));
-  window.addEventListener('resize', reportLayout);
+  window.addEventListener('resize', () => {
+    const nowNarrow = window.innerWidth < NARROW_PX;
+    if (nowNarrow !== narrow) {
+      narrow = nowNarrow;
+      sidebarOpen = nowNarrow ? false : loadSidebarPref();
+    }
+    applySidebar();
+  });
+  applySidebar();
 
   T.event.listen('state', (e) => { state = e.payload; render(); });
   T.event.listen('toast', (e) => toast(String(e.payload)));

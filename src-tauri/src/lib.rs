@@ -3,6 +3,7 @@
 //! separate WKWebViews; `snorkle-core` makes every decision.
 //! See docs/ARCHITECTURE.md.
 
+mod adblock;
 mod command_list;
 pub mod commands;
 pub mod state;
@@ -10,7 +11,6 @@ pub mod state;
 use std::sync::Arc;
 use std::time::Duration;
 
-use snorkle_core::blocking::Blocklist;
 use snorkle_core::browser::Browser;
 use snorkle_core::os::{self, OsSupport};
 use snorkle_core::storage::Store;
@@ -22,8 +22,6 @@ pub use state::{ChromeEvent, Emitter, Shared};
 
 /// Label of the only Tauri webview: the browser chrome.
 pub const CHROME_LABEL: &str = "main";
-
-const BUNDLED_BLOCKLIST: &str = include_str!("../resources/blocklist.txt");
 
 /// Registers the app's command handlers. Kept separate from `run` so the
 /// IPC isolation tests exercise exactly this handler set.
@@ -47,6 +45,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::remove_bookmark,
         commands::list_history,
         commands::clear_history,
+        commands::toggle_site_adblock,
     ])
 }
 
@@ -82,7 +81,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::Toast(m) => handle.emit_to(CHROME_LABEL, "toast", m),
         };
     });
+    let allowlist = store.as_ref().map(|s| s.adblock_allowed()).unwrap_or_default();
     let shared = Shared::new(browser, store, emit);
+    let _ = shared.browser().set_adblock_allowlist(allowlist);
     app.manage(shared.clone());
 
     let window = app.get_webview_window(CHROME_LABEL).ok_or("main window missing")?;
@@ -95,13 +96,11 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     let effects = shared.browser().restore_session(&session, state::now_ms());
     shared.run(effects);
 
-    // Parse the blocklist and build the WebKit rule JSON off the main thread;
-    // WebKit compiles it asynchronously as well.
-    std::thread::spawn(|| {
-        let list = Blocklist::parse(BUNDLED_BLOCKLIST);
-        let json = (!list.is_empty()).then(|| list.to_webkit_rules_json());
-        snorkle_content::dispatch_main(move || state::with_host(|h| h.install_rules(json)));
-    });
+    // Content blocking: reuses WebKit's compiled lists when unchanged,
+    // otherwise converts off the main thread.
+    if os_support.allows_browsing() {
+        adblock::rebuild(&shared, None);
+    }
 
     // Background-tab TTL discards.
     let ticker = shared.clone();

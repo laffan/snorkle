@@ -20,6 +20,8 @@
 //!   chrome with the content view hidden, never inside page content.
 //! - On an unsupported OS no web view is ever created.
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 use url::Url;
 
@@ -130,6 +132,28 @@ pub struct TabView {
     pub security: Security,
     pub live: bool,
     pub notice: Option<Notice>,
+    /// Ad-blocking state for the committed site, if it is an http(s) page.
+    pub adblock: Option<SiteAdblock>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SiteAdblock {
+    /// Registrable domain the per-site toggle applies to.
+    pub site: String,
+    /// False when the user turned blocking off for this site.
+    pub blocking: bool,
+    /// Private tabs cannot change the (persistent) per-site setting.
+    pub can_toggle: bool,
+}
+
+/// State of the content-blocking rule lists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AdblockStatus {
+    Off,
+    Compiling,
+    Active { lists: usize },
+    Failed { message: String },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -139,6 +163,7 @@ pub struct ChromeState {
     pub os: OsSupport,
     pub content_visible: bool,
     pub max_live_tabs: usize,
+    pub adblock: AdblockStatus,
 }
 
 const CRASH_WINDOW_MS: u64 = 60_000;
@@ -155,6 +180,8 @@ pub struct Browser {
     search: SearchEngine,
     chrome_overlay: bool,
     shown: Option<TabId>,
+    adblock_allowed: BTreeSet<String>,
+    adblock_status: AdblockStatus,
 }
 
 impl Browser {
@@ -170,6 +197,8 @@ impl Browser {
             search: input::DEFAULT_SEARCH,
             chrome_overlay: false,
             shown: None,
+            adblock_allowed: BTreeSet::new(),
+            adblock_status: AdblockStatus::Off,
         }
     }
 
@@ -859,13 +888,28 @@ impl Browser {
         }
     }
 
+    pub fn adblock_allowlist(&self) -> &BTreeSet<String> {
+        &self.adblock_allowed
+    }
+
+    pub fn set_adblock_allowlist(&mut self, sites: BTreeSet<String>) -> Vec<Effect> {
+        self.adblock_allowed = sites;
+        vec![Effect::NotifyChrome]
+    }
+
+    pub fn set_adblock_status(&mut self, status: AdblockStatus) -> Vec<Effect> {
+        self.adblock_status = status;
+        vec![Effect::NotifyChrome]
+    }
+
     pub fn view(&self) -> ChromeState {
         ChromeState {
-            tabs: self.tabs.iter().map(tab_view).collect(),
+            tabs: self.tabs.iter().map(|t| tab_view(t, &self.adblock_allowed)).collect(),
             active: self.active,
             os: self.os,
             content_visible: self.shown.is_some(),
             max_live_tabs: self.budget.max_live,
+            adblock: self.adblock_status.clone(),
         }
     }
 }
@@ -903,7 +947,7 @@ fn blocked_notice(r: BlockReason, u: &Url) -> Notice {
     Notice::Blocked { reason: reason.to_string(), url: shown }
 }
 
-fn tab_view(t: &Tab) -> TabView {
+fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
     let display = t.committed_url.as_ref().map(url_display::display);
     let security = match display.as_ref().map(|d| d.transport) {
         Some(Transport::Https) if t.secure_content => Security::Secure,
@@ -923,5 +967,10 @@ fn tab_view(t: &Tab) -> TabView {
         security,
         live: t.life == Life::Live,
         notice: t.notice.clone(),
+        adblock: t.committed_url.as_ref().and_then(crate::blocking::site_key).map(|site| SiteAdblock {
+            blocking: !adblock_allowed.contains(&site),
+            site,
+            can_toggle: !t.is_private(),
+        }),
     }
 }

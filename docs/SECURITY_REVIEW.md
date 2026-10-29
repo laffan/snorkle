@@ -13,6 +13,7 @@ review on every change.
 | `crates/snorkle-core/src/url_display.rs`, `idn.rs` | Anti-spoofing display |
 | `crates/snorkle-core/src/input.rs` | Address-bar input → URL |
 | `crates/snorkle-core/src/storage.rs` | Persistence |
+| `crates/snorkle-core/src/blocking.rs`, `crates/snorkle-content/src/ios/rules.rs`, `src-tauri/src/adblock.rs` | Content blocking, allowlist regex generation, WebKit rule store |
 | `crates/snorkle-content/src/lib.rs` (`CONTENT_VIEW_SPEC`) | Content web view configuration |
 | `crates/snorkle-content/src/ios/*.rs` | Native boundary, unsafe FFI, hand-written bindings |
 | `src-tauri/src/commands.rs`, `command_list.rs`, `build.rs` | Command surface and ACL manifest |

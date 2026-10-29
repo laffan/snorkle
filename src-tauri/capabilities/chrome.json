@@ -27,6 +27,7 @@
     "allow-toggle-bookmark",
     "allow-remove-bookmark",
     "allow-list-history",
-    "allow-clear-history"
+    "allow-clear-history",
+    "allow-toggle-site-adblock"
   ]
 }

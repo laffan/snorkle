@@ -127,19 +127,24 @@ pub fn safari_desktop_user_agent(os: snorkle_core::os::OsVersion) -> String {
 pub const DEFAULT_PROFILE_STORE_ID: [u8; 16] =
     [0x5e, 0x0b, 0x2c, 0x51, 0x7a, 0x4d, 0x4f, 0x2e, 0x9c, 0x3b, 0x1d, 0x6a, 0x8e, 0x70, 0x42, 0x13];
 
-/// Identifier of the compiled content rule list in `WKContentRuleListStore`.
-pub const RULE_LIST_ID: &str = "snorkle.blocklist";
+/// Produces content-blocking rule-list JSON documents (runs off the main
+/// thread).
+pub type MakeRuleLists = Box<dyn FnOnce() -> Result<Vec<String>, String> + Send>;
+/// Completion of a rule-list install, with the number of lists installed.
+pub type RulesDone = Box<dyn FnOnce(Result<usize, String>) + Send>;
 
-/// Smallest/largest accepted chrome toolbar height in points.
-pub const MIN_CHROME_TOP: f64 = 0.0;
-pub const MAX_CHROME_TOP_FRACTION: f64 = 0.5;
+/// Largest accepted chrome inset (toolbar height, sidebar width) as a
+/// fraction of the window extent, so the chrome can never shrink the
+/// content area to nothing.
+pub const MAX_CHROME_INSET_FRACTION: f64 = 0.5;
 
-/// Clamps the content area's top inset reported by the chrome.
-pub fn clamp_top(top: f64, root_height: f64) -> f64 {
-    if !top.is_finite() {
-        return MIN_CHROME_TOP;
+/// Clamps a content-area inset (top or left, in points) reported by the
+/// chrome to `[0, extent * MAX_CHROME_INSET_FRACTION]`.
+pub fn clamp_inset(inset: f64, extent: f64) -> f64 {
+    if !inset.is_finite() {
+        return 0.0;
     }
-    top.clamp(MIN_CHROME_TOP, (root_height * MAX_CHROME_TOP_FRACTION).max(MIN_CHROME_TOP))
+    inset.clamp(0.0, (extent * MAX_CHROME_INSET_FRACTION).max(0.0))
 }
 
 #[cfg(test)]
@@ -148,10 +153,11 @@ mod tests {
 
     #[test]
     fn clamp() {
-        assert_eq!(clamp_top(f64::NAN, 1000.0), 0.0);
-        assert_eq!(clamp_top(-5.0, 1000.0), 0.0);
-        assert_eq!(clamp_top(5000.0, 1000.0), 500.0);
-        assert_eq!(clamp_top(64.0, 1000.0), 64.0);
+        assert_eq!(clamp_inset(f64::NAN, 1000.0), 0.0);
+        assert_eq!(clamp_inset(f64::INFINITY, 1000.0), 0.0);
+        assert_eq!(clamp_inset(-5.0, 1000.0), 0.0);
+        assert_eq!(clamp_inset(5000.0, 1000.0), 500.0);
+        assert_eq!(clamp_inset(64.0, 1000.0), 64.0);
     }
 
     #[test]

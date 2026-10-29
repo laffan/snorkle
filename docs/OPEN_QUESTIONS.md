@@ -104,9 +104,21 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 
 22. **[decide] Default search engine** is DuckDuckGo; no search suggestions, since suggestions
     would send keystrokes off-device.
-23. **[decide] Content-blocking list.** Nothing is shipped: the engine works, the bundled list is
-    empty. EasyList-family lists are GPLv3 / CC BY-SA, so the licence must be decided before
-    bundling. Rule-list compile errors are currently ignored silently.
+23. **[verify] Content blocking** (decided 2026-10-29: Brave's adblock-rust converter, EasyList +
+    EasyPrivacy bundled, per-site allow toggle, no scriptlets). Still to check on a device:
+    (a) how long WebKit takes to compile the 127k rules / 3 lists on first launch, and the
+    memory it uses (after that the compiled lists are reused via the cache key);
+    (b) that `WKContentRuleListStore` completion handlers run on the main thread (asserted;
+    a violation aborts);
+    (c) that `if-top-url` with `ignore-previous-rules` disables blocking for subdomains of an
+    allowed site, as the regex intends;
+    (d) page-load cost of about 2,000 generic `css-display-none` rules;
+    (e) how many sites break. The converter drops rules WebKit can't express (scriptlets, some
+    `$` options), so blocking is weaker than uBlock Origin. YouTube-style video ads are not
+    blocked.
+    **[decide]** Lists refresh only with app updates (`scripts/update-filter-lists.sh`). They
+    expire in about 4 days upstream, so ship regularly or add an opt-in updater (an app-initiated
+    network request, which needs a review).
 24. **[decide] Bundle identifier** `com.example.snorkle` and the development team are placeholders.
 25. **[gap] Multiple windows / Stage Manager scenes.** Only one scene is supported; Tauri's
     `SceneRequested` is not handled.
@@ -120,3 +132,10 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 30. **[verify] IPC test scope.** `ipc_isolation.rs` exercises Tauri's ACL on MockRuntime, not the
     iOS IPC transport. The on-device probe (`tests/device/ipc-probe.html`) covers the content views.
     Run it on hardware before each release.
+31. **[decide] Per-site ad-blocking exceptions in private tabs** are disabled, because the
+    setting is persisted. A memory-only exception would need separate rule lists for the private
+    profile.
+32. **[verify] Sidebar on device.** Docked at ≥ 700 pt window width; below that it slides over
+    the page (pages are hidden while it is open). The 700 pt threshold, safe-area handling in
+    Stage Manager, and the moment the native page view moves (instantly, while the sidebar
+    animates) need checking on hardware.

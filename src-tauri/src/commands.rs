@@ -101,11 +101,13 @@ pub fn dismiss_notice(s: S<'_>, tab: u64) {
     with(&s, |b| b.dismiss_notice(TabId(tab)));
 }
 
-/// `top`: bottom edge of the toolbar in CSS px (= points). `overlay`: the
-/// chrome is showing UI over the content area, so content must be hidden.
+/// `top`: bottom edge of the toolbar, `left`: right edge of the docked tab
+/// sidebar (0 when collapsed), both in CSS px (= points). `overlay`: the
+/// chrome is showing UI over the content area (menus, the sidebar in narrow
+/// windows), so content must be hidden.
 #[tauri::command]
-pub fn set_chrome_layout(s: S<'_>, top: f64, overlay: bool) {
-    snorkle_content::dispatch_main(move || with_host(|h| h.set_top(top)));
+pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, overlay: bool) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left)));
     with(&s, |b| b.set_chrome_overlay(overlay));
 }
 
@@ -180,4 +182,27 @@ pub async fn clear_history(s: S<'_>) -> Result<(), String> {
         Some(store) => store.clear_history().map_err(|e| e.to_string()),
         None => Ok(()),
     }
+}
+
+/// Turns ad blocking off for the tab's site, or back on. The site is derived
+/// from the core's committed URL, not supplied by the caller. Not available
+/// in private tabs, because the setting is persisted. Returns whether
+/// blocking is now on for the site.
+#[tauri::command]
+pub async fn toggle_site_adblock(s: S<'_>, tab: u64) -> Result<bool, String> {
+    let site = {
+        let b = s.browser();
+        let t = b.tab(TabId(tab)).ok_or("No such tab")?;
+        if t.is_private() {
+            return Err("Ad-blocking exceptions can't be changed in a private tab.".into());
+        }
+        t.committed_url.as_ref().and_then(snorkle_core::blocking::site_key).ok_or("No site to change")?
+    };
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    let currently_allowed = store.adblock_allowed().contains(&site);
+    let set = store.set_adblock_allowed(&site, !currently_allowed).map_err(|e| e.to_string())?;
+    let effects = s.browser().set_adblock_allowlist(set);
+    s.run(effects);
+    crate::adblock::rebuild(&s, Some(TabId(tab)));
+    Ok(currently_allowed)
 }

@@ -16,6 +16,7 @@
 //! - Writes are atomic (temp file + rename) and are performed off the main
 //!   thread by the caller.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -78,11 +79,14 @@ pub struct Store {
 struct Data {
     history: Vec<HistoryEntry>,
     bookmarks: Vec<Bookmark>,
+    /// Sites (registrable domains) where the user turned ad blocking off.
+    adblock_allowed: BTreeSet<String>,
 }
 
 const HISTORY_FILE: &str = "history.json";
 const BOOKMARKS_FILE: &str = "bookmarks.json";
 const SESSION_FILE: &str = "session.json";
+const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
 
 impl Store {
     /// Opens (or creates) the store. Corrupt files are moved aside to
@@ -110,7 +114,12 @@ impl Store {
             None => false,
         });
         bookmarks.truncate(MAX_BOOKMARKS);
-        Ok(Store { dir, inner: Mutex::new(Data { history, bookmarks }) })
+        let adblock_allowed: BTreeSet<String> = load_or_reset::<BTreeSet<String>>(&dir.join(ADBLOCK_ALLOW_FILE))
+            .iter()
+            .filter_map(|s| crate::blocking::normalise_site(s))
+            .take(MAX_BOOKMARKS)
+            .collect();
+        Ok(Store { dir, inner: Mutex::new(Data { history, bookmarks, adblock_allowed }) })
     }
 
     fn data(&self) -> std::sync::MutexGuard<'_, Data> {
@@ -193,6 +202,30 @@ impl Store {
             s.active = None;
         }
         atomic_write(&self.dir.join(SESSION_FILE), &serde_json::to_vec(&s)?)
+    }
+
+    /// Sites where ad blocking is turned off.
+    pub fn adblock_allowed(&self) -> BTreeSet<String> {
+        self.data().adblock_allowed.clone()
+    }
+
+    /// Turns ad blocking off (`allowed = true`) or back on for `site`.
+    /// Returns the updated set. Invalid site keys are ignored.
+    pub fn set_adblock_allowed(&self, site: &str, allowed: bool) -> std::io::Result<BTreeSet<String>> {
+        let Some(site) = crate::blocking::normalise_site(site) else { return Ok(self.adblock_allowed()) };
+        let (set, snapshot) = {
+            let mut d = self.data();
+            if allowed {
+                if d.adblock_allowed.len() < MAX_BOOKMARKS {
+                    d.adblock_allowed.insert(site);
+                }
+            } else {
+                d.adblock_allowed.remove(&site);
+            }
+            (d.adblock_allowed.clone(), serde_json::to_vec(&d.adblock_allowed)?)
+        };
+        atomic_write(&self.dir.join(ADBLOCK_ALLOW_FILE), &snapshot)?;
+        Ok(set)
     }
 
     pub fn load_session(&self) -> Session {
@@ -281,6 +314,21 @@ mod tests {
         let s = Store::open(&dir).unwrap();
         assert!(s.history(10).is_empty());
         assert!(dir.join("history.corrupt").exists());
+    }
+
+    #[test]
+    fn adblock_allowlist_roundtrip_and_validation() {
+        let dir = tmpdir("adblock");
+        let s = Store::open(&dir).unwrap();
+        s.set_adblock_allowed("News.Example", true).unwrap();
+        s.set_adblock_allowed("bad\"]}(", true).unwrap();
+        assert_eq!(s.adblock_allowed().into_iter().collect::<Vec<_>>(), vec!["news.example".to_string()]);
+        drop(s);
+        fs::write(dir.join(ADBLOCK_ALLOW_FILE), r#"["ok.example","x(y"]"#).unwrap();
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.adblock_allowed().into_iter().collect::<Vec<_>>(), vec!["ok.example".to_string()]);
+        s.set_adblock_allowed("ok.example", false).unwrap();
+        assert!(s.adblock_allowed().is_empty());
     }
 
     #[test]

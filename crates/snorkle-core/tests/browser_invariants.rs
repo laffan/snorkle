@@ -378,3 +378,27 @@ fn preview_only_platform_never_shows_loading() {
     assert!(!out.iter().any(|e| matches!(e, Effect::CreateView { .. } | Effect::Load { .. })));
     assert!(!b.view().tabs[0].loading);
 }
+
+// ---- ad blocking -------------------------------------------------------------
+
+#[test]
+fn adblock_state_per_site_and_private_tabs_cannot_toggle() {
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(t, "https://www.news.example/", 0).unwrap();
+    webkit_load(&mut b, t, "https://www.news.example/");
+    let (p, _) = b.new_tab(Profile::Private, 0);
+    b.navigate_input(p, "https://www.news.example/", 0).unwrap();
+    webkit_load(&mut b, p, "https://www.news.example/");
+
+    let mut allow = std::collections::BTreeSet::new();
+    allow.insert("news.example".to_string());
+    b.set_adblock_allowlist(allow);
+    let view = b.view();
+    let a = view.tabs.iter().find(|x| x.id == t).unwrap().adblock.clone().unwrap();
+    assert_eq!(a.site, "news.example");
+    assert!(!a.blocking);
+    assert!(a.can_toggle);
+    let pa = view.tabs.iter().find(|x| x.id == p).unwrap().adblock.clone().unwrap();
+    assert!(!pa.can_toggle, "private tabs must not persist per-site settings");
+}

@@ -14,3 +14,4 @@ psl.workspace = true
 unicode-script.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+adblock.workspace = true

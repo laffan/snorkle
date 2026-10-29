@@ -21,4 +21,5 @@ pub const COMMANDS: &[&str] = &[
     "remove_bookmark",
     "list_history",
     "clear_history",
+    "toggle_site_adblock",
 ];

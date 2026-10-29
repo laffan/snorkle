@@ -16,8 +16,9 @@
 
 mod bindings;
 mod delegates;
+mod rules;
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -29,7 +30,7 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSDate, NSDictionary, NSError, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
+    NSDate, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSString, NSURLRequest,
     NSURL, NSUUID,
 };
@@ -38,7 +39,7 @@ use objc2_ui_kit::{
     UIView, UIViewAutoresizing,
 };
 use objc2_web_kit::{
-    WKContentMode, WKContentRuleList, WKContentRuleListStore, WKInactiveSchedulingPolicy, WKUserContentController,
+    WKContentMode, WKInactiveSchedulingPolicy,
     WKWebViewConfiguration, WKWebsiteDataStore,
 };
 use snorkle_core::browser::{AfterCreate, Effect};
@@ -49,7 +50,7 @@ use url::Url;
 
 use self::bindings::WKWebView;
 use self::delegates::{NavDelegate, Observer, TabIvars, UiDelegate, KVO_KEYS};
-use crate::{clamp_top, ContentEvents, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID, RULE_LIST_ID};
+use crate::{clamp_inset, ContentEvents, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
 
 // Adding any page-to-native channel requires writing installation code
 // here, which this assertion forces to be a deliberate, reviewed change.
@@ -62,7 +63,6 @@ const _: () = assert!(
 struct View {
     container: Retained<UIView>,
     web: Retained<WKWebView>,
-    controller: Retained<WKUserContentController>,
     _nav: Retained<NavDelegate>,
     _ui: Retained<UiDelegate>,
     kvo: Retained<Observer>,
@@ -86,13 +86,12 @@ pub struct ContentHost {
     mtm: MainThreadMarker,
     root: Retained<UIView>,
     top: Cell<f64>,
+    left: Cell<f64>,
     views: HashMap<TabId, View>,
     /// `interactionState` of discarded tabs (in memory only).
     saved: HashMap<TabId, Retained<AnyObject>>,
     default_store: Retained<WKWebsiteDataStore>,
     private_store: Option<Retained<WKWebsiteDataStore>>,
-    rules: Rc<RefCell<Option<Retained<WKContentRuleList>>>>,
-    controllers: Rc<RefCell<HashMap<TabId, Retained<WKUserContentController>>>>,
     events: Rc<dyn ContentEvents>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     user_agent: Retained<NSString>,
@@ -133,12 +132,11 @@ impl ContentHost {
             mtm,
             root,
             top: Cell::new(0.0),
+            left: Cell::new(0.0),
             views: HashMap::new(),
             saved: HashMap::new(),
             default_store,
             private_store: None,
-            rules: Rc::new(RefCell::new(None)),
-            controllers: Rc::new(RefCell::new(HashMap::new())),
             events,
             observers,
             user_agent: NSString::from_str(&crate::safari_desktop_user_agent(os_version())),
@@ -151,14 +149,21 @@ impl ContentHost {
 
     fn content_frame(&self) -> CGRect {
         let b = self.root.bounds();
-        let top = clamp_top(self.top.get(), b.size.height);
-        CGRect::new(CGPoint::new(0.0, top), CGSize::new(b.size.width, (b.size.height - top).max(0.0)))
+        let top = clamp_inset(self.top.get(), b.size.height);
+        let left = clamp_inset(self.left.get(), b.size.width);
+        CGRect::new(
+            CGPoint::new(left, top),
+            CGSize::new((b.size.width - left).max(0.0), (b.size.height - top).max(0.0)),
+        )
     }
 
-    /// Top inset of the content area (bottom edge of the chrome toolbar), in
-    /// points. Reported by the trusted chrome UI.
-    pub fn set_top(&mut self, top: f64) {
+    /// Insets of the content area, in points, reported by the trusted
+    /// chrome UI: `top` is the bottom edge of the toolbar, `left` the right
+    /// edge of the docked tab sidebar (0 when collapsed). Content containers
+    /// never extend over either.
+    pub fn set_insets(&mut self, top: f64, left: f64) {
         self.top.set(top);
+        self.left.set(left);
         let frame = self.content_frame();
         for v in self.views.values() {
             v.container.setFrame(frame);
@@ -193,7 +198,7 @@ impl ContentHost {
                                 self.saved.insert(*tab, state);
                             }
                         }
-                        self.controllers.borrow_mut().remove(tab);
+                        rules::unregister(*tab);
                         drop(v);
                     }
                     if !*keep_state {
@@ -298,9 +303,6 @@ impl ContentHost {
         }
 
         let controller = config.userContentController();
-        if let Some(list) = self.rules.borrow().as_ref() {
-            controller.addContentRuleList(list);
-        }
 
         let frame = self.content_frame();
         let container = UIView::initWithFrame(UIView::alloc(mtm), frame);
@@ -336,42 +338,16 @@ impl ContentHost {
 
         container.addSubview(&web);
         self.root.addSubview(&container);
-        self.controllers.borrow_mut().insert(tab, controller.clone());
-        View { container, web, controller, _nav: nav, _ui: ui, kvo }
+        rules::register(tab, controller);
+        View { container, web, _nav: nav, _ui: ui, kvo }
     }
 
-    /// Compiles and installs the content-blocking rule list (`None` removes
-    /// it). Compilation runs inside WebKit, off the main thread; the
-    /// completion handler attaches the list to every live web view.
-    pub fn install_rules(&mut self, json: Option<String>) {
-        unsafe {
-            let Some(json) = json else {
-                *self.rules.borrow_mut() = None;
-                for v in self.views.values() {
-                    v.controller.removeAllContentRuleLists();
-                }
-                return;
-            };
-            let Some(store) = WKContentRuleListStore::defaultStore(self.mtm) else { return };
-            let rules = self.rules.clone();
-            let controllers = self.controllers.clone();
-            let done = RcBlock::new(move |list: *mut WKContentRuleList, err: *mut NSError| {
-                if !err.is_null() {
-                    return;
-                }
-                let Some(list) = Retained::retain(list) else { return };
-                for c in controllers.borrow().values() {
-                    c.removeAllContentRuleLists();
-                    c.addContentRuleList(&list);
-                }
-                *rules.borrow_mut() = Some(list);
-            });
-            store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
-                Some(&NSString::from_str(RULE_LIST_ID)),
-                Some(&NSString::from_str(&json)),
-                Some(&done),
-            );
-        }
+    /// Installs content-blocking rule lists for `key` into every content
+    /// web view (now and future), reusing WebKit's compiled cache when it
+    /// has a complete set for `key`; otherwise `make` runs on a background
+    /// thread and WebKit compiles its output. `done` runs on the main thread.
+    pub fn install_rules(&mut self, key: String, make: crate::MakeRuleLists, done: crate::RulesDone) {
+        rules::install(self.mtm, key, make, done);
     }
 }
 

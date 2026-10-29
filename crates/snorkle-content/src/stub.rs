@@ -16,6 +16,7 @@ pub struct ContentHost {
     live: BTreeSet<TabId>,
     pub applied: Vec<Effect>,
     pub top: f64,
+    pub left: f64,
     _events: Rc<dyn ContentEvents>,
 }
 
@@ -24,7 +25,7 @@ impl ContentHost {
     /// Trivially safe on non-iOS targets; the signature matches the iOS
     /// version, where `root_view` must be a valid `UIView*`.
     pub unsafe fn new(_root_view: *mut std::ffi::c_void, events: Rc<dyn ContentEvents>) -> Self {
-        ContentHost { live: BTreeSet::new(), applied: Vec::new(), top: 0.0, _events: events }
+        ContentHost { live: BTreeSet::new(), applied: Vec::new(), top: 0.0, left: 0.0, _events: events }
     }
 
     pub fn apply(&mut self, effect: &Effect) {
@@ -40,11 +41,16 @@ impl ContentHost {
         self.applied.push(effect.clone());
     }
 
-    pub fn set_top(&mut self, top: f64) {
-        self.top = crate::clamp_top(top, 1024.0);
+    pub fn set_insets(&mut self, top: f64, left: f64) {
+        self.top = crate::clamp_inset(top, 1024.0);
+        self.left = crate::clamp_inset(left, 1366.0);
     }
 
-    pub fn install_rules(&mut self, _json: Option<String>) {}
+    /// Runs the conversion (so it is exercised in desktop builds) but has
+    /// no WebKit to install into.
+    pub fn install_rules(&mut self, _key: String, make: crate::MakeRuleLists, done: crate::RulesDone) {
+        std::thread::spawn(move || done(make().map(|lists| lists.len())));
+    }
 
     pub fn live_views(&self) -> usize {
         self.live.len()

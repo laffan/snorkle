@@ -23,13 +23,19 @@ Policy:
 | idna | =1.1.0 | core | UTS #46 to-Unicode for display (dependency of `url`) |
 | psl | =2.1.245 | core | Public Suffix List, compiled in; no runtime parsing |
 | unicode-script | =0.5.8 | core | Script property for the IDN policy; no dependencies |
+| adblock | =0.13.5 (default features off; `content-blocking`) | core | Brave's ABP/uBlock filter parser and WebKit content-blocking converter (MPL-2.0). Only the converter is used; no matching engine runs in the app. |
 | serde / serde_json | =1.0.229 / =1.0.154 | core, src-tauri | State serialisation, storage (already in Tauri's graph) |
 | objc2 / block2 | =0.6.5 / =0.6.2 | content (iOS) | ObjC runtime, blocks (same versions as wry) |
 | objc2-foundation / -ui-kit / -web-kit / -core-foundation | =0.3.2 | content (iOS) | Framework bindings (same versions as wry) |
 | libfuzzer-sys | =0.4.13 | fuzz (separate workspace) | cargo-fuzz harness |
 
-Graph size (normal edges): `snorkle-core` 44 crates; the iOS app 235 crates, almost all from
-Tauri/wry. Our own additions beyond Tauri's graph: `psl`, `psl-types`, `unicode-script`.
+Graph size (normal edges): `snorkle-core` 60 crates; the iOS app 244 crates, almost all from
+Tauri/wry. Our own additions beyond Tauri's graph: `psl`, `psl-types`, `unicode-script`, and
+from `adblock`: `adblock`, `flatbuffers`, `seahash`, `itertools`, `either`, `arrayvec`,
+`rustc-hash`, `base64` 0.22 and `thiserror` 1.x.
+
+Bundled data: EasyList and EasyPrivacy (`src-tauri/resources/filters/`, CC BY-SA 3.0, see
+`SOURCES.md` there for versions and hashes). Refresh with `scripts/update-filter-lists.sh`.
 
 ## Audit results (2026-10-29)
 

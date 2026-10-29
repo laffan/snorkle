@@ -1,3 +1,0 @@
-# Bundled content-blocking list (see crates/snorkle-core/src/blocking.rs for
-# the accepted syntax). Intentionally empty: which list to ship (and its
-# licence) is an open product decision, see docs/OPEN_QUESTIONS.md.

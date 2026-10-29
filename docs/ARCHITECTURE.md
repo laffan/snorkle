@@ -116,6 +116,35 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   WebKit compiles the rule list in its own process; disk writes on a storage thread with
   session-write coalescing; chrome state updates coalesce progress to 5% steps.
 
+## 5a. Content blocking
+
+- **Lists:** EasyList and EasyPrivacy, bundled (`src-tauri/resources/filters`). They are
+  converted by Brave's `adblock` crate (`snorkle_core::blocking`) into WebKit content-rule-list
+  JSON: about 127k rules, split into 3 lists of at most 50k rules. Every list repeats all 1.4k
+  exception rules, because WebKit applies `ignore-previous-rules` only within its own list.
+  Conversion takes about 0.5 s (release build, laptop) and runs on a background thread.
+- **Caching:** WebKit compiles the lists and stores them as `snorkle.cb.<key>.<i>.of.<n>`, where
+  the key hashes the converter version, the lists and the allowlist. Later launches look up the
+  compiled lists instead of converting again; lists for other keys are deleted
+  (`snorkle-content/src/ios/rules.rs`).
+- **Enforcement:** WebKit blocks network loads and hides elements with `css-display-none`,
+  inside its own processes, with no per-request work in the app. No scripts are injected, so
+  scriptlet filters are unsupported.
+- **Per-site toggle:** stored by registrable domain (`adblock-allow.json`). It becomes one
+  trailing `ignore-previous-rules` rule with `if-top-url`, then the lists are rebuilt and the tab
+  reloaded. Disabled in private tabs, because the setting is persisted.
+- **Security:** a rule list can only block, hide or upgrade content, never run code. Allowlist
+  entries are validated to `[a-z0-9-.]` domains before they go into a regex. Rule lists are not a
+  page-to-native channel.
+
+## 5b. Chrome layout
+
+Tabs are listed in a sidebar along the left edge. In windows at least 700 pt wide the sidebar is
+docked: the chrome reports `left = sidebar width` and the native content container starts to its
+right. In narrower windows it slides over the content area, and the content view is hidden
+while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both
+insets are clamped in Rust to at most half the window.
+
 ## 6. Credentials
 
 The app stores no passwords, tokens or cookies itself. Cookies live in WebKit's data stores.

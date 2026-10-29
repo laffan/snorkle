@@ -15,6 +15,12 @@ procedure. Fill in the results tables from real devices; do not quote the target
 | Chrome state pushes | coalesced; progress in 5 % steps | `Browser::on_progress` |
 | Disk writes | off main thread; session writes coalesced (400 ms) | `src-tauri/src/state.rs` |
 | Restore | only the active tab gets a web view | `Browser::restore_session` |
+| Ad-block conversion | off main thread; skipped when WebKit already has the compiled lists | `src-tauri/src/adblock.rs` |
+
+Measured off-device (not iPad): converting EasyList + EasyPrivacy (2026-10-29 versions) takes
+0.53 s in a release build on the Linux build machine, producing 127,351 rules in 3 lists (14 MB
+of JSON). WebKit's compile time for those lists on an iPad has not been measured. Record it,
+plus first-launch versus cached-launch time to the first page load, in the results below.
 
 ## Test plan (real hardware)
 
