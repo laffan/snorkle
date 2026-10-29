@@ -1,0 +1,86 @@
+<!doctype html>
+<!--
+  On-device security probe. Serve this file from a REMOTE origin (any web
+  server other than the app bundle, e.g. `python3 -m http.server` on your
+  Mac plus an https tunnel, or a test domain) and open it in Snorkle.
+  Every row must read PASS. It checks, from inside a content WKWebView,
+  that no Tauri/IPC bridge exists and that internal schemes are unreachable.
+  Results are shown on the page only; the page has no way to report them
+  to the app (that is the point).
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snorkle IPC probe</title>
+<style>
+  body { font: 16px -apple-system, sans-serif; margin: 24px; }
+  td { padding: 4px 10px; border-bottom: 1px solid #ddd; }
+  .PASS { color: #067647; font-weight: 700; } .FAIL { color: #b42318; font-weight: 700; } .INFO { color: #555; }
+</style>
+<h1>Snorkle IPC probe</h1>
+<p>Origin: <code id="origin"></code></p>
+<table id="out"></table>
+<h2>Manual checks</h2>
+<ul>
+  <li><a id="nav-tauri" href="tauri://localhost/index.html">Navigate to tauri://localhost</a> – must show "Blocked".</li>
+  <li><a href="ipc://localhost/get_state">Navigate to ipc://localhost</a> – must show "Blocked".</li>
+  <li><a href="data:text/html,<h1>phish</h1>">Top-level data: URL</a> – must show "Blocked".</li>
+  <li><a href="https://example.com/" target="_blank" id="popup">target=_blank link</a> – opens a new tab; this page must not get a handle to it.</li>
+  <li><button id="fs">Request element fullscreen</button> – must be unavailable (chrome stays visible).</li>
+  <li><button id="alert">alert()</button> – must not show a modal; chrome shows a note naming this origin.</li>
+  <li><button id="title">Set a bidi-spoofed title</button> – tab title must not show reordered text.</li>
+</ul>
+<script>
+const rows = [];
+function row(name, ok, detail) {
+  const tr = document.createElement('tr');
+  const s = ok === null ? 'INFO' : ok ? 'PASS' : 'FAIL';
+  for (const [t, c] of [[s, s], [name, ''], [detail || '', '']]) {
+    const td = document.createElement('td'); td.textContent = t; if (c) td.className = c; tr.appendChild(td);
+  }
+  document.getElementById('out').appendChild(tr);
+}
+document.getElementById('origin').textContent = location.origin;
+row('served from a remote origin', !/^(tauri:|ipc:|asset:)/.test(location.protocol), location.protocol);
+
+const globals = ['__TAURI__', '__TAURI_INTERNALS__', '__TAURI_IPC__', '__TAURI_INVOKE_KEY__', '__TAURI_METADATA__', '__TAURI_PATTERN__', 'ipc', '__TAURI_EVENT_PLUGIN_INTERNALS__'];
+for (const g of globals) row(`window.${g} absent`, typeof window[g] === 'undefined', typeof window[g]);
+const mh = window.webkit && window.webkit.messageHandlers;
+row('window.webkit.messageHandlers absent', !mh, String(mh));
+for (const name of ['ipc', 'tauri', 'external', 'invoke', 'snorkle']) {
+  const h = mh && mh[name];
+  row(`messageHandlers.${name} absent`, !h, String(h));
+}
+
+async function probeFetch(url) {
+  try {
+    const r = await fetch(url, { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } });
+    return `HTTP ${r.status}`;
+  } catch (e) { return null; }
+}
+(async () => {
+  for (const u of ['ipc://localhost/get_state', 'tauri://localhost/index.html', 'asset://localhost/x', 'http://ipc.localhost/get_state', 'https://tauri.localhost/index.html']) {
+    const res = await probeFetch(u);
+    row(`fetch ${u} fails`, res === null, res || 'network error');
+  }
+  const f = document.createElement('iframe');
+  f.src = 'tauri://localhost/index.html';
+  f.style.width = '1px'; f.style.height = '1px';
+  document.body.appendChild(f);
+  setTimeout(() => {
+    let reachable = false;
+    try { reachable = !!(f.contentWindow && f.contentWindow.__TAURI__); } catch (e) {}
+    row('iframe to tauri:// not loaded/accessible', !reachable, '');
+  }, 1500);
+  const w = window.open('tauri://localhost/index.html');
+  row('window.open without gesture returns null', w === null, String(w));
+  row('element fullscreen API unavailable or rejected', !document.fullscreenEnabled, `fullscreenEnabled=${document.fullscreenEnabled}`);
+  row('Service Workers (needs browser entitlement)', null, 'serviceWorker' in navigator ? 'available' : 'unavailable');
+})();
+
+document.getElementById('fs').onclick = () => document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(e => row('requestFullscreen rejected', true, String(e)));
+document.getElementById('alert').onclick = () => alert('probe');
+document.getElementById('title').onclick = () => { document.title = 'Bank ‮moc.lavyap‬ login'; };
+document.getElementById('popup').addEventListener('click', () => {
+  setTimeout(() => row('no opener handle to the new tab (window.open via link)', true, 'manual: confirm new tab opened'), 0);
+});
+</script>

@@ -1,0 +1,66 @@
+//! Non-iOS stand-in for [`ContentHost`]. iPadOS is the only target
+//! platform; this exists so the app, its IPC-isolation tests and the chrome
+//! UI can be built and exercised on a development machine. It renders no
+//! web content and records the effects it was asked to apply.
+
+use std::collections::BTreeSet;
+use std::rc::Rc;
+
+use snorkle_core::browser::Effect;
+use snorkle_core::os::OsVersion;
+use snorkle_core::tabs::TabId;
+
+use crate::ContentEvents;
+
+pub struct ContentHost {
+    live: BTreeSet<TabId>,
+    pub applied: Vec<Effect>,
+    pub top: f64,
+    _events: Rc<dyn ContentEvents>,
+}
+
+impl ContentHost {
+    /// # Safety
+    /// Trivially safe on non-iOS targets; the signature matches the iOS
+    /// version, where `root_view` must be a valid `UIView*`.
+    pub unsafe fn new(_root_view: *mut std::ffi::c_void, events: Rc<dyn ContentEvents>) -> Self {
+        ContentHost { live: BTreeSet::new(), applied: Vec::new(), top: 0.0, _events: events }
+    }
+
+    pub fn apply(&mut self, effect: &Effect) {
+        match effect {
+            Effect::CreateView { tab, .. } => {
+                self.live.insert(*tab);
+            }
+            Effect::DestroyView { tab, .. } => {
+                self.live.remove(tab);
+            }
+            _ => {}
+        }
+        self.applied.push(effect.clone());
+    }
+
+    pub fn set_top(&mut self, top: f64) {
+        self.top = crate::clamp_top(top, 1024.0);
+    }
+
+    pub fn install_rules(&mut self, _json: Option<String>) {}
+
+    pub fn live_views(&self) -> usize {
+        self.live.len()
+    }
+}
+
+/// Runs `f` on the current thread (no UIKit run loop off iOS).
+pub fn dispatch_main(f: impl FnOnce() + Send + 'static) {
+    f()
+}
+
+pub fn physical_memory() -> u64 {
+    8 * 1024 * 1024 * 1024
+}
+
+/// Pretends to be the newest known OS so desktop dev builds are not gated.
+pub fn os_version() -> OsVersion {
+    OsVersion::new(27, 0, 0)
+}

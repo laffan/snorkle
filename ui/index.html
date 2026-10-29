@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Snorkle</title>
+  <link rel="stylesheet" href="chrome.css">
+  <script src="chrome.js" defer></script>
+</head>
+<body>
+  <!--
+    Trusted browser chrome. Everything rendered here comes from Rust state;
+    page-controlled strings (titles, hosts) are only ever set via
+    textContent. Web content is drawn by native WKWebViews placed BELOW
+    #chrome (Rust positions them using the height reported from here).
+  -->
+  <header id="chrome">
+    <div id="os-banner" class="banner" hidden></div>
+    <nav id="tabstrip" aria-label="Tabs">
+      <div id="tabs" role="tablist"></div>
+      <button id="new-tab" class="icon" title="New tab" aria-label="New tab">+</button>
+      <button id="new-private" class="icon text" title="New private tab" aria-label="New private tab">Private +</button>
+    </nav>
+    <div id="toolbar">
+      <button id="back" class="icon" aria-label="Back">&#x2039;</button>
+      <button id="forward" class="icon" aria-label="Forward">&#x203A;</button>
+      <button id="reload" class="icon" aria-label="Reload">&#x21BB;</button>
+      <div id="omnibox">
+        <button id="url-display" aria-label="Address">
+          <span id="security" class="security"></span>
+          <span id="private-pill" class="pill" hidden>Private</span>
+          <span id="url-sub" class="sub"></span><span id="url-reg" class="reg"></span><span id="url-port" class="port"></span>
+          <span id="url-warn" class="warn" hidden title="This address uses characters that look like other letters; shown in its encoded form.">!</span>
+        </button>
+        <input id="url-input" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
+               enterkeyhint="go" placeholder="Search or enter address" aria-label="Search or enter address" hidden>
+      </div>
+      <button id="bookmark" class="icon" aria-label="Bookmark this page">&#x2606;</button>
+      <button id="menu" class="icon" aria-label="Bookmarks and history">&#x2630;</button>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="progress"><div id="progress-bar"></div></div>
+  </header>
+
+  <!-- Shown only while no content view is visible (start page, notices,
+       panels). Content WKWebViews cover this area otherwise. -->
+  <main id="surface">
+    <section id="start" hidden>
+      <h1 id="start-title">New Tab</h1>
+      <p id="start-private" class="muted" hidden>Private tab: history, cookies and site data are kept in memory only and are discarded when you close your last private tab.</p>
+      <h2>Bookmarks</h2>
+      <ul id="start-bookmarks" class="list"></ul>
+    </section>
+
+    <section id="notice" class="notice" hidden>
+      <h1 id="notice-title"></h1>
+      <p id="notice-body"></p>
+      <p id="notice-detail" class="muted mono"></p>
+      <div class="actions">
+        <button id="notice-secondary" class="button"></button>
+        <button id="notice-primary" class="button primary"></button>
+      </div>
+    </section>
+
+    <section id="panel" hidden>
+      <div class="panel-head">
+        <button id="panel-bookmarks" class="seg">Bookmarks</button>
+        <button id="panel-history" class="seg">History</button>
+        <span class="spacer"></span>
+        <button id="panel-clear" class="button" hidden>Clear history</button>
+        <button id="panel-close" class="button">Done</button>
+      </div>
+      <ul id="panel-list" class="list"></ul>
+    </section>
+
+    <section id="unsupported" class="notice" hidden>
+      <h1>Update iPadOS to browse</h1>
+      <p id="unsupported-body"></p>
+    </section>
+  </main>
+</body>
+</html>

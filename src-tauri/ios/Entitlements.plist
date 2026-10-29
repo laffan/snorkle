@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the iOS target. Tauri v2 (2.12.5) has no config key for
+  iOS entitlements, so after `cargo tauri ios init` copy these keys into
+  gen/apple/snorkle_iOS/snorkle_iOS.entitlements (see README.md).
+  SECURITY-REVIEW: every key here needs human sign-off.
+-->
+<plist version="1.0">
+<dict>
+  <!--
+    Managed entitlement; requires Apple's approval (Default browser
+    entitlement request form). Without it the app still runs, but: it
+    cannot be chosen as default browser, and Service Workers are not
+    available in WKWebView. Remove this key for builds signed without the
+    entitlement or provisioning will fail.
+  -->
+  <key>com.apple.developer.web-browser</key>
+  <true/>
+  <!-- All app files (history, bookmarks, session) unreadable while locked. -->
+  <key>com.apple.developer.default-data-protection</key>
+  <string>NSFileProtectionComplete</string>
+</dict>
+</plist>

@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  Frame-rate probe for ProMotion iPads. Open in Snorkle (served from any
+  origin), keep the device still, tap Start, and record the results in
+  docs/PERFORMANCE.md together with device model, iPadOS version, Low Power
+  Mode state and the Display & Brightness settings. Compare with Safari on
+  the same device.
+  Measures: requestAnimationFrame cadence (idle and under main-thread
+  load), and a compositor-driven CSS animation for reference.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snorkle rAF probe</title>
+<style>
+  body { font: 16px -apple-system, sans-serif; margin: 24px; }
+  #box { width: 60px; height: 60px; background: #0b6e7f; border-radius: 12px; will-change: transform; animation: slide 1s linear infinite alternate; }
+  @keyframes slide { from { transform: translateX(0); } to { transform: translateX(300px); } }
+  pre { background: #f3f4f6; padding: 12px; white-space: pre-wrap; }
+</style>
+<h1>rAF probe</h1>
+<div id="box"></div>
+<p><button id="start">Start (10 s idle + 10 s loaded)</button></p>
+<pre id="out">Not started.</pre>
+<script>
+function measure(ms, loadMs) {
+  return new Promise((resolve) => {
+    const deltas = [];
+    let last = 0, start = 0;
+    function frame(t) {
+      if (!start) start = t;
+      if (last) deltas.push(t - last);
+      last = t;
+      if (loadMs) { const end = performance.now() + loadMs; while (performance.now() < end) {} }
+      if (t - start < ms) requestAnimationFrame(frame); else resolve(deltas);
+    }
+    requestAnimationFrame(frame);
+  });
+}
+function stats(d) {
+  const s = [...d].sort((a, b) => a - b);
+  const q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
+  const mean = d.reduce((a, b) => a + b, 0) / d.length;
+  return { frames: d.length, mean_ms: +mean.toFixed(2), fps_mean: +(1000 / mean).toFixed(1), p50_ms: +q(0.5).toFixed(2), p95_ms: +q(0.95).toFixed(2), p99_ms: +q(0.99).toFixed(2), over_20ms: d.filter((x) => x > 20).length };
+}
+document.getElementById('start').onclick = async () => {
+  const out = document.getElementById('out');
+  out.textContent = 'Measuring idle…';
+  const idle = stats(await measure(10000, 0));
+  out.textContent = 'Measuring with 4 ms main-thread work per frame…';
+  const loaded = stats(await measure(10000, 4));
+  out.textContent = JSON.stringify({ ua: navigator.userAgent, dpr: devicePixelRatio, screen: [screen.width, screen.height], idle, loaded }, null, 2);
+};
+</script>

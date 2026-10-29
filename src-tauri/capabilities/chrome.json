@@ -1,0 +1,32 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "chrome",
+  "description": "Browser chrome: the bundled local UI in the webview labelled \"main\". No remote origins, no other webviews. SECURITY-REVIEW: every change here needs human sign-off.",
+  "local": true,
+  "windows": [],
+  "webviews": [
+    "main"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-state",
+    "allow-navigate",
+    "allow-new-tab",
+    "allow-close-tab",
+    "allow-activate-tab",
+    "allow-go-back",
+    "allow-go-forward",
+    "allow-reload",
+    "allow-stop",
+    "allow-proceed-http",
+    "allow-confirm-external",
+    "allow-dismiss-notice",
+    "allow-set-chrome-layout",
+    "allow-list-bookmarks",
+    "allow-toggle-bookmark",
+    "allow-remove-bookmark",
+    "allow-list-history",
+    "allow-clear-history"
+  ]
+}

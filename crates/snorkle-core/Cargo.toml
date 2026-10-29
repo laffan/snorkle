@@ -1,0 +1,16 @@
+[package]
+name = "snorkle-core"
+description = "Platform-independent browser core: URL display, navigation policy, tabs, storage, content blocking."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+url.workspace = true
+idna.workspace = true
+psl.workspace = true
+unicode-script.workspace = true
+serde.workspace = true
+serde_json.workspace = true

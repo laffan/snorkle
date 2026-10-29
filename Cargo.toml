@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = ["crates/snorkle-core", "crates/snorkle-content", "src-tauri"]
+# The fuzz crate is its own workspace (needs nightly + cargo-fuzz).
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+publish = false
+
+# Every external dependency is pinned with `=`; Cargo.lock is committed.
+# Adding or bumping a dependency requires `cargo deny check` + `cargo audit`
+# (see docs/DEPENDENCIES.md). Versions for objc2-* and block2 MUST match the
+# ones wry (via tauri-runtime-wry) resolves, so only one copy is linked.
+[workspace.dependencies]
+snorkle-core = { path = "crates/snorkle-core" }
+snorkle-content = { path = "crates/snorkle-content" }
+url = "=2.5.8"
+idna = "=1.1.0"
+psl = "=2.1.245"
+unicode-script = "=0.5.8"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# Fail closed: a panic (including inside an Objective-C delegate callback)
+# terminates the app instead of unwinding across the FFI boundary.
+panic = "abort"
+strip = true
+

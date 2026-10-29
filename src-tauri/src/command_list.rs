@@ -1,0 +1,24 @@
+// The complete list of app commands. Shared by build.rs (Tauri app ACL
+// manifest, so every command is ACL-checked) and the IPC isolation tests.
+// SECURITY-REVIEW: adding a command here is adding native attack surface
+// for the chrome; it must also be granted in capabilities/chrome.json.
+pub const COMMANDS: &[&str] = &[
+    "get_state",
+    "navigate",
+    "new_tab",
+    "close_tab",
+    "activate_tab",
+    "go_back",
+    "go_forward",
+    "reload",
+    "stop",
+    "proceed_http",
+    "confirm_external",
+    "dismiss_notice",
+    "set_chrome_layout",
+    "list_bookmarks",
+    "toggle_bookmark",
+    "remove_bookmark",
+    "list_history",
+    "clear_history",
+];

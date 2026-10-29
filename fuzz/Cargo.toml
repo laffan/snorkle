@@ -1,0 +1,44 @@
+[package]
+name = "snorkle-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+snorkle-core = { path = "../crates/snorkle-core" }
+
+# Separate workspace: cargo-fuzz needs nightly and sanitizer flags.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "url_display"
+path = "fuzz_targets/url_display.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "input"
+path = "fuzz_targets/input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "nav_policy"
+path = "fuzz_targets/nav_policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "browser_events"
+path = "fuzz_targets/browser_events.rs"
+test = false
+doc = false
+bench = false

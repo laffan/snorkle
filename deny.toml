@@ -1,0 +1,39 @@
+# cargo-deny policy. Run: cargo deny check
+# The shipping target is iOS; Linux targets are included only because the
+# development/test build (MockRuntime, desktop stub) pulls GTK/WebKitGTK.
+[graph]
+targets = ["aarch64-apple-ios", "x86_64-unknown-linux-gnu"]
+all-features = false
+
+[advisories]
+# Linux-only (GTK stack via wry/tao), not linked into the iOS app.
+ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error: build-time only, Linux GTK stack" },
+  { id = "RUSTSEC-2024-0429", reason = "glib: Linux-only dependency of the desktop dev build" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+  "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
+  "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "MPL-2.0", "CC0-1.0", "BSL-1.0", "0BSD", "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+# These must never appear: alternative engines / embedded JS engines.
+# (javascriptcore-rs is pulled by WebKitGTK on the Linux dev build only;
+# scripts/check-deps.sh asserts it is absent from the iOS graph.)
+deny = [
+  { name = "boa_engine" },
+  { name = "rusty_v8" },
+  { name = "v8" },
+  { name = "servo" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
