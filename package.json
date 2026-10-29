@@ -2,7 +2,8 @@
   "name": "snorkle",
   "private": true,
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "ios:build": "sh scripts/ios-build-deploy.sh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4"

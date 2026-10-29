@@ -59,7 +59,11 @@ On Linux, the Tauri test build needs the WebKitGTK development packages
   4. Set the bundle identifier and development team (`tauri.conf.json`, currently placeholders).
   5. Pick an iPad simulator when prompted. Inspect the chrome **and** the page views from
      Safari → Develop → Simulator (both are inspectable in debug builds).
-  6. Run `tests/device/ipc-probe.html` from a remote origin and `tests/device/raf-probe.html`,
+  6. Physical iPad: `npm run ios:build` builds a debug IPA and installs it with
+     `ios-deploy --bundle` (`brew install ios-deploy`). `npm run ios:build -- --release` for a
+     release build; any other arguments go to ios-deploy (e.g. `--justlaunch`, `--id <udid>`).
+     Needs a development team set (`bundle.iOS.developmentTeam` or `APPLE_DEVELOPMENT_TEAM`).
+  7. Run `tests/device/ipc-probe.html` from a remote origin and `tests/device/raf-probe.html`,
      and record the results in `docs/PERFORMANCE.md`.
 
 Minimum OS: iPadOS 26.0 (deployment target and runtime gate). Older patch levels get a warning
