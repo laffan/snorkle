@@ -38,7 +38,7 @@ use objc2_ui_kit::{
     UIView, UIViewAutoresizing,
 };
 use objc2_web_kit::{
-    WKContentRuleList, WKContentRuleListStore, WKInactiveSchedulingPolicy, WKUserContentController,
+    WKContentMode, WKContentRuleList, WKContentRuleListStore, WKInactiveSchedulingPolicy, WKUserContentController,
     WKWebViewConfiguration, WKWebsiteDataStore,
 };
 use snorkle_core::browser::{AfterCreate, Effect};
@@ -95,6 +95,7 @@ pub struct ContentHost {
     controllers: Rc<RefCell<HashMap<TabId, Retained<WKUserContentController>>>>,
     events: Rc<dyn ContentEvents>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+    user_agent: Retained<NSString>,
 }
 
 impl ContentHost {
@@ -140,6 +141,7 @@ impl ContentHost {
             controllers: Rc::new(RefCell::new(HashMap::new())),
             events,
             observers,
+            user_agent: NSString::from_str(&crate::safari_desktop_user_agent(os_version())),
         }
     }
 
@@ -289,6 +291,12 @@ impl ContentHost {
             let _: () = msg_send![&*config, setAllowsInlineMediaPlayback: true];
         }
 
+        if spec.safari_desktop_user_agent {
+            // Desktop-class content to match the desktop UA set below
+            // (Safari's default on iPad, except in narrow multitasking).
+            config.defaultWebpagePreferences().setPreferredContentMode(WKContentMode::Desktop);
+        }
+
         let controller = config.userContentController();
         if let Some(list) = self.rules.borrow().as_ref() {
             controller.addContentRuleList(list);
@@ -308,6 +316,9 @@ impl ContentHost {
         }
         web.setAllowsBackForwardNavigationGestures(spec.allows_back_forward_gestures);
         web.setAllowsLinkPreview(spec.allows_link_preview);
+        if spec.safari_desktop_user_agent {
+            web.setCustomUserAgent(Some(&self.user_agent));
+        }
 
         let nav = NavDelegate::new(mtm, TabIvars::new(tab, self.events.clone()));
         let ui = UiDelegate::new(mtm, TabIvars::new(tab, self.events.clone()));

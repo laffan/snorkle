@@ -116,6 +116,11 @@ impl WKWebView {
         #[unsafe(method_family = none)]
         pub unsafe fn setAllowsLinkPreview(&self, allows: bool);
 
+        /// iOS 9+. Replaces the whole User-Agent header and `navigator.userAgent`.
+        #[unsafe(method(setCustomUserAgent:))]
+        #[unsafe(method_family = none)]
+        pub unsafe fn setCustomUserAgent(&self, user_agent: Option<&NSString>);
+
         #[unsafe(method(scrollView))]
         #[unsafe(method_family = none)]
         pub unsafe fn scrollView(&self) -> Retained<UIScrollView>;

@@ -87,9 +87,12 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 18. **[decide] Element fullscreen and link previews are disabled** to prevent fullscreen phishing
     and unpoliced preview loads. This costs some UX (e.g. custom video players' fullscreen
     buttons).
-19. **[decide] User agent.** Content views use WKWebView's default UA, which lacks Safari's
-    `Version/… Safari/…` tokens; some sites treat that as an in-app browser. Setting
-    `applicationNameForUserAgent` is a compatibility versus honesty trade-off.
+19. **[verify] User agent.** Resolved 2026-10-29 at your request after Gmail reported "This
+    browser is not supported": content views now send Safari's iPad desktop UA
+    (`CONTENT_VIEW_SPEC.safari_desktop_user_agent`, version taken from the running OS) and request
+    desktop content mode. Sites cannot tell Snorkle from Safari. To verify on device: Gmail and
+    Google sign-in work; `navigator.userAgent` in the page inspector matches Safari's; and in narrow
+    Split View, Safari would switch to mobile layout but Snorkle stays desktop (known difference).
 20. **[verify] Tauri's local-origin rule.** Tauri treats `https://tauri.localhost` as local. This
     does not affect content views (they are not Tauri webviews), and policy blocks those hosts
     anyway. It matters only if a remote page were ever loaded into the chrome webview, which no

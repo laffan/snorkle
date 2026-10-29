@@ -87,6 +87,13 @@ pub struct ContentViewSpec {
     pub inspectable: bool,
     pub allows_back_forward_gestures: bool,
     pub allows_link_preview: bool,
+    /// Present Safari's iPad (desktop-class) user agent and request desktop
+    /// content. WKWebView's default UA lacks Safari's `Version/… Safari/…`
+    /// tokens, which sites such as Google sign-in/Gmail treat as an
+    /// unsupported embedded browser. Other iOS browsers built on WKWebView
+    /// do the same. Trade-off: sites cannot tell Snorkle from Safari (which
+    /// also means one less fingerprinting bit).
+    pub safari_desktop_user_agent: bool,
 }
 
 pub const CONTENT_VIEW_SPEC: ContentViewSpec = ContentViewSpec {
@@ -101,7 +108,18 @@ pub const CONTENT_VIEW_SPEC: ContentViewSpec = ContentViewSpec {
     inspectable: cfg!(debug_assertions),
     allows_back_forward_gestures: true,
     allows_link_preview: false,
+    safari_desktop_user_agent: true,
 };
+
+/// The user agent Safari sends on iPad in desktop mode (identical to macOS
+/// Safari's; the macOS version token is frozen at 10_15_7 by WebKit), with
+/// Safari's version taken from the running OS version, as Safari's is.
+pub fn safari_desktop_user_agent(os: snorkle_core::os::OsVersion) -> String {
+    format!(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{}.{} Safari/605.1.15",
+        os.major, os.minor
+    )
+}
 
 /// Fixed identifier of the default profile's persistent
 /// `WKWebsiteDataStore(forIdentifier:)`. Must never be all zeros (WebKit
@@ -134,6 +152,15 @@ mod tests {
         assert_eq!(clamp_top(-5.0, 1000.0), 0.0);
         assert_eq!(clamp_top(5000.0, 1000.0), 500.0);
         assert_eq!(clamp_top(64.0, 1000.0), 64.0);
+    }
+
+    #[test]
+    fn user_agent_matches_safari_desktop_format() {
+        let ua = safari_desktop_user_agent(snorkle_core::os::OsVersion::new(26, 6, 1));
+        assert_eq!(
+            ua,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15"
+        );
     }
 
     #[test]

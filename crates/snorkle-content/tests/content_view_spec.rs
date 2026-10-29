@@ -20,6 +20,7 @@ fn anti_spoofing_and_popup_settings() {
     assert!(S.upgrade_known_hosts_to_https);
     assert!(!S.limits_navigations_to_app_bound_domains);
     assert!(S.fraudulent_website_warning);
+    assert!(S.safari_desktop_user_agent);
 }
 
 #[test]
