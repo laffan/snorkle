@@ -367,4 +367,14 @@ fn unsupported_os_creates_no_web_views() {
     let (t, _) = b.new_tab(Profile::Default, 0);
     let out = b.navigate_input(t, "https://example.com/", 0).unwrap();
     assert!(!out.iter().any(|e| matches!(e, Effect::CreateView { .. } | Effect::Load { .. })));
+    assert!(!b.view().tabs[0].loading, "no view can load, so the tab must not show progress");
+}
+
+#[test]
+fn preview_only_platform_never_shows_loading() {
+    let mut b = Browser::new(MemoryBudget::for_physical_memory(8 << 30), OsSupport::PreviewOnly);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    let out = b.navigate_input(t, "example.com", 0).unwrap();
+    assert!(!out.iter().any(|e| matches!(e, Effect::CreateView { .. } | Effect::Load { .. })));
+    assert!(!b.view().tabs[0].loading);
 }

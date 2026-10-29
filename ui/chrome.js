@@ -73,7 +73,10 @@
     const os = state.os;
     const banner = $('os-banner');
     const block = $('unsupported');
-    banner.hidden = os.status !== 'update_recommended';
+    banner.hidden = os.status !== 'update_recommended' && os.status !== 'preview_only';
+    if (os.status === 'preview_only') {
+      banner.textContent = 'Desktop preview: only the browser chrome runs here. Web pages render on iPadOS only (device or Simulator: npm run tauri ios dev).';
+    }
     block.hidden = os.status !== 'unsupported';
     const v = (x) => `${x.major}.${x.minor}.${x.patch}`;
     if (os.status === 'update_recommended') {

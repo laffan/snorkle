@@ -67,7 +67,9 @@ pub fn run() {
 }
 
 fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
-    let os_support = os::check(snorkle_content::os_version());
+    // Only iOS has a content host; desktop builds run the chrome alone.
+    let os_support =
+        if cfg!(target_os = "ios") { os::check(snorkle_content::os_version()) } else { OsSupport::PreviewOnly };
     let browser = make_browser(os_support, snorkle_content::physical_memory());
 
     let store = app.path().app_data_dir().ok().and_then(|d| Store::open(d.join("profile-default")).ok());
@@ -85,6 +87,10 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
 
     let window = app.get_webview_window(CHROME_LABEL).ok_or("main window missing")?;
     attach_content_host(&window, shared.clone())?;
+    // Debug desktop builds: open the chrome's Web Inspector (console etc.).
+    // On iOS use Safari > Develop > <device or Simulator> instead.
+    #[cfg(all(debug_assertions, desktop))]
+    window.open_devtools();
 
     let effects = shared.browser().restore_session(&session, state::now_ms());
     shared.run(effects);

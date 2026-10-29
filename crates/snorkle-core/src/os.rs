@@ -47,11 +47,14 @@ pub enum OsSupport {
     Supported,
     UpdateRecommended { current: OsVersion, recommended: OsVersion },
     Unsupported { current: OsVersion, minimum: OsVersion },
+    /// Desktop development build: this platform has no content host, so
+    /// pages are never rendered (only the chrome UI runs).
+    PreviewOnly,
 }
 
 impl OsSupport {
     pub fn allows_browsing(&self) -> bool {
-        !matches!(self, OsSupport::Unsupported { .. })
+        !matches!(self, OsSupport::Unsupported { .. } | OsSupport::PreviewOnly)
     }
 }
 

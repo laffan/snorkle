@@ -356,6 +356,12 @@ impl Browser {
     }
 
     fn load(&mut self, id: TabId, url: Url, source: Source, out: &mut Vec<Effect>) {
+        // No web view can exist (unsupported OS, desktop preview): do not
+        // mark the tab as loading, or the chrome shows a progress bar that
+        // never finishes.
+        if !self.os.allows_browsing() {
+            return;
+        }
         let live = match self.tab_mut(id) {
             Some(t) => {
                 t.loading = true;

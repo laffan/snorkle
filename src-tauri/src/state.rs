@@ -75,6 +75,7 @@ impl Shared {
 
     /// Routes effects. Must be called WITHOUT the browser lock held.
     pub fn run(self: &Arc<Self>, effects: Vec<Effect>) {
+        debug_log_effects(&effects);
         let mut host_effects = Vec::new();
         let mut notify = false;
         for e in effects {
@@ -107,6 +108,20 @@ impl Shared {
     fn storage(&self, job: StorageJob) {
         if let Some(tx) = &self.storage_tx {
             let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(job);
+        }
+    }
+}
+
+/// Debug builds only: prints what the core decided, so navigation can be
+/// followed in the terminal running `tauri dev` / `tauri ios dev`. URLs of
+/// private tabs are printed too; never enable this in release builds.
+fn debug_log_effects(effects: &[Effect]) {
+    if cfg!(debug_assertions) {
+        for e in effects {
+            match e {
+                Effect::NotifyChrome | Effect::PersistSession(_) => {}
+                other => eprintln!("[snorkle] effect {other:?}"),
+            }
         }
     }
 }
@@ -183,6 +198,9 @@ impl Events {
 impl ContentEvents for Events {
     fn decide_navigation(&self, tab: TabId, url: &Url, frame: Frame, kind: NavKind) -> Verdict {
         let (verdict, effects) = self.shared.browser().decide_navigation(tab, url, frame, kind, now_ms());
+        if cfg!(debug_assertions) {
+            eprintln!("[snorkle] policy tab={} {frame:?} {kind:?} {url} -> {verdict:?}", tab.0);
+        }
         self.shared.run(effects);
         verdict
     }

@@ -42,17 +42,25 @@ cd fuzz && cargo +nightly fuzz run url_display     # also: input, nav_policy, br
 On Linux, the Tauri test build needs the WebKitGTK development packages
 (`libwebkit2gtk-4.1-dev libgtk-3-dev`).
 
-## Build for iPad (macOS, not yet done)
+## Run (macOS)
 
-1. Xcode for the iPadOS 26/27 SDK; `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`.
-2. `cargo install tauri-cli --version =2.12.4 --locked`
-3. `cd src-tauri && cargo tauri icon icons/icon.png && cargo tauri ios init`
-4. Copy the keys from `src-tauri/ios/Entitlements.plist` into
-   `gen/apple/snorkle_iOS/snorkle_iOS.entitlements`. Remove `com.apple.developer.web-browser` until
-   Apple grants the managed entitlement, or signing fails.
-5. Set the bundle identifier and development team (`tauri.conf.json`, currently placeholders).
-6. `cargo tauri ios dev` (device), then run `tests/device/ipc-probe.html` from a remote origin and
-   `tests/device/raf-probe.html`, and record the results in `docs/PERFORMANCE.md`.
+`npm ci` installs the pinned Tauri CLI (dev tool only; the chrome UI has no JS packages).
+
+- `npm run tauri dev`: **desktop preview**. Only the browser chrome runs; there is no content
+  host on macOS, so pages never render (a banner says so). The Web Inspector opens
+  automatically in debug builds, and the terminal prints `[snorkle] policy …` / `effect …` lines
+  for every navigation decision.
+- `npm run tauri ios dev`: the real browser, in the iPad Simulator or on a device. First run:
+  1. Xcode with the iPadOS 26/27 SDK; `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`.
+  2. `npm run tauri icon src-tauri/icons/icon.png && npm run tauri ios init`
+  3. Copy the keys from `src-tauri/ios/Entitlements.plist` into
+     `src-tauri/gen/apple/snorkle_iOS/snorkle_iOS.entitlements`. Leave out
+     `com.apple.developer.web-browser` until Apple grants it, or device signing fails.
+  4. Set the bundle identifier and development team (`tauri.conf.json`, currently placeholders).
+  5. Pick an iPad simulator when prompted. Inspect the chrome **and** the page views from
+     Safari → Develop → Simulator (both are inspectable in debug builds).
+  6. Run `tests/device/ipc-probe.html` from a remote origin and `tests/device/raf-probe.html`,
+     and record the results in `docs/PERFORMANCE.md`.
 
 Minimum OS: iPadOS 26.0 (deployment target and runtime gate). Older patch levels get a warning
 banner; the table lives in `crates/snorkle-core/src/os.rs` and must be updated with each Apple

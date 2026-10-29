@@ -5,8 +5,10 @@ Policy:
 - The objc2 crates (`objc2`, `block2`, `objc2-foundation`, `objc2-ui-kit`, `objc2-web-kit`,
   `objc2-core-foundation`) must stay at exactly the versions wry resolves. Two copies would
   register duplicate Objective-C classes. `scripts/check-deps.sh` fails if they are duplicated.
-- No Tauri plugins (each adds an IPC surface). No JavaScript packages: `ui/` is plain JS with no
-  build step, and the check script fails if `ui/package.json` appears.
+- No Tauri plugins (each adds an IPC surface). No JavaScript packages in the app: `ui/` is plain
+  JS with no build step, and the check script fails if `ui/package.json` appears. The root
+  `package.json` holds one dev-only tool, `@tauri-apps/cli` (exact `2.12.4`, lockfile committed),
+  which is never bundled.
 - Adding or bumping a dependency: explain why in this file, run `scripts/check-deps.sh`
   (`cargo deny check` + `cargo audit` + graph checks) and the full test suite.
 
