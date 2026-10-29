@@ -12,7 +12,7 @@ name = "snorkle_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "=2.7.4", default-features = false }
+tauri-build = { version = "=2.7.4", default-features = false , features = [] }
 
 [dependencies]
 snorkle-core.workspace = true
