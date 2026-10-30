@@ -99,7 +99,13 @@ filter lists (none shipped yet), extensions (non-goal), sync (non-goal).
 3. **Response:** non-renderable MIME types are cancelled (no downloads).
 4. **Provisional start → commit → finish/fail:** drives the address bar, HTTPS-first fallback,
    history and session.
-5. **Popups:** `createWebView` → `on_new_window_request` → policy → new tab in the same profile.
+5. **Popups:** `createWebView` → `open_popup` → policy → a web view built from WebKit's
+   configuration, in the opener's profile. A `window.open` that asks for a window size
+   (sign-in and payment buttons) becomes a **sheet**: centred over the dimmed opener, which stays
+   on screen so its scripts keep running (hidden views are suspended), with the sheet's URL in
+   the address bar, a "Pop-up" marker and a Close Pop-up button. Sheets are not listed as tabs or
+   saved in the session; choosing the opener brings its sheet back to the front, and closing the
+   opener closes its sheets. Other popups (target=_blank) open as tabs.
 
 The policy runs synchronously on the main thread. It is a pure function with no I/O. Effects
 are applied asynchronously on the main queue, so WebKit callbacks never re-enter UIKit code.

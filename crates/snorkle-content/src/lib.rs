@@ -18,7 +18,7 @@
 //! failure callbacks (needed for HTTPS-first fallback) and popup handling.
 //! The browser chrome itself still uses Tauri + wry.
 
-use snorkle_core::browser::{NavErrorKind, NavKind, Verdict};
+use snorkle_core::browser::{NavErrorKind, NavKind, PopupStyle, Verdict};
 use snorkle_core::policy::Frame;
 use snorkle_core::tabs::TabId;
 use url::Url;
@@ -65,8 +65,9 @@ pub trait ContentEvents: 'static {
     fn decide_navigation(&self, tab: TabId, url: &Url, frame: Frame, kind: NavKind) -> Verdict;
     fn new_window_request(&self, opener: TabId, url: Url);
     /// `window.open` / target=_blank: return the new tab if the platform
-    /// should create a popup web view for it (synchronous).
-    fn popup_requested(&self, opener: TabId, url: Option<Url>) -> Option<TabId>;
+    /// should create a popup web view for it (synchronous). `style` is
+    /// `Sheet` when the page asked for a window size.
+    fn popup_requested(&self, opener: TabId, url: Option<Url>, style: PopupStyle) -> Option<TabId>;
     /// The page called `window.close()`.
     fn close_requested(&self, tab: TabId);
     fn provisional_start(&self, tab: TabId);

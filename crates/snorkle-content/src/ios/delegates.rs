@@ -31,7 +31,7 @@ use objc2_web_kit::{
     WKNavigationResponse, WKNavigationResponsePolicy, WKNavigationType, WKPermissionDecision, WKSecurityOrigin,
     WKUIDelegate, WKWebViewConfiguration, WKWindowFeatures,
 };
-use snorkle_core::browser::{NavErrorKind, NavKind, Verdict};
+use snorkle_core::browser::{NavErrorKind, NavKind, PopupStyle, Verdict};
 use snorkle_core::policy::Frame;
 use snorkle_core::tabs::TabId;
 use url::Url;
@@ -239,19 +239,23 @@ define_class!(
 
     unsafe impl WKUIDelegate for UiDelegate {
         /// target=_blank / window.open. The core runs the navigation policy
-        /// and creates a tab; we then return a real web view built from
-        /// WebKit's `configuration` (required by WebKit), so `window.opener`
-        /// works for OAuth/payment popups. WebKit itself applies `noopener`
-        /// where the page or link asks for it. Returning nil cancels.
+        /// and creates a tab or sheet; we then return a real web view built
+        /// from WebKit's `configuration` (required by WebKit), so
+        /// `window.opener` works for OAuth/payment popups. WebKit itself
+        /// applies `noopener` where the page or link asks for it. Returning
+        /// nil cancels. A window opened with a size (`window.open(url, name,
+        /// "width=…")`, as sign-in buttons do) is shown as a sheet over its
+        /// opener; anything else as a tab.
         #[unsafe(method_id(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:))]
         fn create_web_view(
             &self,
             _web_view: &WKWebView,
             config: &WKWebViewConfiguration,
             action: &WKNavigationAction,
-            _features: &WKWindowFeatures,
+            features: &WKWindowFeatures,
         ) -> Option<Retained<WKWebView>> {
-            self.popup_for(config, action)
+            let sized = unsafe { features.width().is_some() || features.height().is_some() };
+            self.popup_for(config, action, if sized { PopupStyle::Sheet } else { PopupStyle::Tab })
         }
 
         /// `window.close()`; the core only honours it for popups.
@@ -322,7 +326,12 @@ define_class!(
 );
 
 impl UiDelegate {
-    fn popup_for(&self, config: &WKWebViewConfiguration, action: &WKNavigationAction) -> Option<Retained<WKWebView>> {
+    fn popup_for(
+        &self,
+        config: &WKWebViewConfiguration,
+        action: &WKNavigationAction,
+        style: PopupStyle,
+    ) -> Option<Retained<WKWebView>> {
         let i = self.ivars();
         let raw = unsafe { action.request().URL() };
         let url = raw.as_deref().and_then(to_url);
@@ -331,7 +340,7 @@ impl UiDelegate {
         if raw.is_some() && url.is_none() {
             return None;
         }
-        let tab = i.events.popup_requested(i.tab, url)?;
+        let tab = i.events.popup_requested(i.tab, url, style)?;
         Some(unsafe { super::create_popup(self.mtm(), tab, config, &i.events) })
     }
 

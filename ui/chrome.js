@@ -105,7 +105,7 @@
 
   function renderTabs() {
     const key = JSON.stringify([
-      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable]),
+      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable, t.sheet_over]),
       state.active,
       state.splits,
     ]);
@@ -118,13 +118,14 @@
     const byId = new Map(state.tabs.map((t) => [t.id, t]));
     const placed = new Set();
     for (const t of state.tabs) {
-      if (placed.has(t.id)) continue;
+      // Pop-up sheets are not tabs; their opener is shown as selected.
+      if (placed.has(t.id) || t.sheet_over !== null) continue;
       const pair = pairOf(t.id);
       const list = t.private ? priv : normal;
       if (pair && byId.has(pair.left) && byId.has(pair.right)) {
         // A split pair is one row, at the position of whichever tab comes
         // first, left pane on the left.
-        const group = el('div', 'tab-group' + (state.active === pair.left || state.active === pair.right ? ' active' : ''));
+        const group = el('div', 'tab-group' + (shownTab() === pair.left || shownTab() === pair.right ? ' active' : ''));
         group.dataset.pair = String(pair.left);
         group.setAttribute('role', 'group');
         group.setAttribute('aria-label', 'Split view');
@@ -143,11 +144,19 @@
     if (act && !dragState) act.scrollIntoView({ block: 'nearest' });
   }
 
+  // The tab shown as selected in the sidebar: the active tab, or the tab
+  // under the active pop-up sheet.
+  function shownTab() {
+    const t = activeTab();
+    return t && t.sheet_over !== null ? t.sheet_over : state.active;
+  }
+
   function tabNode(t, pair) {
-    const node = el('div', 'tab' + (t.id === state.active ? ' active' : '') + (t.private ? ' private' : '') + (t.live ? '' : ' discarded'));
+    const selected = t.id === shownTab();
+    const node = el('div', 'tab' + (selected ? ' active' : '') + (t.private ? ' private' : '') + (t.live ? '' : ' discarded'));
     node.dataset.tab = String(t.id);
     node.setAttribute('role', 'tab');
-    node.setAttribute('aria-selected', String(t.id === state.active));
+    node.setAttribute('aria-selected', String(selected));
     const open = el('button', 'open');
     open.appendChild(el('span', 't', t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
     if (t.url) {
@@ -177,6 +186,8 @@
     reload.setAttribute('aria-label', tab && tab.loading ? 'Stop' : 'Reload');
     $('bookmark').disabled = !(tab && tab.url && !tab.private);
     $('unsplit').hidden = !state.split;
+    $('sheet-close').hidden = !state.sheet;
+    $('sheet-pill').hidden = !state.sheet;
     renderShield(tab);
     $('private-pill').hidden = !(tab && tab.private);
 
@@ -867,8 +878,8 @@
     for (const p of pins) items.push({ link: p });
     for (const b of bookmarks) items.push({ link: b });
     if (state) {
-      for (const t of state.tabs) if (!t.private) items.push({ tab: t });
-      for (const t of state.tabs) if (t.private) items.push({ tab: t });
+      for (const t of state.tabs) if (!t.private && t.sheet_over === null) items.push({ tab: t });
+      for (const t of state.tabs) if (t.private && t.sheet_over === null) items.push({ tab: t });
     }
     return items;
   }
@@ -920,6 +931,7 @@
   $('images').addEventListener('click', () => setViewMode({ hide_images: !viewMode.hide_images }));
   $('sidebar-toggle').addEventListener('click', () => setSidebar(!sidebarOpen));
   $('unsplit').addEventListener('click', withTab((t) => invoke('unsplit', { tab: t.id })));
+  $('sheet-close').addEventListener('click', () => { if (state && state.sheet !== null) invoke('close_tab', { tab: state.sheet }); });
   $('menu').addEventListener('click', () => (menuOpen ? closeMenu() : openMenu()));
   $('menu-history').addEventListener('click', openPanel);
   $('menu-settings').addEventListener('click', () => setModal(true));

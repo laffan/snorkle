@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use libfuzzer_sys::fuzz_target;
-use snorkle_core::browser::{Browser, Effect, NavErrorKind, NavKind};
+use snorkle_core::browser::{Browser, Effect, NavErrorKind, NavKind, PopupStyle};
 use snorkle_core::os::OsSupport;
 use snorkle_core::policy::Frame;
 use snorkle_core::tabs::{MemoryBudget, Profile, TabId};
@@ -95,7 +95,7 @@ fuzz_target!(|data: &[u8]| {
                 .unwrap_or_default(),
             13 if c & 4 == 0 => pick(&tabs)
                 .map(|(id, p)| {
-                    let (popup, e) = b.open_popup(id, Some(&url_for(p, c)), now);
+                    let (popup, e) = b.open_popup(id, Some(&url_for(p, c)), if c & 16 == 0 { PopupStyle::Sheet } else { PopupStyle::Tab }, now);
                     if let Some(pid) = popup {
                         tabs.push((pid, p));
                     }

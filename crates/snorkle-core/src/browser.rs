@@ -85,6 +85,18 @@ pub enum Pane {
     Full,
     Left,
     Right,
+    /// A popup window centred over its (dimmed, still running) opener.
+    Sheet,
+}
+
+/// How a page-opened window is presented.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupStyle {
+    /// target=_blank, or `window.open` without a size: a new tab.
+    Tab,
+    /// `window.open` asking for a window size (sign-in, payment): a sheet
+    /// over the opener, which stays visible so its scripts keep running.
+    Sheet,
 }
 
 /// Two tabs shown side by side. A tab belongs to at most one pair; the
@@ -158,6 +170,9 @@ pub struct TabView {
     pub notice: Option<Notice>,
     /// Ad-blocking state for the committed site, if it is an http(s) page.
     pub adblock: Option<SiteAdblock>,
+    /// Set for a popup shown as a sheet: the tab it covers. Sheets are not
+    /// listed as tabs.
+    pub sheet_over: Option<TabId>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -190,6 +205,8 @@ pub struct ChromeState {
     pub split: Option<SplitView>,
     /// Every pair, shown or not.
     pub splits: Vec<SplitView>,
+    /// The popup sheet in front (the active tab), if any.
+    pub sheet: Option<TabId>,
     pub max_live_tabs: usize,
     pub adblock: AdblockStatus,
 }
@@ -323,6 +340,14 @@ impl Browser {
     }
 
     fn activate_into(&mut self, id: TabId, now: u64, out: &mut Vec<Effect>) {
+        // A tab with a popup sheet open is shown with the sheet in front.
+        let mut id = id;
+        for _ in 0..self.tabs.len() {
+            match self.tabs.iter().rev().find(|t| t.sheet && t.opener == Some(id)) {
+                Some(child) => id = child.id,
+                None => break,
+            }
+        }
         if let Some(prev) = self.active {
             if let Some(t) = self.tab_mut(prev) {
                 t.last_active_ms = now;
@@ -333,9 +358,12 @@ impl Browser {
         }
         self.active = Some(id);
         // Choosing a tab in a pair shows the pair, so its partner needs a
-        // live view too.
+        // live view too; a sheet needs its opener underneath.
         if let Some(partner) = self.pair_of(id).map(|s| if s.left == id { s.right } else { s.left }) {
             self.restore_if_unloaded(partner, now, out);
+        }
+        if let Some((_, opener)) = self.front_sheet() {
+            self.restore_if_unloaded(opener, now, out);
         }
         self.restore_if_unloaded(id, now, out);
         self.enforce_budget(now, out);
@@ -407,6 +435,11 @@ impl Browser {
 
     pub fn close(&mut self, id: TabId, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
+        // Popup sheets go with the tab they cover.
+        let sheets: Vec<TabId> = self.tabs.iter().filter(|t| t.sheet && t.opener == Some(id)).map(|t| t.id).collect();
+        for s in sheets {
+            out.extend(self.close(s, now));
+        }
         let Some(idx) = self.tabs.iter().position(|t| t.id == id) else { return out };
         let tab = self.tabs.remove(idx);
         self.shown.retain(|(t, _)| *t != id);
@@ -433,6 +466,9 @@ impl Browser {
                 }
             }
         }
+        // A closed split partner or sheet leaves the remaining view in the
+        // wrong place unless visibility is recomputed.
+        self.sync_visibility(&mut out);
         if !tab.is_private() {
             out.push(Effect::PersistSession(self.session()));
         }
@@ -683,7 +719,13 @@ impl Browser {
     /// through `decide_navigation` like any other tab; the address bar keeps
     /// showing each tab's committed URL, so an opener navigated by its popup
     /// is visible.
-    pub fn open_popup(&mut self, opener: TabId, url: Option<&Url>, now: u64) -> (Option<TabId>, Vec<Effect>) {
+    pub fn open_popup(
+        &mut self,
+        opener: TabId,
+        url: Option<&Url>,
+        style: PopupStyle,
+        now: u64,
+    ) -> (Option<TabId>, Vec<Effect>) {
         let mut out = Vec::new();
         let Some(op) = self.tab(opener) else { return (None, out) };
         // The popup and its opener both stay live; never exceed the budget.
@@ -712,6 +754,7 @@ impl Browser {
         tab.life = Life::Live;
         tab.loading = true;
         tab.opener = Some(opener);
+        tab.sheet = style == PopupStyle::Sheet;
         self.tabs.insert(insert_at, tab);
         out.push(Effect::AdoptPopup { tab: id });
         self.activate_into(id, now, &mut out);
@@ -1000,12 +1043,28 @@ impl Browser {
         if self.chrome_overlay {
             return Vec::new();
         }
+        // A popup sheet in front: its opener underneath, full width, and the
+        // sheet once it has something to show. While the sheet shows a
+        // notice, nothing is shown, so the chrome can draw the notice.
+        if let Some((sheet, opener)) = self.front_sheet() {
+            if self.tab(sheet).is_some_and(|t| t.notice.is_some()) {
+                return Vec::new();
+            }
+            return [(opener, Pane::Full), (sheet, Pane::Sheet)].into_iter().filter(|(t, _)| self.showable(*t)).collect();
+        }
         let wanted = match (self.split_view(), self.active) {
             (Some(s), _) => vec![(s.left, Pane::Left), (s.right, Pane::Right)],
             (None, Some(a)) => vec![(a, Pane::Full)],
             (None, None) => Vec::new(),
         };
         wanted.into_iter().filter(|(t, _)| self.showable(*t)).collect()
+    }
+
+    /// The active tab and its opener, if the active tab is a popup sheet.
+    fn front_sheet(&self) -> Option<(TabId, TabId)> {
+        let t = self.tab(self.active?)?;
+        let opener = t.opener.filter(|_| t.sheet).and_then(|o| self.tab(o))?;
+        Some((t.id, opener.id))
     }
 
     fn sync_visibility(&mut self, out: &mut Vec<Effect>) {
@@ -1018,9 +1077,13 @@ impl Browser {
                 out.push(Effect::HideView(*old));
             }
         }
+        let mut raised = false;
         for (tab, pane) in &want {
-            if !self.shown.contains(&(*tab, *pane)) {
+            if !self.shown.contains(&(*tab, *pane)) || (raised && *pane == Pane::Sheet) {
+                // Showing a view raises it, so a sheet already on screen is
+                // raised again to stay above a pane shown under it.
                 out.push(Effect::ShowView { tab: *tab, pane: *pane });
+                raised = true;
             }
         }
         self.shown = want;
@@ -1031,7 +1094,7 @@ impl Browser {
         let persistable: Vec<&Tab> = self
             .tabs
             .iter()
-            .filter(|t| !t.is_private())
+            .filter(|t| !t.is_private() && !t.sheet)
             .filter(|t| t.committed_url.as_ref().map(|u| matches!(u.scheme(), "http" | "https")).unwrap_or(false))
             .collect();
         let active = self.active.and_then(|a| persistable.iter().position(|t| t.id == a));
@@ -1069,6 +1132,7 @@ impl Browser {
             content_visible: !self.shown.is_empty(),
             split: self.split_view(),
             splits: self.splits.clone(),
+            sheet: self.front_sheet().map(|(s, _)| s),
             max_live_tabs: self.budget.max_live,
             adblock: self.adblock_status.clone(),
         }
@@ -1133,5 +1197,6 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
             site,
             can_toggle: !t.is_private(),
         }),
+        sheet_over: t.opener.filter(|_| t.sheet),
     }
 }

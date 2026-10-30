@@ -2,7 +2,7 @@
 //! address bar shows committed URLs only, HTTPS-first never downgrades
 //! silently, private tabs never reach storage, and the memory budget holds.
 
-use snorkle_core::browser::{AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, SplitView, Verdict};
+use snorkle_core::browser::{AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, PopupStyle, SplitView, Verdict};
 use snorkle_core::os::{OsSupport, OsVersion};
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, SessionTab};
@@ -551,7 +551,7 @@ fn split_with_self_is_ignored() {
 fn popup_keeps_opener_alive_and_returns_to_it_on_close() {
     let mut b = browser(2);
     let (op, _) = open_and_load(&mut b, "https://www.pinterest.com/", 0);
-    let (popup, out) = b.open_popup(op, Some(&u("https://accounts.google.com/o/oauth2/auth")), 1);
+    let (popup, out) = b.open_popup(op, Some(&u("https://accounts.google.com/o/oauth2/auth")), PopupStyle::Tab, 1);
     let popup = popup.expect("popup allowed");
     assert!(out.contains(&Effect::AdoptPopup { tab: popup }));
     assert!(!out.iter().any(|e| matches!(e, Effect::CreateView { .. })), "WebKit supplies the popup view");
@@ -567,12 +567,83 @@ fn popup_keeps_opener_alive_and_returns_to_it_on_close() {
 }
 
 #[test]
+fn popup_sheet_shows_over_its_running_opener() {
+    let mut b = browser(4);
+    let (op, _) = open_and_load(&mut b, "https://www.pinterest.com/", 0);
+    let auth = "https://accounts.google.com/o/oauth2/auth";
+    let (sheet, out) = b.open_popup(op, Some(&u(auth)), PopupStyle::Sheet, 1);
+    let sheet = sheet.expect("popup allowed");
+    assert!(out.contains(&Effect::AdoptPopup { tab: sheet }));
+    assert_eq!(b.active(), Some(sheet), "the address bar shows the sheet's URL");
+    assert_eq!(b.view().sheet, Some(sheet));
+    // Before the sheet commits, the opener stays on screen (and running).
+    assert!(!out.contains(&Effect::HideView(op)));
+    let out = webkit_load(&mut b, sheet, auth);
+    assert!(out.contains(&Effect::ShowView { tab: sheet, pane: Pane::Sheet }));
+    assert!(!out.contains(&Effect::HideView(op)));
+    let v = b.view();
+    assert_eq!(v.tabs.iter().find(|t| t.id == sheet).unwrap().sheet_over, Some(op));
+    assert!(!b.session().tabs.iter().any(|t| t.url.starts_with(auth)), "sheets are never saved");
+    // Choosing another tab hides both; choosing the opener brings the sheet back in front.
+    let (other, _) = open_and_load(&mut b, "https://c.example/", 2);
+    assert_eq!(b.view().sheet, None);
+    let out = b.activate(op, 3);
+    assert_eq!(b.active(), Some(sheet));
+    let shown: Vec<_> = out.iter().filter_map(|e| match e { Effect::ShowView { tab, pane } => Some((*tab, *pane)), _ => None }).collect();
+    assert_eq!(shown, vec![(op, Pane::Full), (sheet, Pane::Sheet)], "the sheet is shown last, on top");
+    assert!(out.contains(&Effect::HideView(other)));
+    // window.close() returns to the opener, full width.
+    let out = b.on_close_requested(sheet, 4);
+    assert_eq!(b.active(), Some(op));
+    assert!(out.contains(&Effect::DestroyView { tab: sheet, keep_state: false }));
+    assert_eq!(b.view().sheet, None);
+}
+
+#[test]
+fn sheet_stays_on_top_when_the_opener_is_shown_again() {
+    let mut b = browser(4);
+    let (op, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (sheet, _) = b.open_popup(op, Some(&u("https://login.example/")), PopupStyle::Sheet, 1);
+    let sheet = sheet.unwrap();
+    webkit_load(&mut b, sheet, "https://login.example/");
+    // The opener shows a notice (hidden), then is shown again under the sheet.
+    let (_, out) = b.decide_navigation(op, &u("tel:+15555550100"), Frame::Main, NavKind::LinkActivated, 2);
+    assert!(out.contains(&Effect::HideView(op)));
+    let out = b.dismiss_notice(op);
+    let shown: Vec<_> = out.iter().filter_map(|e| match e { Effect::ShowView { tab, pane } => Some((*tab, *pane)), _ => None }).collect();
+    assert_eq!(shown, vec![(op, Pane::Full), (sheet, Pane::Sheet)]);
+}
+
+#[test]
+fn notice_in_a_sheet_is_drawn_by_the_chrome() {
+    let mut b = browser(4);
+    let (op, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (sheet, _) = b.open_popup(op, Some(&u("https://login.example/")), PopupStyle::Sheet, 1);
+    let sheet = sheet.unwrap();
+    webkit_load(&mut b, sheet, "https://login.example/");
+    let (_, out) = b.decide_navigation(sheet, &u("tel:+15555550100"), Frame::Main, NavKind::LinkActivated, 2);
+    assert!(out.contains(&Effect::HideView(sheet)) && out.contains(&Effect::HideView(op)));
+}
+
+#[test]
+fn closing_an_opener_closes_its_sheets() {
+    let mut b = browser(4);
+    let (op, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (sheet, _) = b.open_popup(op, Some(&u("https://login.example/")), PopupStyle::Sheet, 1);
+    let sheet = sheet.unwrap();
+    b.close(op, 2);
+    assert!(b.tab(sheet).is_none());
+    assert!(b.tab(op).is_none());
+    assert!(b.active().is_some());
+}
+
+#[test]
 fn popups_inherit_private_profile() {
     let mut b = browser(4);
     let (p, _) = b.new_tab(Profile::Private, 0);
     b.navigate_input(p, "https://a.example/", 0).unwrap();
     webkit_load(&mut b, p, "https://a.example/");
-    let (popup, _) = b.open_popup(p, Some(&u("https://b.example/")), 1);
+    let (popup, _) = b.open_popup(p, Some(&u("https://b.example/")), PopupStyle::Tab, 1);
     assert_eq!(b.tab(popup.unwrap()).unwrap().profile, Profile::Private);
 }
 
@@ -590,12 +661,12 @@ fn popup_policy_blocks_dangerous_urls() {
     let (t, _) = open_and_load(&mut b, "https://a.example/", 0);
     // (Page-initiated javascript: runs with the page's own privileges and is allowed by policy.)
     for bad in ["data:text/html,x", "file:///etc/hosts", "tauri://localhost/"] {
-        let (popup, _) = b.open_popup(t, Some(&u(bad)), 1);
+        let (popup, _) = b.open_popup(t, Some(&u(bad)), PopupStyle::Sheet, 1);
         assert!(popup.is_none(), "{bad}");
     }
-    let (popup, _) = b.open_popup(t, Some(&u("tel:+15555550100")), 1);
+    let (popup, _) = b.open_popup(t, Some(&u("tel:+15555550100")), PopupStyle::Sheet, 1);
     assert!(popup.is_none());
     assert!(matches!(notice(&b, t), Some(Notice::ExternalApp { .. })));
     // about:blank popups (filled by script) are allowed.
-    assert!(b.open_popup(t, None, 2).0.is_some());
+    assert!(b.open_popup(t, None, PopupStyle::Sheet, 2).0.is_some());
 }

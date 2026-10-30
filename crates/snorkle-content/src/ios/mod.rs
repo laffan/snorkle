@@ -9,6 +9,10 @@
 //!   whenever it shows anything that overlaps the content area.
 //! - Configurations are built only from `CONTENT_VIEW_SPEC`; no user
 //!   scripts, script message handlers or URL scheme handlers are installed.
+//! - A popup sheet (`Pane::Sheet`) is centred in the content area over a
+//!   dimming backdrop that swallows touches, so the page underneath keeps
+//!   running but cannot be used until the sheet closes. Both stay below the
+//!   toolbar, which shows the sheet's URL.
 //! - Each `Profile` maps to its own `WKWebsiteDataStore`; private tabs share
 //!   one non-persistent store per private session, which is wiped and
 //!   released when the last private tab closes.
@@ -39,7 +43,7 @@ use objc2_foundation::{
 };
 use objc2_ui_kit::{
     UIApplication, UIApplicationDidEnterBackgroundNotification, UIApplicationDidReceiveMemoryWarningNotification,
-    UITapGestureRecognizer, UIView, UIViewAutoresizing,
+    UIColor, UITapGestureRecognizer, UIView, UIViewAutoresizing,
 };
 use objc2_web_kit::{
     WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController, WKWebsiteDataTypeDiskCache,
@@ -104,6 +108,8 @@ pub struct ContentHost {
     events: Rc<dyn ContentEvents>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     scripts: injection::Scripts,
+    /// Dims the content area under a popup sheet and swallows its touches.
+    backdrop: Retained<UIView>,
 }
 
 impl ContentHost {
@@ -137,8 +143,14 @@ impl ContentHost {
             &bg,
         ));
 
+        let backdrop = UIView::new(mtm);
+        backdrop.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(0.0, 0.45)));
+        backdrop.setHidden(true);
+        root.addSubview(&backdrop);
+
         ContentHost {
             mtm,
+            backdrop,
             root,
             top: Cell::new(0.0),
             left: Cell::new(0.0),
@@ -179,6 +191,35 @@ impl ContentHost {
                 CGPoint::new(area.origin.x + area.size.width - half, area.origin.y),
                 CGSize::new(half, area.size.height),
             ),
+            // Window-sized, centred, with a margin that leaves the page
+            // underneath visible.
+            Pane::Sheet => {
+                const MARGIN: f64 = 16.0;
+                let w = (area.size.width - 2.0 * MARGIN).clamp(0.0, 620.0);
+                let h = (area.size.height - 2.0 * MARGIN).clamp(0.0, 820.0);
+                CGRect::new(
+                    CGPoint::new(
+                        (area.origin.x + (area.size.width - w) / 2.0).floor(),
+                        (area.origin.y + (area.size.height - h) / 2.0).floor(),
+                    ),
+                    CGSize::new(w, h),
+                )
+            }
+        }
+    }
+
+    /// Shows the backdrop under the visible sheet, if any, and keeps the
+    /// sheet above it.
+    fn sync_backdrop(&self) {
+        let sheet = self.views.values().find(|v| v.pane.get() == Pane::Sheet && !v.container.isHidden());
+        match sheet {
+            Some(v) => {
+                self.backdrop.setFrame(self.content_frame());
+                self.root.bringSubviewToFront(&self.backdrop);
+                self.root.bringSubviewToFront(&v.container);
+                self.backdrop.setHidden(false);
+            }
+            None => self.backdrop.setHidden(true),
         }
     }
 
@@ -192,6 +233,7 @@ impl ContentHost {
         for v in self.views.values() {
             v.container.setFrame(self.pane_frame(v.pane.get()));
         }
+        self.sync_backdrop();
     }
 
     /// Replaces the injected scripts (user scripts, black-and-white mode) in
@@ -262,6 +304,7 @@ impl ContentHost {
                         }
                         rules::unregister(*tab);
                         drop(v);
+                        self.sync_backdrop();
                     }
                     if !*keep_state {
                         self.saved.remove(tab);
@@ -273,12 +316,15 @@ impl ContentHost {
                         v.container.setFrame(self.pane_frame(*pane));
                         self.root.bringSubviewToFront(&v.container);
                         v.container.setHidden(false);
+                        set_corner_radius(&v.container, if *pane == Pane::Sheet { 12.0 } else { 0.0 });
                     }
+                    self.sync_backdrop();
                 }
                 Effect::HideView(tab) => {
                     if let Some(v) = self.views.get(tab) {
                         v.container.setHidden(true);
                     }
+                    self.sync_backdrop();
                 }
                 Effect::Load { tab, url } => {
                     if let Some(v) = self.views.get(tab) {
@@ -494,6 +540,14 @@ impl Drop for ContentHost {
         for o in &self.observers {
             unsafe { center.removeObserver(AsRef::<AnyObject>::as_ref(&**o)) };
         }
+    }
+}
+
+/// Rounds a container's corners (it already clips to its bounds).
+fn set_corner_radius(view: &UIView, radius: f64) {
+    unsafe {
+        let layer: Retained<AnyObject> = msg_send![view, layer];
+        let _: () = msg_send![&*layer, setCornerRadius: radius];
     }
 }
 

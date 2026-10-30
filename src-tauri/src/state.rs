@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use snorkle_content::{ContentEvents, ContentHost};
-use snorkle_core::browser::{Browser, ChromeState, Effect, NavErrorKind, NavKind, Verdict};
+use snorkle_core::browser::{Browser, ChromeState, Effect, NavErrorKind, NavKind, PopupStyle, Verdict};
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, Store};
 use snorkle_core::tabs::TabId;
@@ -219,8 +219,8 @@ impl ContentEvents for Events {
     fn new_window_request(&self, opener: TabId, url: Url) {
         self.apply(|b| b.on_new_window_request(opener, &url, now_ms()));
     }
-    fn popup_requested(&self, opener: TabId, url: Option<Url>) -> Option<TabId> {
-        let (tab, effects) = self.shared.browser().open_popup(opener, url.as_ref(), now_ms());
+    fn popup_requested(&self, opener: TabId, url: Option<Url>, style: PopupStyle) -> Option<TabId> {
+        let (tab, effects) = self.shared.browser().open_popup(opener, url.as_ref(), style, now_ms());
         self.shared.run(effects);
         tab
     }

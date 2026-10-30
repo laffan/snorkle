@@ -77,6 +77,14 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     its popup is in front. To check on device: the Google → Pinterest flow completes; WebKit
     applies `noopener` to `target=_blank` links; popups get the opener's rule lists and user
     scripts (they share its content controller).
+    2026-10-30: sized popups are shown as a sheet over the still-visible opener, because a hidden
+    opener is suspended (`inactiveSchedulingPolicy`) and cannot receive the sign-in result. The
+    bundled filter lists were checked against Google sign-in URLs (script, button iframe, popup,
+    sign-in page) on pinterest.com: no blocking or hiding rule matches. Still unverified: whether
+    WebKit calls `createWebView` at all for Pinterest's button (its popup blocker drops
+    `window.open` calls it does not count as user-initiated, without telling the app), and
+    whether `window.opener` survives (a 2024 Apple forum report says it is null in WKWebView
+    popups from iOS 17.5 on). Use the in-app console to see which step fails.
 15. **[decide][gap] JavaScript dialogs** (`alert`/`confirm`/`prompt`) are suppressed, and the chrome
     shows a note naming the origin. A trusted dialog UI (native `UIAlertController` titled with the
     origin, rate-limited, only for the active tab) is the obvious next step. It is native UI code

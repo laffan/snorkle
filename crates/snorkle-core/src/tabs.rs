@@ -142,6 +142,9 @@ pub struct Tab {
     /// Tab whose page opened this one as a popup (`window.open`), keeping a
     /// `window.opener` relationship (OAuth / payment popups).
     pub opener: Option<TabId>,
+    /// A popup window (`window.open` with a size) shown as a sheet over its
+    /// opener instead of as a tab. Never saved in the session.
+    pub sheet: bool,
 }
 
 impl Tab {
@@ -165,6 +168,7 @@ impl Tab {
             history_recorded: false,
             crash_times_ms: Vec::new(),
             opener: None,
+            sheet: false,
         }
     }
 
