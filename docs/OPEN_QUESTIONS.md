@@ -186,9 +186,11 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     over a native content view (touch sequences stay with the view they began in); verify.
     Tab close buttons show on hover (`any-hover: hover`) and on the active tab otherwise; check
     a first tap on a tab still opens it on iPadOS with a trackpad attached.
-40. **[decide] "Empty Cache"** clears the HTTP disk and memory caches of the default and current
-    private stores. It does not clear cookies, local storage or service-worker caches. A fuller
-    "Clear website data" option is a separate decision.
+40. **[decide] Website data** (Settings, 2026-10-30): separate Delete buttons for cache, cookies,
+    site data, and "logins" (cookies + site data, i.e. signed out everywhere), for the default and
+    current private stores. Passwords are not the app's to delete (iOS Passwords app); HTTP
+    authentication credentials WebKit may keep are not cleared. Open pages keep what they have in
+    memory until reloaded.
 41. **[verify] Keyboard shortcuts.** ⌘T/⌘S/⌘1–5 use `UIKeyCommand`s on content containers with
     `wantsPriorityOverSystemBehavior`, so they take precedence over page shortcuts (e.g. ⌘S in web
     editors). Check that UIKit offers them while a page has focus, and that the chrome's own
@@ -202,8 +204,9 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     storage accepts only 8-bit RGB/RGBA PNGs up to 512 px, the old icon cache is deleted, and the
     chrome falls back to the letter tile if an image still fails. The console logs each fetch
     ("favicon <host>: 128×128, depth 8, …") and any display failure.
-43. **[decide] ⌘1–5 order** is pins, bookmarks, then tabs. Opening a pin or bookmark switches to
-    a tab already showing that exact URL, else uses the current tab if empty, else a new tab.
+43. **[decide] ⌘1–5 order** is pins, bookmarks, then tabs. Since 2026-10-30 each pin and bookmark
+    owns one tab (not listed with the other tabs) that opening it returns to, wherever that tab
+    has navigated since. **[gap]** There is no way to close a pin's tab without unpinning.
 44. **[verify] Console capture on device.** Check: the page-world hook is installed before page
     scripts run (document start) in iframes too, e.g. Google's sign-in button frame; removing
     the handler and scripts when Record is turned off takes effect on the next load;

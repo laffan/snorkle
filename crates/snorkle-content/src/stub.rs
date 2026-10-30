@@ -54,7 +54,7 @@ impl ContentHost {
 
     pub fn set_injections(&mut self, _injections: &[snorkle_core::userscripts::Injection], _run_now: Option<&str>) {}
 
-    pub fn clear_cache(&mut self) {}
+    pub fn clear_data(&mut self, _kind: crate::DataKind) {}
 
     pub fn set_console_capture(&mut self, _on: bool) {}
 

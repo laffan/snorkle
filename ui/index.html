@@ -23,23 +23,24 @@
        area in narrow ones (Split View, Slide Over). -->
   <aside id="sidebar" aria-label="Bookmarks and tabs">
     <div id="side-scroll">
-      <div class="side-section">Pinned</div>
       <div id="pins" class="pingrid" aria-label="Pinned sites"></div>
-      <div class="side-section">Bookmarks</div>
+      <div class="side-gap" aria-hidden="true"></div>
       <div id="bookmarks" class="droplist" aria-label="Bookmarks"></div>
-      <div class="side-section">Tabs</div>
-      <div id="tabs" class="tablist" role="tablist" aria-orientation="vertical"></div>
+      <div class="side-gap" aria-hidden="true"></div>
+      <div id="tabs" class="tablist" role="tablist" aria-label="Tabs" aria-orientation="vertical"></div>
       <div id="private-head" class="side-section" hidden>Private</div>
       <div id="private-tabs" class="tablist" role="tablist" aria-orientation="vertical"></div>
     </div>
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-      <button id="new-tab" class="icon" aria-label="New tab" title="New tab"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></button>
-      <button id="new-private" class="icon" aria-label="New private tab" title="New private tab"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11c2-1 4-1.5 9-1.5S19 10 21 11"/><path d="M6 10 7.5 5h9L18 10"/><circle cx="8" cy="16" r="2.5"/><circle cx="16" cy="16" r="2.5"/><path d="M10.5 16h3"/></svg></button>
+      <span class="spacer"></span>
       <button id="color" class="icon" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
-      <button id="images" class="icon" aria-label="Hide images" title="Hide images" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/><path d="M3 3l18 18"/></svg></button>
+      <button id="images" class="icon" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/></svg></button>
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
+      <button id="menu-new-tab" role="menuitem">New Tab <span class="kbd">⌘T</span></button>
+      <button id="menu-new-private" role="menuitem">New Private Tab</button>
+      <div class="menu-sep" role="separator"></div>
       <button id="menu-history" role="menuitem">History</button>
       <button id="menu-console" role="menuitem">Console</button>
       <button id="menu-settings" role="menuitem">Settings</button>
@@ -56,6 +57,7 @@
       <button id="reload" class="icon" aria-label="Reload">&#x21BB;</button>
       <div id="omnibox">
         <button id="url-display" aria-label="Address">
+          <svg id="lock" class="lock" viewBox="0 0 24 24" width="14" height="14" aria-label="Secure connection" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" hidden><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg>
           <span id="security" class="security"></span>
           <span id="private-pill" class="pill" hidden>Private</span>
           <span id="sheet-pill" class="pill" hidden title="A window this site opened, shown over the page">Pop-up</span>
@@ -118,12 +120,34 @@
         <h1 id="modal-title">Settings</h1>
         <button id="modal-close" class="button">Done</button>
       </div>
+      <h2>Website data</h2>
       <div class="option">
         <div>
           <div class="option-title">Cache</div>
-          <div class="muted small">Removes cached files for all sites. Cookies, logins and site data are kept.</div>
+          <div class="muted small">Cached files and offline copies. Sites load slower the next time.</div>
         </div>
-        <button id="empty-cache" class="button">Empty Cache</button>
+        <button class="button clear-data" data-kind="cache">Delete</button>
+      </div>
+      <div class="option">
+        <div>
+          <div class="option-title">Cookies</div>
+          <div class="muted small">Signs you out of most sites.</div>
+        </div>
+        <button class="button clear-data" data-kind="cookies">Delete</button>
+      </div>
+      <div class="option">
+        <div>
+          <div class="option-title">Site data</div>
+          <div class="muted small">Storage sites keep on this device: offline data, preferences, service workers.</div>
+        </div>
+        <button class="button clear-data" data-kind="site_data">Delete</button>
+      </div>
+      <div class="option">
+        <div>
+          <div class="option-title">Logins</div>
+          <div class="muted small">Cookies and site data together: signs you out of every site. Saved passwords are kept by the iOS Passwords app, not Snorkle, and are not affected.</div>
+        </div>
+        <button class="button clear-data" data-kind="logins">Delete</button>
       </div>
     </div>
   </div>

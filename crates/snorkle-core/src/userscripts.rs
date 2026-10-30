@@ -91,14 +91,20 @@ pub struct Injection {
 }
 
 /// How pages are drawn. Session-only (not persisted): every launch starts
-/// in black and white with images shown.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// in black and white with images and video hidden.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewMode {
     /// Show pages in colour (off: black and white).
     pub color: bool,
-    /// Hide every image before pages are drawn.
+    /// Hide images and video before pages are drawn.
     pub hide_images: bool,
+}
+
+impl Default for ViewMode {
+    fn default() -> Self {
+        ViewMode { color: false, hide_images: true }
+    }
 }
 
 /// A constant style the browser itself injects.
@@ -111,10 +117,18 @@ enum FixedStyle {
 /// Fixed style for black-and-white mode. `filter` on the root element does
 /// not create a containing block for fixed-position content.
 pub const GRAYSCALE_CSS: &str = "html{filter:grayscale(1)!important}";
-/// Fixed style for hidden images: image elements are removed from layout
+/// Fixed style for hidden images and video: image and video elements, and
+/// embedded players of the common video sites, are removed from layout,
 /// and CSS background images are dropped (WebKit then does not fetch them;
 /// `<img>` sources are still fetched). Inline SVG icons stay visible.
-pub const NO_IMAGES_CSS: &str = "img,picture,input[type=image],svg image,object[type^=\"image/\"],embed[type^=\"image/\"]{display:none!important}*,*::before,*::after{background-image:none!important}";
+pub const NO_IMAGES_CSS: &str = concat!(
+    "img,picture,input[type=image],svg image,object[type^=\"image/\"],embed[type^=\"image/\"],",
+    "video,object[type^=\"video/\"],embed[type^=\"video/\"],",
+    "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
+    "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
+    "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"]",
+    "{display:none!important}*,*::before,*::after{background-image:none!important}"
+);
 
 impl FixedStyle {
     fn id(self) -> &'static str {
@@ -249,10 +263,11 @@ mod tests {
 
     #[test]
     fn view_modes() {
-        // Default: black and white, images shown.
+        // Default: black and white, images and video hidden.
         let inj = injections(&[], ViewMode::default());
-        assert_eq!(inj.len(), 1);
+        assert_eq!(inj.len(), 2);
         assert!(inj[0].source.contains("grayscale(1)"));
+        assert!(inj[1].source.contains("video,"));
         assert_eq!(inj[0].at, InjectAt::DocumentStart);
         let inj = injections(&[], ViewMode { color: true, hide_images: true });
         assert_eq!(inj.len(), 1);
@@ -262,7 +277,7 @@ mod tests {
         let js = view_mode_js(ViewMode { color: true, hide_images: true });
         assert!(js.contains("getElementById(\"__snorkle_grayscale\");if(st)st.remove()"));
         assert!(js.contains("display:none"));
-        let js = view_mode_js(ViewMode::default());
+        let js = view_mode_js(ViewMode { color: false, hide_images: false });
         assert!(js.contains("grayscale(1)"));
         assert!(js.contains("getElementById(\"__snorkle_no_images\");if(st)st.remove()"));
     }

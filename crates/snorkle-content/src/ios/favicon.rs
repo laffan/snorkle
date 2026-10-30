@@ -43,11 +43,11 @@ use objc2_foundation::{
     NSURL,
 };
 use objc2_ui_kit::{
-    UIColor, UIGraphicsImageRenderer, UIGraphicsImageRendererContext, UIGraphicsImageRendererFormat,
+    UIColor, UIGraphicsImageRenderer, UIScrollViewContentInsetAdjustmentBehavior, UIGraphicsImageRendererContext, UIGraphicsImageRendererFormat,
     UIGraphicsImageRendererFormatRange, UIImage, UIView,
 };
 use objc2_web_kit::{
-    WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate, WKSnapshotConfiguration,
+    WKContentMode, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate, WKSnapshotConfiguration,
     WKWebViewConfiguration, WKWebsiteDataStore,
 };
 
@@ -131,19 +131,27 @@ unsafe fn start(mtm: MainThreadMarker, root: &UIView, host: &str, generation: u6
     let config = WKWebViewConfiguration::new(mtm);
     config.setWebsiteDataStore(&WKWebsiteDataStore::nonPersistentDataStore(mtm));
     config.defaultWebpagePreferences().setAllowsContentJavaScript(false);
+    // Mobile content mode, so the 64-px viewport below is honoured (iPad's
+    // default desktop mode lays pages out at 980 px and shifts the icon).
+    config.defaultWebpagePreferences().setPreferredContentMode(WKContentMode::Mobile);
     // Off-screen but inside the window, so WebKit renders it.
     let frame = CGRect::new(CGPoint::new(-4.0 * SIZE, -4.0 * SIZE), CGSize::new(SIZE, SIZE));
     let web = WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config);
     web.setOpaque(false);
     web.setBackgroundColor(Some(&UIColor::clearColor()));
     web.setUserInteractionEnabled(false);
+    // No safe-area or scroll offsets: the snapshot rect must be the page's
+    // top-left 64×64.
+    let scroll = web.scrollView();
+    scroll.setContentInsetAdjustmentBehavior(UIScrollViewContentInsetAdjustmentBehavior::Never);
+    scroll.setScrollEnabled(false);
     let nav = FaviconNav::new(mtm, generation);
     web.setNavigationDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*nav)));
     root.addSubview(&web);
     // `host` is [a-z0-9.-] only (validated by the caller), so it is inert in
     // both the attribute and the URL.
     let html = format!(
-        "<!doctype html><meta name=viewport content=\"width={s}\"><style>html,body{{margin:0;background:transparent}}img{{display:block;width:{s}px;height:{s}px;object-fit:contain}}</style><img alt=\"\" src=\"https://{host}/favicon.ico\">",
+        "<!doctype html><meta name=viewport content=\"width={s},initial-scale=1,user-scalable=no\"><style>html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}img{{position:fixed;left:0;top:0;width:{s}px;height:{s}px;object-fit:contain}}</style><img alt=\"\" src=\"https://{host}/favicon.ico\">",
         s = SIZE as u32
     );
     web.loadHTMLString_baseURL(&NSString::from_str(&html), None);

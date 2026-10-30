@@ -1,32 +1,36 @@
 :root {
-  --bg: #f2f3f5;
+  /* The chrome is black and white only (see also the filter on html). */
+  --bg: #f2f2f2;
   --bar: #ffffff;
-  --fg: #16181d;
-  --muted: #6b7280;
-  --line: #d9dce1;
-  --accent: #0b6e7f;
-  --danger: #b42318;
-  --warn-bg: #fff4ce;
-  --field: #eceef1;
-  --tab: #e3e6ea;
+  --fg: #161616;
+  --muted: #6e6e6e;
+  --line: #d9d9d9;
+  --accent: #161616;
+  --danger: #161616;
+  --warn-bg: #e6e6e6;
+  --field: #ececec;
+  --tab: #e3e3e3;
   --tab-active: #ffffff;
-  --side: #e9ebee;
+  --side: #eaeaea;
   /* Docked sidebar width; set from JS while resizing. */
   --sidebar-w: 264px;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #15171a; --bar: #1f2226; --fg: #eef0f3; --muted: #9aa1ab; --line: #33373d;
-    --accent: #4fc3d4; --danger: #f97066; --warn-bg: #4a3b0a; --field: #2a2e33;
-    --tab: #26292e; --tab-active: #33373d; --side: #1a1c20;
+    --bg: #151515; --bar: #1f1f1f; --fg: #efefef; --muted: #a0a0a0; --line: #363636;
+    --accent: #efefef; --danger: #efefef; --warn-bg: #333333; --field: #2b2b2b;
+    --tab: #262626; --tab-active: #363636; --side: #1a1a1a;
   }
 }
-/* Private browsing: unmistakably different chrome. */
+/* Private browsing: unmistakably different chrome (always dark). */
 body.private {
-  --bar: #2b1d3f; --bg: #1c1329; --fg: #f3eefa; --muted: #b9a9d0; --line: #45325f;
-  --field: #3a2a52; --tab: #33244a; --tab-active: #4a3666; --accent: #c9a7ff; --side: #241834;
+  --bar: #0c0c0c; --bg: #000000; --fg: #f5f5f5; --muted: #9a9a9a; --line: #333333;
+  --field: #232323; --tab: #1b1b1b; --tab-active: #2e2e2e; --accent: #f5f5f5; --danger: #f5f5f5;
+  --warn-bg: #2e2e2e; --side: #111111;
 }
+/* Catches anything colourful the palette cannot: favicons, emoji. */
+html { filter: grayscale(1); }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -67,6 +71,8 @@ body.narrow #sidebar { box-shadow: 0 0 24px rgba(0, 0, 0, .25); }
 body.resizing #sidebar { transition: none; }
 #side-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px 12px; }
 body.dragging #side-scroll { overflow-y: hidden; }
+.side-gap { height: 1px; margin: 10px 4px; background: var(--line); }
+#pins { margin-top: 10px; }
 .side-section { margin: 14px 4px 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .tablist, .droplist { display: flex; flex-direction: column; gap: 2px; }
 .droplist { min-height: 44px; border-radius: 10px; padding: 2px 0; }
@@ -80,7 +86,8 @@ body.dragging #side-scroll { overflow-y: hidden; }
 
 .tab, .bm { display: flex; align-items: center; border-radius: 10px; touch-action: manipulation; }
 .tab { position: relative; }
-.tab.active { background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; }
+.tab.active, .bm.active { background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; }
+.bm.active .t { font-weight: 600; }
 .tab.private.active { box-shadow: 0 0 0 1px var(--accent) inset; }
 .tab.drop-target { box-shadow: 0 0 0 2px var(--accent) inset; background: var(--field); }
 .tab.drag-src, .bm.drag-src { opacity: .35; }
@@ -140,7 +147,9 @@ body.narrow #sidebar-resize { display: none; }
   background: var(--bar); border: 1px solid var(--line); border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 6px; display: flex; flex-direction: column;
 }
-.popup button { text-align: left; padding: 10px 12px; border-radius: 8px; }
+.popup button { text-align: left; padding: 10px 12px; border-radius: 8px; display: flex; justify-content: space-between; gap: 16px; }
+.popup .kbd { color: var(--muted); font-size: 13px; }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .popup button:active { background: var(--field); }
 
 /* Drag ghost and insertion line. */
@@ -150,9 +159,14 @@ body.narrow #sidebar-resize { display: none; }
 }
 #drop-line { position: fixed; z-index: 99; height: 2px; background: var(--accent); pointer-events: none; }
 
-.pillbtn { height: 30px; padding: 0 10px; border-radius: 15px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--field); }
-.pillbtn.on { color: var(--accent); }
-.pillbtn.off { color: var(--danger); }
+.pillbtn {
+  height: 30px; padding: 0 12px; border-radius: 15px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: var(--bar); border: 1px solid var(--fg); display: inline-flex; align-items: center; gap: 6px;
+}
+.pillbtn:active { background: var(--field); }
+.pillbtn:disabled { border-color: var(--line); }
+/* Ads allowed on this site: the exception is marked by a dashed border. */
+.pillbtn.off { border-style: dashed; }
 .banner { padding: 6px 12px; background: var(--warn-bg); font-size: 13px; }
 
 #toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 8px; }
@@ -168,7 +182,9 @@ body.narrow #sidebar-resize { display: none; }
 #url-display { display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; }
 #url-input { border: 2px solid var(--accent); outline: none; }
 .security { font-size: 13px; margin-right: 6px; white-space: nowrap; }
-.security.not-secure, .security.mixed { color: var(--danger); font-weight: 600; }
+.security:empty { display: none; }
+.security.not-secure, .security.mixed { font-weight: 700; text-decoration: underline; }
+.lock { flex: 0 0 auto; margin-right: 6px; }
 .pill { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--accent); color: var(--bar); margin-right: 6px; }
 /* Subdomain is elided from the LEFT so the registrable domain stays
    visible; it never shrinks. Each label is its own bidi isolate. */
@@ -205,6 +221,12 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .list .u { font-size: 13px; color: var(--muted); display: flex; min-width: 0; }
 .list li > button.remove { padding: 8px 12px; color: var(--muted); }
 .list li > input[type=checkbox] { margin: 0 10px; width: 20px; height: 20px; }
+/* History: grouped by day, then hour. */
+.list li.day { display: block; border: 0; padding: 18px 4px 4px; font-weight: 700; font-size: 15px; }
+.list li.hour { display: block; border: 0; padding: 10px 4px 2px; font-size: 12px; color: var(--muted); }
+.list .when { font-size: 12px; color: var(--muted); padding: 0 8px; flex: 0 0 auto; }
+.modal h2 { margin: 16px 0 4px; }
+.clear-data.armed { background: var(--fg); color: var(--bar); }
 
 .notice { padding-top: 32px; }
 .actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
@@ -214,7 +236,7 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .button.danger { background: var(--danger); color: #fff; font-weight: 600; }
 
 .panel-head, .modal-head { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
-.modal-head h1 { margin: 0; font-size: 22px; }
+.modal-head h1 { margin: 0; font-size: 22px; flex: 1; }
 .spacer { flex: 1; }
 
 /* Settings modal and site-scripts sheet. */
@@ -263,7 +285,7 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .console-list .src { color: var(--muted); flex: 0 0 auto; max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console-list .msg { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .console-list li.warn { background: var(--warn-bg); }
-.console-list li.error { color: var(--danger); }
+.console-list li.error { font-weight: 700; }
 .console-list li.debug .msg { color: var(--muted); }
 
 /* ---- pinned grid ------------------------------------------------------- */
@@ -272,6 +294,18 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .pingrid .hint { grid-column: 1 / -1; }
 .pin { position: relative; aspect-ratio: 1; border-radius: 12px; background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; touch-action: manipulation; }
 .pin.drag-src { opacity: .35; }
+.pin.active { box-shadow: 0 0 0 2px var(--fg) inset; }
+/* Unpin appears only while the pointer is over the pin (touch-only
+   devices: on the selected pin). */
+.pin > .unpin { opacity: 0; pointer-events: none; transition: opacity .1s; }
+.pin:focus-within > .unpin { opacity: 1; pointer-events: auto; }
+@media (any-hover: hover) {
+  .pin:hover > .unpin { opacity: 1; pointer-events: auto; }
+}
+@media (any-hover: none) {
+  .pin.active > .unpin { opacity: 1; pointer-events: auto; }
+}
+body.dragging .pin > .unpin { opacity: 0; pointer-events: none; }
 .pin > .open { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 12px; }
 .pin img { width: 28px; height: 28px; object-fit: contain; pointer-events: none; }
 .letter { width: 28px; height: 28px; border-radius: 8px; color: #fff; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; }

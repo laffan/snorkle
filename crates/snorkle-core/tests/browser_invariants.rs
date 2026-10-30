@@ -349,7 +349,7 @@ fn new_tab_creates_no_web_view_until_navigation() {
 fn session_restore_is_lazy() {
     let mut b = browser(4);
     let s = Session {
-        tabs: (0..10).map(|i| SessionTab { url: format!("https://s{i}.example/"), title: String::new() }).collect(),
+        tabs: (0..10).map(|i| SessionTab { url: format!("https://s{i}.example/"), title: String::new(), launcher: None }).collect(),
         active: Some(3),
     };
     let out = b.restore_session(&s, 0);
@@ -543,6 +543,37 @@ fn split_with_self_is_ignored() {
     let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
     assert!(b.split(a, a, 1).is_empty());
     assert!(b.view().split.is_none());
+}
+
+// ---- pins and bookmarks own a tab -----------------------------------------
+
+#[test]
+fn launcher_reuses_its_tab_and_survives_restart() {
+    let mut b = browser(4);
+    let (t, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let key = "https://pin.example/";
+    let (p, out) = b.open_launcher(key, u(key), 1);
+    assert_ne!(p, t);
+    assert!(out.iter().any(|e| matches!(e, Effect::CreateView { .. } | Effect::Load { .. })));
+    webkit_load(&mut b, p, key);
+    // Navigating inside the pin's tab keeps it bound.
+    webkit_load(&mut b, p, "https://pin.example/page");
+    b.activate(t, 2);
+    let (again, _) = b.open_launcher(key, u(key), 3);
+    assert_eq!(again, p, "no new tab");
+    assert_eq!(b.active(), Some(p));
+    assert_eq!(b.view().tabs.len(), 2);
+    assert_eq!(b.view().tabs.iter().find(|x| x.id == p).unwrap().launcher.as_deref(), Some(key));
+    // Saved and restored with its binding.
+    let session = b.session();
+    assert!(session.tabs.iter().any(|s| s.launcher.as_deref() == Some(key)));
+    let mut b2 = browser(4);
+    b2.restore_session(&session, 0);
+    assert!(b2.view().tabs.iter().any(|x| x.launcher.as_deref() == Some(key)));
+    // Removing the pin turns its tab into an ordinary tab.
+    b.release_launcher(key);
+    assert!(b.view().tabs.iter().all(|x| x.launcher.is_none()));
+    assert_eq!(b.view().tabs.len(), 2);
 }
 
 // ---- popups (window.open with opener) -------------------------------------

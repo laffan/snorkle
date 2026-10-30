@@ -63,6 +63,9 @@ pub struct Session {
 pub struct SessionTab {
     pub url: String,
     pub title: String,
+    /// The pin or bookmark (by URL) this tab belongs to, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher: Option<String>,
 }
 
 /// Returns the normalised URL string if `s` is an http(s) URL.
@@ -97,10 +100,11 @@ const SESSION_FILE: &str = "session.json";
 const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
 const USER_SCRIPTS_FILE: &str = "user-scripts.json";
 const PINS_FILE: &str = "pins.json";
-/// Versioned: v1 icons were the raw snapshot encoding, which the chrome
-/// could fail to display; they are deleted and fetched again.
-const ICONS_DIR: &str = "icons-v2";
-const OLD_ICONS_DIRS: &[&str] = &["icons"];
+/// Versioned: older caches are deleted and icons fetched again (v1: raw
+/// snapshot encoding the chrome could fail to display; v2: icons offset
+/// by the snapshot view's desktop layout).
+const ICONS_DIR: &str = "icons-v3";
+const OLD_ICONS_DIRS: &[&str] = &["icons", "icons-v2"];
 
 impl Store {
     /// Opens (or creates) the store. Corrupt files are moved aside to
@@ -685,8 +689,8 @@ mod tests {
         let s = Store::open(&dir).unwrap();
         let sess = Session {
             tabs: vec![
-                SessionTab { url: "https://a.example/".into(), title: "a".into() },
-                SessionTab { url: "file:///x".into(), title: "f".into() },
+                SessionTab { url: "https://a.example/".into(), title: "a".into(), launcher: None },
+                SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None },
             ],
             active: Some(1),
         };

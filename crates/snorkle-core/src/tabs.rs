@@ -145,6 +145,10 @@ pub struct Tab {
     /// A popup window (`window.open` with a size) shown as a sheet over its
     /// opener instead of as a tab. Never saved in the session.
     pub sheet: bool,
+    /// The pin or bookmark (by its stored URL) this tab belongs to. Such a
+    /// tab is not listed with the other tabs; the pin or bookmark is shown
+    /// as selected instead, and opening it again returns to this tab.
+    pub launcher: Option<String>,
 }
 
 impl Tab {
@@ -169,6 +173,7 @@ impl Tab {
             crash_times_ms: Vec::new(),
             opener: None,
             sheet: false,
+            launcher: None,
         }
     }
 

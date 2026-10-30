@@ -151,11 +151,12 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   main-frame `WKUserScript`s in WebKit's isolated client world and guarded by
   `location.hostname`. There is no native bridge. See SECURITY_REVIEW I1/I2.
 - **View modes** use the same mechanism with constant styles, plus one `evaluateJavaScript` to
-  update already-loaded pages. Pages are black and white by default; the palette button shows
-  colour and the images button hides images (`img`, `picture`, SVG `image`, CSS background
-  images). Both are session-only (`Shared::view_mode`, not persisted), so every launch starts
-  in black and white with images shown. Hidden `<img>` elements are still downloaded; CSS
-  background images are not.
+  update already-loaded pages. Pages are black and white with images and video hidden by
+  default (`img`, `picture`, SVG `image`, `video`, embedded players of the common video sites,
+  CSS background images); the palette button shows colour and the images button shows images
+  and video. Both are session-only (`Shared::view_mode`, not persisted), so every launch starts
+  that way. Hidden `<img>` and `<video>` elements may still download; CSS background images do
+  not. Players inside other sites' iframes are hidden only for the listed video sites.
 - **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
   tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects
   carry a `Pane` (`Full`, `Left` or `Right`), and the host places each container in its half,
@@ -184,7 +185,7 @@ errors/warnings, this tab only. Copy puts the visible entries on the clipboard.
 
 ## 5b. Chrome layout
 
-Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices). The bottom bar holds the menu (History, Settings), new tab, new private tab, colour and hide images. In windows at least 700 pt wide the sidebar is
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. The bottom bar holds the menu (New Tab, New Private Tab, History, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both

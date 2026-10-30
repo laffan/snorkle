@@ -47,9 +47,11 @@ use objc2_ui_kit::{
     UIColor, UITapGestureRecognizer, UIView, UIViewAutoresizing,
 };
 use objc2_web_kit::{
-    WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController, WKWebsiteDataTypeDiskCache,
-    WKWebsiteDataTypeMemoryCache,
-    WKWebViewConfiguration, WKWebsiteDataStore,
+    WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController, WKWebViewConfiguration, WKWebsiteDataStore,
+    WKWebsiteDataTypeCookies, WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeFileSystem,
+    WKWebsiteDataTypeIndexedDBDatabases, WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeMediaKeys,
+    WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeOfflineWebApplicationCache,
+    WKWebsiteDataTypeServiceWorkerRegistrations, WKWebsiteDataTypeSessionStorage, WKWebsiteDataTypeWebSQLDatabases,
 };
 use snorkle_core::browser::{AfterCreate, Effect, Pane};
 use snorkle_core::userscripts::Injection;
@@ -60,7 +62,7 @@ use url::Url;
 
 use self::bindings::WKWebView;
 use self::delegates::{NavDelegate, Observer, TabIvars, TapFocus, UiDelegate, KVO_KEYS};
-use crate::{clamp_inset, ContentEvents, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
+use crate::{clamp_inset, ContentEvents, DataKind, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
 
 // Adding any page-to-native channel requires writing installation code
 // here, which this assertion forces to be a deliberate, reviewed change.
@@ -278,11 +280,31 @@ impl ContentHost {
         favicon::fetch(self.mtm, &self.root, host, done);
     }
 
-    /// Empties the HTTP disk and memory caches of every profile's store.
-    /// Cookies, storage and logins are kept.
-    pub fn clear_cache(&mut self) {
+    /// Deletes one kind of website data from every profile's store.
+    pub fn clear_data(&mut self, kind: DataKind) {
         unsafe {
-            let types = NSSet::from_slice(&[WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache]);
+            let cache = [
+                WKWebsiteDataTypeDiskCache,
+                WKWebsiteDataTypeMemoryCache,
+                WKWebsiteDataTypeFetchCache,
+                WKWebsiteDataTypeOfflineWebApplicationCache,
+            ];
+            let site = [
+                WKWebsiteDataTypeLocalStorage,
+                WKWebsiteDataTypeSessionStorage,
+                WKWebsiteDataTypeIndexedDBDatabases,
+                WKWebsiteDataTypeWebSQLDatabases,
+                WKWebsiteDataTypeServiceWorkerRegistrations,
+                WKWebsiteDataTypeFileSystem,
+                WKWebsiteDataTypeMediaKeys,
+            ];
+            let list: Vec<&NSString> = match kind {
+                DataKind::Cache => cache.to_vec(),
+                DataKind::Cookies => vec![WKWebsiteDataTypeCookies],
+                DataKind::SiteData => site.to_vec(),
+                DataKind::Logins => std::iter::once(WKWebsiteDataTypeCookies).chain(site).collect(),
+            };
+            let types = NSSet::from_slice(&list);
             for store in std::iter::once(&self.default_store).chain(self.private_store.as_ref()) {
                 let done = RcBlock::new(|| {});
                 store.removeDataOfTypes_modifiedSince_completionHandler(&types, &NSDate::distantPast(), &done);

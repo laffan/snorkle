@@ -173,6 +173,8 @@ pub struct TabView {
     /// Set for a popup shown as a sheet: the tab it covers. Sheets are not
     /// listed as tabs.
     pub sheet_over: Option<TabId>,
+    /// The pin or bookmark (URL) this tab belongs to; not listed as a tab.
+    pub launcher: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -292,6 +294,7 @@ impl Browser {
             let mut tab = Tab::new(id, Profile::Default, now);
             tab.committed_url = Some(url);
             tab.title = sanitize_page_text(&st.title, MAX_PAGE_TEXT_CHARS);
+            tab.launcher = st.launcher.as_deref().and_then(crate::storage::storable_url);
             self.tabs.push(tab);
             ids.push(id);
         }
@@ -474,6 +477,39 @@ impl Browser {
         }
         out.push(Effect::NotifyChrome);
         out
+    }
+
+    /// Opens a pin or bookmark: returns to the tab that belongs to it, or
+    /// creates one (default profile) and loads `url` there. `key` is the
+    /// pin's or bookmark's stored URL.
+    pub fn open_launcher(&mut self, key: &str, url: Url, now: u64) -> (TabId, Vec<Effect>) {
+        let existing =
+            self.tabs.iter().find(|t| t.launcher.as_deref() == Some(key) && !t.is_private()).map(|t| t.id);
+        if let Some(id) = existing {
+            return (id, self.activate(id, now));
+        }
+        let mut out = Vec::new();
+        let id = self.new_tab_into(Profile::Default, now, &mut out);
+        if let Some(t) = self.tab_mut(id) {
+            t.launcher = Some(key.to_string());
+        }
+        out.extend(self.navigate_trusted(id, url, now));
+        out.push(Effect::NotifyChrome);
+        (id, out)
+    }
+
+    /// The pin or bookmark `key` was removed: its tab becomes an ordinary
+    /// tab (listed again), so nothing the user had open is lost.
+    pub fn release_launcher(&mut self, key: &str) -> Vec<Effect> {
+        let mut changed = false;
+        for t in self.tabs.iter_mut().filter(|t| t.launcher.as_deref() == Some(key)) {
+            t.launcher = None;
+            changed = true;
+        }
+        if !changed {
+            return Vec::new();
+        }
+        vec![Effect::PersistSession(self.session()), Effect::NotifyChrome]
     }
 
     /// Address-bar submission.
@@ -1102,6 +1138,7 @@ impl Browser {
             tabs: persistable
                 .iter()
                 .map(|t| SessionTab {
+                    launcher: t.launcher.clone(),
                     url: t.committed_url.as_ref().map(|u| u.to_string()).unwrap_or_default(),
                     title: t.title.clone(),
                 })
@@ -1198,5 +1235,6 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
             can_toggle: !t.is_private(),
         }),
         sheet_over: t.opener.filter(|_| t.sheet),
+        launcher: t.launcher.clone(),
     }
 }

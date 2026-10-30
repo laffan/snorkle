@@ -35,6 +35,22 @@ mod stub;
 #[cfg(not(target_os = "ios"))]
 pub use stub::{dispatch_main, os_version, physical_memory, ContentHost};
 
+/// Website data the user can delete (Settings). Applies to the default
+/// profile's store and the current private store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataKind {
+    /// HTTP disk and memory caches, fetch and offline caches.
+    Cache,
+    /// Cookies (signs out of sites that use them for logins).
+    Cookies,
+    /// Local and session storage, IndexedDB, WebSQL, service workers, file
+    /// system, media keys.
+    SiteData,
+    /// Everything that keeps you signed in: cookies and site data.
+    /// Passwords are not stored by the app (iOS Passwords app).
+    Logins,
+}
+
 /// Browser keyboard shortcuts handled natively (see `ios::keys`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortcut {

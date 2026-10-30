@@ -117,11 +117,14 @@ pub struct Entry {
     url: String,
     title: String,
     display: DisplayUrl,
+    /// Wall-clock milliseconds of the visit (history only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    visited_ms: Option<u64>,
 }
 
 fn entry(url: &str, title: &str) -> Option<Entry> {
     let u = Url::parse(url).ok()?;
-    Some(Entry { url: url.to_string(), title: title.to_string(), display: url_display::display(&u) })
+    Some(Entry { url: url.to_string(), title: title.to_string(), display: url_display::display(&u), visited_ms: None })
 }
 
 #[tauri::command]
@@ -162,10 +165,24 @@ pub async fn toggle_bookmark(s: S<'_>, tab: u64) -> Result<bool, String> {
 
 #[tauri::command]
 pub async fn remove_bookmark(s: S<'_>, url: String) -> Result<(), String> {
+    with_browser(&s, |b| b.release_launcher(&url));
     match s.store.clone() {
         Some(store) => store.remove_bookmark(&url).map_err(|e| e.to_string()),
         None => Ok(()),
     }
+}
+
+/// Opens a pin or bookmark in the tab that belongs to it (created on first
+/// use; not listed with the other tabs).
+#[tauri::command]
+pub fn open_launcher(s: S<'_>, url: String) -> Result<u64, String> {
+    let parsed = Url::parse(&url).map_err(|_| "Not a web address".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || url.len() > 4096 {
+        return Err("Not a web address".into());
+    }
+    let (id, effects) = s.browser().open_launcher(&url, parsed, now_ms());
+    s.run(effects);
+    Ok(id.0)
 }
 
 #[tauri::command]
@@ -173,7 +190,12 @@ pub fn list_history(s: S<'_>, limit: usize) -> Vec<Entry> {
     let limit = limit.min(500);
     s.store
         .as_ref()
-        .map(|st| st.history(limit).iter().filter_map(|h| entry(&h.url, &h.title)).collect())
+        .map(|st| {
+            st.history(limit)
+                .iter()
+                .filter_map(|h| entry(&h.url, &h.title).map(|e| Entry { visited_ms: Some(h.visited_ms), ..e }))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -287,10 +309,20 @@ pub fn clear_console(s: S<'_>) {
     s.console_log().clear();
 }
 
-/// Empties the HTTP caches (not cookies or site data).
+/// Deletes one kind of website data (Settings): "cache", "cookies",
+/// "site_data" or "logins".
 #[tauri::command]
-pub fn empty_cache() {
-    snorkle_content::dispatch_main(|| with_host(|h| h.clear_cache()));
+pub fn clear_website_data(kind: String) -> Result<(), String> {
+    use snorkle_content::DataKind;
+    let kind = match kind.as_str() {
+        "cache" => DataKind::Cache,
+        "cookies" => DataKind::Cookies,
+        "site_data" => DataKind::SiteData,
+        "logins" => DataKind::Logins,
+        _ => return Err("Unknown data kind".into()),
+    };
+    snorkle_content::dispatch_main(move || with_host(|h| h.clear_data(kind)));
+    Ok(())
 }
 
 #[tauri::command]
@@ -403,6 +435,10 @@ pub async fn move_pin(s: S<'_>, url: String, index: usize) -> Result<(), String>
 /// at that position instead of dropping it.
 #[tauri::command]
 pub async fn unpin(s: S<'_>, url: String, bookmark_index: Option<usize>) -> Result<(), String> {
+    // Moved into the bookmarks, it keeps its tab; removed, the tab is listed again.
+    if bookmark_index.is_none() {
+        with_browser(&s, |b| b.release_launcher(&url));
+    }
     let Some(store) = s.store.clone() else { return Ok(()) };
     if let (Some(p), Some(i)) = (store.remove_pin(&url).map_err(|e| e.to_string())?, bookmark_index) {
         store.insert_bookmark(&p.url, &p.title, i, p.created_ms).map_err(|e| e.to_string())?;

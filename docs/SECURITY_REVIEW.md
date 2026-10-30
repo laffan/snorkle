@@ -57,7 +57,7 @@ Native → page code paths (not channels back to native, but reviewed the same w
 |---|---|---|---|
 | I1 | User scripts and styles (`WKUserScript`) | User-written CSS/JS for domains they chose | Isolated default client world; main frame only; guarded by the document's real `location.hostname`; CSS and domain embedded as escaped JSON literals; no message handler or `GM_*` API. Every saved script's source is present (guarded) in every page's client world. |
 | F1 | Pinned-grid favicons (`ios/favicon.rs`) | Fixed HTML `<img src="https://<validated host>/favicon.ico">` in a hidden web view: JS off, non-persistent store, only `about:blank` navigation allowed | WebKit decodes the image in its sandbox; the app receives snapshot pixels and re-encodes a PNG. Storage accepts only PNGs ≤ 64 KB, and the chrome receives them as `data:` URLs (`img-src 'self' data:`, the only `data:` in its CSP). App-initiated request: one per pinned host. |
-| I2 | View modes: black and white (default on), hidden images | Constant styles (`GRAYSCALE_CSS`, `NO_IMAGES_CSS` in `userscripts.rs`), via user script and one `evaluateJavaScript` (no completion handler) | Same world and frame constraints; takes no input. Session-only state |
+| I2 | View modes: black and white (default on), hidden images and video (default on) | Constant styles (`GRAYSCALE_CSS`, `NO_IMAGES_CSS` in `userscripts.rs`), via user script and one `evaluateJavaScript` (no completion handler) | Same world and frame constraints; takes no input. Session-only state |
 
 Sign-off log:
 

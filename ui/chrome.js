@@ -26,7 +26,7 @@
   let bookmarks = [];
   let pins = [];
   const MAX_PINS = 4;
-  let viewMode = { color: false, hide_images: false }; // session-only, set in Rust
+  let viewMode = { color: false, hide_images: true }; // session-only, set in Rust
   let scripts = [];
   let editingDomain = null; // domain of the script open in the editor, or '' for new
   let tabsKey = '';
@@ -77,6 +77,7 @@
     document.body.classList.toggle('private', !!(tab && tab.private));
     renderOs();
     renderTabs();
+    renderLauncherSelection();
     renderToolbar(tab);
     renderSurface(tab);
     reportLayout();
@@ -119,8 +120,9 @@
     const byId = new Map(state.tabs.map((t) => [t.id, t]));
     const placed = new Set();
     for (const t of state.tabs) {
-      // Pop-up sheets are not tabs; their opener is shown as selected.
-      if (placed.has(t.id) || t.sheet_over !== null) continue;
+      // Pop-up sheets are not tabs (their opener is shown as selected), and
+      // tabs that belong to a pin or bookmark are shown as that item.
+      if (placed.has(t.id) || t.sheet_over !== null || t.launcher !== null) continue;
       const pair = pairOf(t.id);
       const list = t.private ? priv : normal;
       if (pair && byId.has(pair.left) && byId.has(pair.right)) {
@@ -198,8 +200,8 @@
     const security = tab ? tab.security : 'none';
     if (security === 'not_secure') { sec.textContent = 'Not Secure'; sec.classList.add('not-secure'); }
     else if (security === 'mixed') { sec.textContent = 'Not Fully Secure'; sec.classList.add('mixed'); }
-    else if (security === 'secure') { sec.textContent = '\u{1F512}'; }
     else { sec.textContent = ''; }
+    $('lock').toggleAttribute('hidden', security !== 'secure'); // SVG: no .hidden property
     renderUrlInto($('url-sub'), $('url-reg'), $('url-port'), d);
     $('url-warn').hidden = !(d && d.punycode_forced);
     if (!d) $('url-reg').textContent = 'Search or enter address';
@@ -283,13 +285,30 @@
     $('start-private').hidden = !(tab && tab.private);
   }
 
-  function fillList(list, items) {
+  // History, newest first, under a heading per day and per hour.
+  function fillHistory(list, items) {
     list.replaceChildren();
     if (!items.length) {
       list.appendChild(el('li', 'muted', 'Nothing here yet.'));
       return;
     }
+    const dayName = (d) => {
+      const today = new Date();
+      const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+      const diff = Math.round((start(today) - start(d)) / 86400000);
+      if (diff === 0) return 'Today';
+      if (diff === 1) return 'Yesterday';
+      return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: diff > 300 ? 'numeric' : undefined });
+    };
+    const hourName = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(/:\d\d/, ':00');
+    let lastDay = '';
+    let lastHour = '';
     for (const it of items) {
+      const when = new Date(it.visited_ms || 0);
+      const day = dayName(when);
+      const hour = day + hourName(when);
+      if (day !== lastDay) { list.appendChild(el('li', 'day', day)); lastDay = day; lastHour = ''; }
+      if (hour !== lastHour) { list.appendChild(el('li', 'hour', hourName(when))); lastHour = hour; }
       const li = el('li');
       const open = el('button', 'open');
       open.appendChild(el('span', 't', it.title || it.display.registrable));
@@ -305,24 +324,31 @@
         if (tab) invoke('navigate', { tab: tab.id, input: it.url });
       });
       li.appendChild(open);
+      li.appendChild(el('span', 'when', when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })));
       list.appendChild(li);
     }
   }
 
   // ---- opening links from pins / bookmarks / shortcuts -----------------------
 
-  // Switch to a tab already showing the URL; otherwise open it in the
-  // current tab if that is empty, or in a new tab.
-  function openLink(url, display) {
-    const existing = state && state.tabs.find((t) => t.url && display && t.url.full === display.full);
-    if (existing) {
-      invoke('activate_tab', { tab: existing.id });
-    } else {
-      const tab = activeTab();
-      if (tab && !tab.url && !tab.private) invoke('navigate', { tab: tab.id, input: url });
-      else T.core.invoke('new_tab', { private: false }).then((id) => invoke('navigate', { tab: id, input: url })).catch((e) => toast(String(e)));
-    }
+  // Each pin and bookmark has its own tab, which is not listed with the
+  // other tabs: opening one returns to it (created on first use), and the
+  // pin or bookmark is shown as selected.
+  function openLink(url) {
+    invoke('open_launcher', { url });
     if (narrow) setSidebar(false);
+  }
+
+  // The pin or bookmark whose tab is shown, if any.
+  function selectedLauncher() {
+    const id = state && shownTab();
+    const t = state && state.tabs.find((x) => x.id === id);
+    return (t && t.launcher) || null;
+  }
+
+  function renderLauncherSelection() {
+    const sel = selectedLauncher();
+    document.querySelectorAll('.pin, .bm').forEach((n) => n.classList.toggle('active', n.dataset.url === sel));
   }
 
   // ---- pinned grid ----------------------------------------------------------
@@ -337,7 +363,7 @@
     const t = el('span', 'letter', name.charAt(0).toUpperCase());
     let h = 0;
     for (const c of name) h = (h * 31 + c.codePointAt(0)) % 360;
-    t.style.background = `hsl(${h}, 45%, 45%)`;
+    t.style.background = `hsl(0, 0%, ${28 + (h % 5) * 6}%)`; // greys only
     return t;
   }
 
@@ -351,6 +377,7 @@
     pins.forEach((p, index) => {
       const node = el('div', 'pin');
       node.dataset.index = String(index);
+      node.dataset.url = p.url;
       node.title = p.title || p.display.registrable;
       const open = el('button', 'open');
       open.setAttribute('aria-label', `Open ${p.title || p.display.registrable}`);
@@ -367,7 +394,7 @@
       } else {
         open.appendChild(letterTile(p.display));
       }
-      open.addEventListener('click', () => { if (!suppressClick) openLink(p.url, p.display); });
+      open.addEventListener('click', () => { if (!suppressClick) openLink(p.url); });
       const rm = el('button', 'unpin', '\u00D7');
       rm.setAttribute('aria-label', 'Unpin');
       rm.addEventListener('click', (ev) => {
@@ -378,6 +405,7 @@
       node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'pin', url: p.url, index }));
       grid.appendChild(node);
     });
+    if (state) renderLauncherSelection();
   }
 
   // ---- bookmarks bar ------------------------------------------------------
@@ -396,12 +424,13 @@
     bookmarks.forEach((b, index) => {
       const node = el('div', 'bm');
       node.dataset.index = String(index);
+      node.dataset.url = b.url;
       const open = el('button', 'open');
       open.appendChild(el('span', 't', b.title || b.display.registrable));
       const host = el('span', 'h');
       fillLabels(host, b.display.registrable, false);
       open.appendChild(host);
-      open.addEventListener('click', () => { if (!suppressClick) openLink(b.url, b.display); });
+      open.addEventListener('click', () => { if (!suppressClick) openLink(b.url); });
       const rm = el('button', 'close', '×');
       rm.setAttribute('aria-label', 'Remove bookmark');
       rm.addEventListener('click', (ev) => {
@@ -412,6 +441,7 @@
       node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'bookmark', url: b.url, index }));
       list.appendChild(node);
     });
+    if (state) renderLauncherSelection();
   }
 
   // ---- drag and drop ------------------------------------------------------
@@ -671,7 +701,7 @@
     panel = 'history';
     clearArmed = false;
     $('panel-clear').textContent = 'Clear history';
-    T.core.invoke('list_history', { limit: 300 }).then((items) => fillList($('panel-list'), items));
+    T.core.invoke('list_history', { limit: 500 }).then((items) => fillHistory($('panel-list'), items));
     if (narrow) setSidebar(false);
     render();
   }
@@ -858,7 +888,7 @@
     }
     b.hidden = !a;
     if (!a) return;
-    b.textContent = a.blocking ? 'Blocking Ads' : 'Ads Allowed';
+    b.textContent = a.blocking ? 'Ads: Blocked' : 'Ads: Allowed';
     b.classList.add(a.blocking ? 'on' : 'off');
     b.disabled = !a.can_toggle;
     b.title = a.can_toggle
@@ -870,9 +900,10 @@
     const c = $('color');
     c.classList.toggle('on', viewMode.color);
     c.setAttribute('aria-pressed', String(viewMode.color));
+    // Images and video are hidden by default; the button shows them.
     const i = $('images');
-    i.classList.toggle('on', viewMode.hide_images);
-    i.setAttribute('aria-pressed', String(viewMode.hide_images));
+    i.classList.toggle('on', !viewMode.hide_images);
+    i.setAttribute('aria-pressed', String(!viewMode.hide_images));
   }
 
   function setViewMode(change) {
@@ -1007,8 +1038,9 @@
     for (const p of pins) items.push({ link: p });
     for (const b of bookmarks) items.push({ link: b });
     if (state) {
-      for (const t of state.tabs) if (!t.private && t.sheet_over === null) items.push({ tab: t });
-      for (const t of state.tabs) if (t.private && t.sheet_over === null) items.push({ tab: t });
+      const listed = (t) => t.sheet_over === null && t.launcher === null;
+      for (const t of state.tabs) if (!t.private && listed(t)) items.push({ tab: t });
+      for (const t of state.tabs) if (t.private && listed(t)) items.push({ tab: t });
     }
     return items;
   }
@@ -1023,7 +1055,7 @@
       const item = sidebarItems()[Number(name.slice(5)) - 1];
       if (!item) return;
       if (item.tab) invoke('activate_tab', { tab: item.tab.id });
-      else openLink(item.link.url, item.link.display);
+      else openLink(item.link.url);
     }
   }
 
@@ -1048,11 +1080,13 @@
   $('back').addEventListener('click', withTab((t) => invoke('go_back', { tab: t.id })));
   $('forward').addEventListener('click', withTab((t) => invoke('go_forward', { tab: t.id })));
   $('reload').addEventListener('click', withTab((t) => invoke(t.loading ? 'stop' : 'reload', { tab: t.id })));
-  $('new-tab').addEventListener('click', () => {
+  $('menu-new-tab').addEventListener('click', () => {
+    closeMenu();
     if (narrow) setSidebar(false);
     invoke('new_tab', { private: false }).then(beginEdit);
   });
-  $('new-private').addEventListener('click', () => {
+  $('menu-new-private').addEventListener('click', () => {
+    closeMenu();
     if (narrow) setSidebar(false);
     invoke('new_tab', { private: true }).then(beginEdit);
   });
@@ -1077,7 +1111,20 @@
   document.querySelectorAll('#console .seg button').forEach((b) => b.addEventListener('click', () => { consoleFilter = b.dataset.filter; renderConsole(); }));
   $('modal-close').addEventListener('click', () => setModal(false));
   $('modal').addEventListener('click', (ev) => { if (ev.target === $('modal')) setModal(false); });
-  $('empty-cache').addEventListener('click', () => invoke('empty_cache').then(() => toast('Cache emptied.')));
+  // Deleting website data takes two taps.
+  const DATA_DONE = { cache: 'Cache deleted.', cookies: 'Cookies deleted.', site_data: 'Site data deleted.', logins: 'Signed out of all sites.' };
+  document.querySelectorAll('.clear-data').forEach((b) => b.addEventListener('click', () => {
+    if (!b.classList.contains('armed')) {
+      document.querySelectorAll('.clear-data.armed').forEach((x) => { x.classList.remove('armed'); x.textContent = 'Delete'; });
+      b.classList.add('armed');
+      b.textContent = 'Tap again';
+      setTimeout(() => { b.classList.remove('armed'); b.textContent = 'Delete'; }, 4000);
+      return;
+    }
+    b.classList.remove('armed');
+    b.textContent = 'Delete';
+    invoke('clear_website_data', { kind: b.dataset.kind }).then(() => toast(DATA_DONE[b.dataset.kind]));
+  }));
   $('scripts-btn').addEventListener('click', () => setScripts(!scriptsOpen));
   $('scripts-close').addEventListener('click', () => setScripts(false));
   $('scripts-new').addEventListener('click', () => {
