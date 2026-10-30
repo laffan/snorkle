@@ -4,6 +4,7 @@
 //! See docs/ARCHITECTURE.md.
 
 mod adblock;
+mod ai;
 mod command_list;
 mod pins;
 mod scripts;
@@ -58,6 +59,11 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::get_headings,
         commands::scroll_to_heading,
         commands::clear_website_data,
+        ai::ai_status,
+        ai::ai_set_key,
+        ai::ai_delete_key,
+        ai::ai_test,
+        ai::ai_write_script,
         commands::open_launcher,
         commands::get_console,
         commands::set_console_capture,

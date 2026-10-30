@@ -220,3 +220,12 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     (`window.webkit.messageHandlers.snorkleHeadings` undefined in the page world); the extractor
     keeps up on single-page apps; heading indices can shift between report and click on pages
     that change quickly.
+46. **[verify] AI connections on device.** Check: Keychain add/read/delete work under the app's
+    entitlements and `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`; `NSURLSession`'s completion
+    runs off the main thread as assumed; the OpenAI model filter (`snorkle_core::ai::is_text_model`)
+    still matches the account's chat models; the Responses API reply shape (`output[].content[]`
+    `output_text`). Anthropic requests send `anthropic-version: 2026-10-21` and, for Claude Fable
+    5.1 / Opus 5.5 / Opus 5 / Sonnet 5.5, the server-side refusal fallback (`fallbacks: "default"`,
+    beta `server-side-fallback-2026-07-01`). **[decide]** Keys are device-only (no iCloud
+    Keychain sync); the domain, script and prompt are sent to the provider under the user's own
+    account terms.

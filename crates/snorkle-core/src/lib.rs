@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ai;
 pub mod blocking;
 pub mod browser;
 pub mod console;

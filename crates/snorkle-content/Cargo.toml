@@ -16,12 +16,13 @@ url.workspace = true
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "=0.6.5"
 block2 = "=0.6.2"
-objc2-core-foundation = { version = "=0.3.2", features = ["std", "CFCGTypes"] }
+objc2-core-foundation = { version = "=0.3.2", features = ["std", "CFCGTypes", "CFDictionary", "CFData", "CFString", "CFNumber"] }
+objc2-security = { version = "=0.3.2", default-features = false, features = ["std", "SecBase", "SecItem"] }
 objc2-foundation = { version = "=0.3.2", features = [
   "std", "block2", "objc2-core-foundation",
   "NSArray", "NSDate", "NSDictionary", "NSError", "NSKeyValueObserving", "NSNotification",
   "NSObject", "NSOperation", "NSProcessInfo", "NSSet", "NSString", "NSURL", "NSURLRequest",
-  "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLSession", "NSUUID", "NSValue", "NSData",
+  "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLSession", "NSURLRequest", "NSURLResponse", "NSUUID", "NSValue", "NSData",
 ] }
 objc2-ui-kit = { version = "=0.3.2", features = [
   "std", "objc2-core-foundation", "UIApplication", "UIResponder", "UIView", "UIScrollView",

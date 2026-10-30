@@ -121,12 +121,66 @@
 
   <!-- Settings modal (over the content area). -->
   <div id="modal" class="backdrop" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-head">
+    <div class="modal settings" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <nav class="settings-nav" aria-label="Settings sections">
         <h1 id="modal-title">Settings</h1>
-        <button id="modal-close" class="button">Done</button>
-      </div>
-      <h2>Website data</h2>
+        <button data-section="general" aria-current="page">General</button>
+        <button data-section="ai">AI</button>
+        <button data-section="cache">Cache</button>
+      </nav>
+      <div class="settings-body">
+        <div class="modal-head">
+          <h2 id="settings-heading">General</h2>
+          <button id="modal-close" class="button">Done</button>
+        </div>
+        <section data-panel="general">
+          <div class="option"><div>
+            <div class="option-title">View modes</div>
+            <div class="muted small">Black and white, and hiding images and video, are on at every launch. Tap a mode button in the sidebar to change it for all tabs; long-press it to turn it off for the current tab only. The headers view lists the page's headings beside it.</div>
+          </div></div>
+          <div class="option"><div>
+            <div class="option-title">Keyboard</div>
+            <div class="muted small">⌘T new tab (search open tabs and bookmarks) · ⌘S show or hide the sidebar · ⌘1–⌘5 the first pins, bookmarks and tabs.</div>
+          </div></div>
+          <div class="option"><div>
+            <div class="option-title">Ad and tracker blocking</div>
+            <div class="muted small">Uses EasyList and EasyPrivacy by The EasyList authors (easylist.to), licensed CC BY-SA 3.0. Turn it off for one site with the Ads button in the toolbar.</div>
+          </div></div>
+        </section>
+        <section data-panel="ai" hidden>
+          <p class="muted small">Connect your own API account to let AI help write site scripts. Keys are kept in the iOS Keychain on this device only and are never shown again. Requests go directly to the provider and contain the site's domain, its site script and what you type, never the page itself.</p>
+        <div class="ai-provider" data-provider="anthropic">
+          <div class="ai-head"><span class="option-title">Anthropic</span><span class="ai-state muted small"></span></div>
+          <div class="ai-row">
+            <input class="ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Anthropic API key (sk-ant-…)" aria-label="Anthropic API key">
+            <button class="button ai-save">Save</button>
+          </div>
+          <div class="ai-row">
+            <button class="button ai-test">Test</button>
+            <select class="ai-model" aria-label="Anthropic model"><option value="">Test the key to list models</option></select>
+            <button class="button ai-remove">Remove</button>
+          </div>
+          <div class="ai-msg muted small" role="status"></div>
+        </div>
+        <div class="ai-provider" data-provider="openai">
+          <div class="ai-head"><span class="option-title">OpenAI</span><span class="ai-state muted small"></span></div>
+          <div class="ai-row">
+            <input class="ai-key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="OpenAI API key (sk-…)" aria-label="OpenAI API key">
+            <button class="button ai-save">Save</button>
+          </div>
+          <div class="ai-row">
+            <button class="button ai-test">Test</button>
+            <select class="ai-model" aria-label="OpenAI model"><option value="">Test the key to list models</option></select>
+            <button class="button ai-remove">Remove</button>
+          </div>
+          <div class="ai-msg muted small" role="status"></div>
+        </div>
+          <div class="option">
+            <div><div class="option-title">Site script helper uses</div></div>
+            <select id="ai-use" aria-label="AI provider for site scripts"></select>
+          </div>
+        </section>
+        <section data-panel="cache" hidden>
       <div class="option">
         <div>
           <div class="option-title">Cache</div>
@@ -155,6 +209,8 @@
         </div>
         <button class="button clear-data" data-kind="logins">Delete</button>
       </div>
+        </section>
+      </div>
     </div>
   </div>
 
@@ -170,6 +226,15 @@
     <div id="script-editor" hidden>
       <label class="field">Domain <input id="se-domain" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="example.com"></label>
       <label class="check"><input id="se-enabled" type="checkbox" checked> Enabled</label>
+      <div id="se-ai" class="ai-box" hidden>
+        <label class="field">Describe what this site script should do
+          <textarea id="se-ai-prompt" rows="2" placeholder="Hide the cookie banner and make article text larger"></textarea>
+        </label>
+        <div class="actions">
+          <button id="se-ai-go" class="button primary">Write with AI</button>
+          <span id="se-ai-msg" class="muted small" role="status"></span>
+        </div>
+      </div>
       <label class="field">CSS <textarea id="se-css" rows="5" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="body { font-size: 18px; }"></textarea></label>
       <label class="field">JavaScript <textarea id="se-js" rows="8" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="document.title = 'Hello';"></textarea></label>
       <div class="actions">

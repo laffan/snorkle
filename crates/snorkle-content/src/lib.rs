@@ -31,12 +31,16 @@ pub use snorkle_core::browser::Effect;
 #[cfg(target_os = "ios")]
 mod ios;
 #[cfg(target_os = "ios")]
-pub use ios::{dispatch_main, os_version, physical_memory, ContentHost};
+pub use ios::{dispatch_main, http, keychain, os_version, physical_memory, ContentHost};
 
 #[cfg(not(target_os = "ios"))]
 mod stub;
 #[cfg(not(target_os = "ios"))]
-pub use stub::{dispatch_main, os_version, physical_memory, ContentHost};
+pub use stub::{dispatch_main, http, keychain, os_version, physical_memory, ContentHost};
+
+/// Completion of an HTTPS request: status and body, or a short error.
+/// Called once, on any thread.
+pub type HttpDone = Box<dyn FnOnce(Result<(u16, Vec<u8>), String>) + Send>;
 
 /// Everything injected into content views: the user's scripts (every tab)
 /// and the view-mode sources, app-wide with per-tab overrides for tabs

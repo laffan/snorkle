@@ -22,7 +22,9 @@
 mod bindings;
 mod delegates;
 mod favicon;
+pub mod http;
 mod injection;
+pub mod keychain;
 mod keys;
 mod rules;
 

@@ -27,6 +27,7 @@ Policy:
 | serde / serde_json | =1.0.229 / =1.0.154 | core, src-tauri | State serialisation, storage (already in Tauri's graph) |
 | objc2 / block2 | =0.6.5 / =0.6.2 | content (iOS) | ObjC runtime, blocks (same versions as wry) |
 | objc2-foundation / -ui-kit / -web-kit / -core-foundation | =0.3.2 | content (iOS) | Framework bindings (same versions as wry) |
+| objc2-security | =0.3.2 (features `SecBase`, `SecItem`) | content (iOS) | Keychain items for AI API keys (2026-10-30). Already in wry's graph at this version; no new crate. |
 | libfuzzer-sys | =0.4.13 | fuzz (separate workspace) | cargo-fuzz harness |
 
 Graph size (normal edges): `snorkle-core` 60 crates; the iOS app 244 crates, almost all from

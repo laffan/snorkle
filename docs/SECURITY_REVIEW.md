@@ -14,6 +14,7 @@ review on every change.
 | `crates/snorkle-core/src/input.rs` | Address-bar input → URL |
 | `crates/snorkle-core/src/storage.rs` | Persistence |
 | `crates/snorkle-core/src/console.rs` | In-app console: page console messages (C13) |
+| `crates/snorkle-core/src/ai.rs`, `src-tauri/src/ai.rs`, `crates/snorkle-content/src/ios/http.rs`, `ios/keychain.rs` | AI provider requests, API keys in the Keychain |
 | `crates/snorkle-core/src/viewmodes.rs` | View modes: constant injected sources, headings parser (C14) |
 | `crates/snorkle-core/src/userscripts.rs`, `crates/snorkle-content/src/ios/injection.rs` | Script injection into content (user scripts, view modes: black and white, hidden images) |
 | `crates/snorkle-core/src/blocking.rs`, `crates/snorkle-content/src/ios/rules.rs`, `src-tauri/src/adblock.rs` | Content blocking, allowlist regex generation, WebKit rule store |
@@ -59,6 +60,7 @@ Native → page code paths (not channels back to native, but reviewed the same w
 |---|---|---|---|
 | I1 | User scripts and styles (`WKUserScript`) | User-written CSS/JS for domains they chose | Isolated default client world; main frame only; guarded by the document's real `location.hostname`; CSS and domain embedded as escaped JSON literals; no message handler or `GM_*` API. Every saved script's source is present (guarded) in every page's client world. |
 | F1 | Pinned-grid favicons (`ios/favicon.rs`) | Fixed HTML `<img src="https://<validated host>/favicon.ico">` in a hidden web view: JS off, non-persistent store, only `about:blank` navigation allowed | WebKit decodes the image in its sandbox; the app receives snapshot pixels and re-encodes a PNG. Storage accepts only PNGs ≤ 64 KB, and the chrome receives them as `data:` URLs (`img-src 'self' data:`, the only `data:` in its CSP). App-initiated request: one per pinned host. |
+| N1 | AI requests (only with a user-supplied key) | HTTPS to `api.openai.com` / `api.anthropic.com` only; ephemeral session | Key from the Keychain, never sent to the chrome. Body: site domain, current site script, user prompt. Reply parsed strictly (`snorkle_core::ai`, ≤ 2 MB); generated code is shown for review, never run automatically. |
 | I2 | View modes (`viewmodes.rs`): desaturate (default on), hide media (default on), headers; app-wide with per-tab exemptions | Constant styles (`GRAYSCALE_CSS`, `NO_IMAGES_CSS` in `userscripts.rs`), via user script and one `evaluateJavaScript` (no completion handler) | Same world and frame constraints; takes no input. Session-only state |
 
 Sign-off log:
@@ -69,6 +71,7 @@ Sign-off log:
 | 2026-10-30 | Popups keep `window.opener` (C5) to fix OAuth logins, owner request; favicons via sandboxed snapshot (F1), owner choice; native keyboard shortcuts (C12) | Owner (in session) |
 | 2026-10-29 | Script injection into content: user scripts/styles per domain and black-and-white mode (I1, I2), confined to `ios/injection.rs` (tripwire allowlist) | Owner (feature request in session) |
 | 2026-10-30 | Black and white on by default, colour and hidden images as session-only toggles (I2 extended with a second constant style), owner request | **Pending owner sign-off** |
+| 2026-10-30 | AI connections (OpenAI, Anthropic): app-initiated requests (N1), API keys in the Keychain, AI-drafted site scripts | Owner (feature request in session); **written sign-off pending** |
 | 2026-10-30 | View modes with per-tab exemptions; headers view (C14, client-world handler) | Owner (feature request in session); **written sign-off pending** |
 | 2026-10-30 | In-app console with page console capture (C13): a page-world script and message handler, on demand, to debug sign-in popups without a Mac. Tripwire allowlist extended for `ios/injection.rs` | Owner (feature request in session); **written sign-off pending** |
 

@@ -83,3 +83,36 @@ pub fn physical_memory() -> u64 {
 pub fn os_version() -> OsVersion {
     OsVersion::new(27, 0, 0)
 }
+
+/// No network stack off iOS (desktop preview): AI requests fail politely.
+pub mod http {
+    pub fn send(_req: snorkle_core::ai::HttpRequest, done: crate::HttpDone) {
+        done(Err("AI requests run on iPadOS only (this is the desktop preview).".into()));
+    }
+}
+
+/// In-memory stand-in for the Keychain (desktop preview and tests).
+pub mod keychain {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    static KEYS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+    pub fn get(account: &str) -> Option<String> {
+        KEYS.lock().ok()?.as_ref()?.get(account).cloned()
+    }
+
+    pub fn set(account: &str, secret: &str) -> Result<(), String> {
+        let mut k = KEYS.lock().map_err(|_| "Keychain unavailable".to_string())?;
+        k.get_or_insert_with(HashMap::new).insert(account.to_string(), secret.to_string());
+        Ok(())
+    }
+
+    pub fn delete(account: &str) {
+        if let Ok(mut k) = KEYS.lock() {
+            if let Some(m) = k.as_mut() {
+                m.remove(account);
+            }
+        }
+    }
+}

@@ -752,12 +752,133 @@
     render();
   }
 
-  function setModal(open) {
+  function setModal(open, section) {
     closeMenu();
     modalOpen = open;
     $('modal').hidden = !open;
+    if (open) showSettings(section || 'general');
     reportLayout();
   }
+
+  const SETTINGS_TITLES = { general: 'General', ai: 'AI', cache: 'Cache' };
+  function showSettings(section) {
+    document.querySelectorAll('.settings-nav button').forEach((b) => b.setAttribute('aria-current', b.dataset.section === section ? 'page' : 'false'));
+    document.querySelectorAll('.settings-body [data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== section; });
+    $('settings-heading').textContent = SETTINGS_TITLES[section];
+    if (section === 'ai') loadAi();
+  }
+  document.querySelectorAll('.settings-nav button').forEach((b) => b.addEventListener('click', () => showSettings(b.dataset.section)));
+
+  // ---- AI connections -----------------------------------------------------
+  //
+  // Keys go to the Keychain through Rust and never come back; the chrome
+  // only learns whether one is stored. The chosen model per provider and the
+  // provider used for site scripts are UI preferences (localStorage).
+
+  const AI_DEFAULT_MODEL = { anthropic: 'claude-opus-5-5', openai: '' };
+  const AI_LABEL = { anthropic: 'Anthropic', openai: 'OpenAI' };
+  let aiConfigured = { anthropic: false, openai: false };
+
+  function aiModels(p) {
+    try { return JSON.parse(pref('aiModels.' + p) || '[]'); } catch (e) { return []; }
+  }
+  function aiModel(p) { return pref('aiModel.' + p) || AI_DEFAULT_MODEL[p]; }
+  function aiProvider() {
+    const chosen = pref('aiProvider');
+    if (chosen && aiConfigured[chosen]) return chosen;
+    return ['anthropic', 'openai'].find((p) => aiConfigured[p]) || null;
+  }
+
+  function loadAi() {
+    return T.core.invoke('ai_status').then((st) => { aiConfigured = st.configured; renderAi(); }).catch(() => {});
+  }
+
+  function renderAi() {
+    document.querySelectorAll('.ai-provider').forEach((box) => {
+      const p = box.dataset.provider;
+      const on = !!aiConfigured[p];
+      box.querySelector('.ai-state').textContent = on ? 'Key saved' : 'Not connected';
+      box.querySelector('.ai-key').placeholder = on ? 'Replace the saved key' : `${AI_LABEL[p]} API key`;
+      box.querySelector('.ai-test').disabled = !on;
+      box.querySelector('.ai-remove').disabled = !on;
+      const sel = box.querySelector('.ai-model');
+      const models = aiModels(p);
+      const current = aiModel(p);
+      sel.replaceChildren();
+      if (!models.length) {
+        const o = el('option', null, current ? current : 'Test the key to list models');
+        o.value = current || '';
+        sel.appendChild(o);
+      }
+      for (const m of models) {
+        const o = el('option', null, m.name === m.id ? m.id : `${m.name} (${m.id})`);
+        o.value = m.id;
+        sel.appendChild(o);
+      }
+      sel.value = current;
+      sel.disabled = !on;
+    });
+    const use = $('ai-use');
+    use.replaceChildren();
+    const ps = ['anthropic', 'openai'].filter((p) => aiConfigured[p]);
+    if (!ps.length) use.appendChild(el('option', null, 'Connect a provider first'));
+    for (const p of ps) { const o = el('option', null, AI_LABEL[p]); o.value = p; use.appendChild(o); }
+    use.disabled = !ps.length;
+    if (ps.length) use.value = aiProvider();
+    $('se-ai').hidden = !aiProvider();
+  }
+
+  document.querySelectorAll('.ai-provider').forEach((box) => {
+    const p = box.dataset.provider;
+    const msg = (t) => { box.querySelector('.ai-msg').textContent = t; };
+    box.querySelector('.ai-save').addEventListener('click', () => {
+      const input = box.querySelector('.ai-key');
+      T.core.invoke('ai_set_key', { provider: p, key: input.value })
+        .then((st) => { input.value = ''; aiConfigured = st.configured; renderAi(); msg('Saved. Testing…'); return test(); })
+        .catch((e) => msg(String(e)));
+    });
+    const test = () => {
+      msg('Testing…');
+      return T.core.invoke('ai_test', { provider: p })
+        .then((models) => {
+          setPref('aiModels.' + p, JSON.stringify(models));
+          if (models.length && !models.some((m) => m.id === aiModel(p))) setPref('aiModel.' + p, models[0].id);
+          renderAi();
+          msg(`Connected. ${models.length} model${models.length === 1 ? '' : 's'} available.`);
+        })
+        .catch((e) => msg(String(e)));
+    };
+    box.querySelector('.ai-test').addEventListener('click', test);
+    box.querySelector('.ai-remove').addEventListener('click', () => {
+      T.core.invoke('ai_delete_key', { provider: p })
+        .then((st) => { aiConfigured = st.configured; renderAi(); msg('Key removed from this device.'); })
+        .catch((e) => msg(String(e)));
+    });
+    box.querySelector('.ai-model').addEventListener('change', (ev) => setPref('aiModel.' + p, ev.target.value));
+  });
+  $('ai-use').addEventListener('change', (ev) => { setPref('aiProvider', ev.target.value); renderAi(); });
+
+  // Site script helper: drafts CSS/JS into the editor for the user to review.
+  $('se-ai-go').addEventListener('click', () => {
+    const p = aiProvider();
+    const out = $('se-ai-msg');
+    if (!p) { out.textContent = 'Connect an AI provider in Settings → AI.'; return; }
+    const model = aiModel(p);
+    if (!model) { out.textContent = `Choose an ${AI_LABEL[p]} model in Settings → AI.`; return; }
+    const btn = $('se-ai-go');
+    btn.disabled = true;
+    out.textContent = `Asking ${AI_LABEL[p]}…`;
+    T.core.invoke('ai_write_script', {
+      provider: p, model, domain: $('se-domain').value, css: $('se-css').value, js: $('se-js').value, prompt: $('se-ai-prompt').value,
+    })
+      .then((d) => {
+        $('se-css').value = d.css;
+        $('se-js').value = d.js;
+        out.textContent = (d.note ? d.note + ' ' : '') + 'Review the code, then Save.';
+      })
+      .catch((e) => { out.textContent = String(e); })
+      .finally(() => { btn.disabled = false; });
+  });
 
   // ---- site scripts -------------------------------------------------------
 
@@ -811,6 +932,9 @@
     $('se-css').value = s ? s.css : '';
     $('se-js').value = s ? s.js : '';
     $('se-delete').hidden = !s;
+    $('se-ai-prompt').value = '';
+    $('se-ai-msg').textContent = '';
+    $('se-ai').hidden = !aiProvider();
   }
 
   function currentSite() {
@@ -1520,6 +1644,7 @@
   loadBookmarks();
   loadPins();
   loadScripts();
+  loadAi();
   T.core.invoke('get_view_mode').then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch(() => {});
   T.event.listen('headings', (e) => {
     headingsByTab.set(e.payload.tab, e.payload.headings);
