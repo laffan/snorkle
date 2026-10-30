@@ -74,6 +74,7 @@ body.dragging #side-scroll { overflow-y: hidden; }
 .hint { font-size: 13px; color: var(--muted); padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
 
 .tab, .bm { display: flex; align-items: center; border-radius: 10px; touch-action: manipulation; }
+.tab { position: relative; }
 .tab.active { background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; }
 .tab.private.active { box-shadow: 0 0 0 1px var(--accent) inset; }
 .tab.drop-target { box-shadow: 0 0 0 2px var(--accent) inset; background: var(--field); }
@@ -84,13 +85,39 @@ body.dragging #side-scroll { overflow-y: hidden; }
 .tab .h, .bm .h { font-size: 12px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab.discarded .t { opacity: .65; }
 .tab .close, .bm .close { width: 32px; height: 32px; border-radius: 8px; color: var(--muted); font-size: 18px; flex: 0 0 auto; }
-.badge { font-size: 10px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-right: 4px; flex: 0 0 auto; }
+/* A tab's close button appears only while the pointer is over the tab. It
+   floats over the end of the title, so the title keeps its full width.
+   Opacity (not display/visibility) so a first tap on iPadOS still opens
+   the tab instead of only triggering hover. Touch-only devices have no
+   hover, so there it shows on the active tab. */
+.tab .close {
+  position: absolute; right: 2px; top: 50%; margin-top: -16px;
+  opacity: 0; pointer-events: none; transition: opacity .1s;
+  --close-bg: var(--side); background: var(--close-bg); box-shadow: -8px 0 8px -2px var(--close-bg);
+}
+.tab.active .close { --close-bg: var(--tab-active); }
+.tab:focus-within .close { opacity: 1; pointer-events: auto; }
+@media (any-hover: hover) {
+  .tab:hover .close { opacity: 1; pointer-events: auto; }
+}
+@media (any-hover: none) {
+  .tab.active .close { opacity: 1; pointer-events: auto; }
+}
+body.dragging .tab .close { opacity: 0; pointer-events: none; }
+
+/* Two tabs shown side by side: one sidebar row with a half per tab. */
+.tab-group { display: flex; gap: 2px; padding: 2px; border-radius: 12px; background: var(--tab); }
+.tab-group > .tab { flex: 1 1 0; min-width: 0; }
+.tab-group > .tab > .open { padding-left: 8px; }
+.tab-group > .tab:not(.active) .close { --close-bg: var(--tab); }
+.tab-group.leaving { box-shadow: 0 0 0 2px var(--accent) inset; background: transparent; }
+.tab-group.leaving > .tab.drag-src { opacity: .15; }
 
 #side-bottom {
   display: flex; justify-content: space-between; align-items: center;
   padding: 6px 10px; border-top: 1px solid var(--line); background: var(--side);
 }
-#grayscale.on { background: var(--fg); color: var(--side); }
+#color.on, #images.on { background: var(--fg); color: var(--side); }
 #sidebar-resize {
   position: absolute; top: 0; bottom: 0; right: -6px; width: 12px;
   cursor: col-resize; touch-action: none; z-index: 2;

@@ -6,7 +6,7 @@
 //!
 //! Security assumptions:
 //! - Sources come from `snorkle_core::userscripts::injections` /
-//!   `grayscale_toggle_js` (validated, guarded, literals escaped).
+//!   `view_mode_js` (validated, guarded, literals escaped).
 //! - Everything runs in WebKit's isolated default client world, main frame
 //!   only, so pages cannot see or call the injected code.
 //! - No script message handler exists: injected code has no way to send

@@ -25,7 +25,7 @@
   let bookmarks = [];
   let pins = [];
   const MAX_PINS = 4;
-  let settings = { grayscale: false };
+  let viewMode = { color: false, hide_images: false }; // session-only, set in Rust
   let scripts = [];
   let editingDomain = null; // domain of the script open in the editor, or '' for new
   let tabsKey = '';
@@ -98,12 +98,16 @@
     }
   }
 
+  // The split pair holding a tab, if any.
+  function pairOf(id) {
+    return (state.splits || []).find((p) => p.left === id || p.right === id) || null;
+  }
+
   function renderTabs() {
-    const split = state.split;
     const key = JSON.stringify([
       state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable]),
       state.active,
-      split,
+      state.splits,
     ]);
     if (key === tabsKey) return;
     tabsKey = key;
@@ -111,39 +115,58 @@
     const priv = $('private-tabs');
     normal.replaceChildren();
     priv.replaceChildren();
+    const byId = new Map(state.tabs.map((t) => [t.id, t]));
+    const placed = new Set();
     for (const t of state.tabs) {
-      const node = el('div', 'tab' + (t.id === state.active ? ' active' : '') + (t.private ? ' private' : '') + (t.live ? '' : ' discarded'));
-      node.dataset.tab = String(t.id);
-      node.setAttribute('role', 'tab');
-      node.setAttribute('aria-selected', String(t.id === state.active));
-      const open = el('button', 'open');
-      open.appendChild(el('span', 't', t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
-      if (t.url) {
-        const host = el('span', 'h');
-        fillLabels(host, t.url.registrable, false);
-        open.appendChild(host);
+      if (placed.has(t.id)) continue;
+      const pair = pairOf(t.id);
+      const list = t.private ? priv : normal;
+      if (pair && byId.has(pair.left) && byId.has(pair.right)) {
+        // A split pair is one row, at the position of whichever tab comes
+        // first, left pane on the left.
+        const group = el('div', 'tab-group' + (state.active === pair.left || state.active === pair.right ? ' active' : ''));
+        group.dataset.pair = String(pair.left);
+        group.setAttribute('role', 'group');
+        group.setAttribute('aria-label', 'Split view');
+        for (const id of [pair.left, pair.right]) {
+          group.appendChild(tabNode(byId.get(id), pair));
+          placed.add(id);
+        }
+        list.appendChild(group);
+      } else {
+        list.appendChild(tabNode(t, null));
+        placed.add(t.id);
       }
-      open.addEventListener('click', () => {
-        if (suppressClick) return;
-        invoke('activate_tab', { tab: t.id });
-        if (narrow) setSidebar(false);
-      });
-      node.appendChild(open);
-      if (split && (split.left === t.id || split.right === t.id)) {
-        const b = el('span', 'badge', split.left === t.id ? 'L' : 'R');
-        b.title = 'Shown in split view';
-        node.appendChild(b);
-      }
-      const close = el('button', 'close', '×');
-      close.setAttribute('aria-label', 'Close tab');
-      close.addEventListener('click', (ev) => { ev.stopPropagation(); invoke('close_tab', { tab: t.id }); });
-      node.appendChild(close);
-      node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'tab', id: t.id, private: t.private }));
-      (t.private ? priv : normal).appendChild(node);
     }
     $('private-head').hidden = !priv.childElementCount;
     const act = $('sidebar').querySelector('.tab.active');
     if (act && !dragState) act.scrollIntoView({ block: 'nearest' });
+  }
+
+  function tabNode(t, pair) {
+    const node = el('div', 'tab' + (t.id === state.active ? ' active' : '') + (t.private ? ' private' : '') + (t.live ? '' : ' discarded'));
+    node.dataset.tab = String(t.id);
+    node.setAttribute('role', 'tab');
+    node.setAttribute('aria-selected', String(t.id === state.active));
+    const open = el('button', 'open');
+    open.appendChild(el('span', 't', t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
+    if (t.url) {
+      const host = el('span', 'h');
+      fillLabels(host, t.url.registrable, false);
+      open.appendChild(host);
+    }
+    open.addEventListener('click', () => {
+      if (suppressClick) return;
+      invoke('activate_tab', { tab: t.id });
+      if (narrow) setSidebar(false);
+    });
+    node.appendChild(open);
+    const close = el('button', 'close', '×');
+    close.setAttribute('aria-label', 'Close tab');
+    close.addEventListener('click', (ev) => { ev.stopPropagation(); invoke('close_tab', { tab: t.id }); });
+    node.appendChild(close);
+    node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'tab', id: t.id, private: t.private, paired: !!pair }));
+    return node;
   }
 
   function renderToolbar(tab) {
@@ -377,8 +400,9 @@
   // ---- drag and drop ------------------------------------------------------
   //
   // Long-press (or mouse press) then move. Tab → bookmarks bar: bookmark it
-  // at that position. Tab → another tab: split view. Bookmark → bookmarks
-  // bar: reorder. A move before the long-press fires is a scroll.
+  // at that position. Tab → another tab: split view. A tab of a split pair
+  // → anywhere off its pair: unsplit. Bookmark → bookmarks bar: reorder. A
+  // move before the long-press fires is a scroll.
 
   const DRAG_DELAY_MS = 280;
   const MOVE_TOLERANCE_PX = 8;
@@ -434,21 +458,30 @@
       }
       return { kind: 'bookmarks', index, list, items };
     }
-    const tabNode = hit.closest('.tab');
-    if (tabNode && dragState.item.kind === 'tab') {
-      const id = Number(tabNode.dataset.tab);
-      if (id !== dragState.item.id) return { kind: 'tab', id, node: tabNode };
+    if (dragState.item.kind !== 'tab') return null;
+    const item = dragState.item;
+    const group = item.paired ? dragState.node.closest('.tab-group') : null;
+    if (group && group.contains(hit)) return null; // still inside its own pair
+    const node = hit.closest('.tab');
+    if (node) {
+      const id = Number(node.dataset.tab);
+      const other = state.tabs.find((x) => x.id === id);
+      // Tabs of different profiles are never paired.
+      if (id !== item.id && other && other.private === item.private) return { kind: 'tab', id, node };
     }
-    return null;
+    return group ? { kind: 'unsplit', group } : null;
   }
 
   function showDropFeedback(target) {
     document.querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+    document.querySelectorAll('.tab-group.leaving').forEach((n) => n.classList.remove('leaving'));
     const line = $('drop-line');
     line.hidden = true;
     if (!target) return;
     if (target.kind === 'tab') {
       target.node.classList.add('drop-target');
+    } else if (target.kind === 'unsplit') {
+      target.group.classList.add('leaving');
     } else if (target.kind === 'pins') {
       target.grid.classList.add('drop-target');
     } else {
@@ -478,6 +511,8 @@
     if (!commit || !t) return;
     if (d.item.kind === 'tab' && t.kind === 'tab') {
       invoke('split_tabs', { tab: d.item.id, with: t.id });
+    } else if (t.kind === 'unsplit') {
+      invoke('unsplit', { tab: d.item.id });
     } else if (d.item.kind === 'tab' && t.kind === 'bookmarks') {
       T.core.invoke('bookmark_tab', { tab: d.item.id, index: t.index })
         .then((added) => { if (!added) toast('Already bookmarked, or nothing to bookmark yet.'); return loadBookmarks(); })
@@ -795,10 +830,20 @@
       : 'Per-site settings can’t be changed in a private tab';
   }
 
-  function renderGrayscale() {
-    const b = $('grayscale');
-    b.classList.toggle('on', settings.grayscale);
-    b.setAttribute('aria-pressed', String(settings.grayscale));
+  function renderViewMode() {
+    const c = $('color');
+    c.classList.toggle('on', viewMode.color);
+    c.setAttribute('aria-pressed', String(viewMode.color));
+    const i = $('images');
+    i.classList.toggle('on', viewMode.hide_images);
+    i.setAttribute('aria-pressed', String(viewMode.hide_images));
+  }
+
+  function setViewMode(change) {
+    const next = { ...viewMode, ...change };
+    T.core.invoke('set_view_mode', { color: next.color, hideImages: next.hide_images })
+      .then((m) => { viewMode = m; renderViewMode(); })
+      .catch((e) => toast(String(e)));
   }
 
   function toast(msg) {
@@ -871,14 +916,10 @@
     if (narrow) setSidebar(false);
     invoke('new_tab', { private: true }).then(beginEdit);
   });
-  $('grayscale').addEventListener('click', () => {
-    const on = !settings.grayscale;
-    T.core.invoke('set_grayscale', { on })
-      .then(() => { settings.grayscale = on; renderGrayscale(); })
-      .catch((e) => toast(String(e)));
-  });
+  $('color').addEventListener('click', () => setViewMode({ color: !viewMode.color }));
+  $('images').addEventListener('click', () => setViewMode({ hide_images: !viewMode.hide_images }));
   $('sidebar-toggle').addEventListener('click', () => setSidebar(!sidebarOpen));
-  $('unsplit').addEventListener('click', () => invoke('unsplit'));
+  $('unsplit').addEventListener('click', withTab((t) => invoke('unsplit', { tab: t.id })));
   $('menu').addEventListener('click', () => (menuOpen ? closeMenu() : openMenu()));
   $('menu-history').addEventListener('click', openPanel);
   $('menu-settings').addEventListener('click', () => setModal(true));
@@ -963,5 +1004,5 @@
   T.core.invoke('get_state').then((s) => { state = s; render(); });
   loadBookmarks();
   loadPins();
-  T.core.invoke('get_settings').then((s) => { settings = s; renderGrayscale(); }).catch(() => {});
+  T.core.invoke('get_view_mode').then((m) => { viewMode = m; renderViewMode(); }).catch(() => {});
 })();

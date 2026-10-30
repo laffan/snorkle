@@ -21,6 +21,7 @@ use snorkle_core::browser::{Browser, ChromeState, Effect, NavErrorKind, NavKind,
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, Store};
 use snorkle_core::tabs::TabId;
+use snorkle_core::userscripts::ViewMode;
 use snorkle_core::Url;
 
 /// Monotonic milliseconds since app start (for tab LRU/TTL bookkeeping).
@@ -56,17 +57,24 @@ pub struct Shared {
     pub store: Option<Arc<Store>>,
     storage_tx: Option<Mutex<Sender<StorageJob>>>,
     pub(crate) emit: Emitter,
+    /// Black and white / hidden images. In memory only, so every launch
+    /// starts in black and white.
+    pub view_mode: Mutex<ViewMode>,
 }
 
 impl Shared {
     pub fn new(browser: Browser, store: Option<Store>, emit: Emitter) -> Arc<Self> {
         let store = store.map(Arc::new);
         let storage_tx = store.clone().map(|s| Mutex::new(spawn_storage_worker(s)));
-        Arc::new(Shared { browser: Mutex::new(browser), store, storage_tx, emit })
+        Arc::new(Shared { browser: Mutex::new(browser), store, storage_tx, emit, view_mode: Mutex::default() })
     }
 
     pub fn browser(&self) -> MutexGuard<'_, Browser> {
         self.browser.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn view_mode(&self) -> ViewMode {
+        *self.view_mode.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn view(&self) -> ChromeState {

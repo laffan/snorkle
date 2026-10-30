@@ -48,7 +48,7 @@ linked. Two copies would register duplicate Objective-C classes.
 
 | # | Boundary | Direction | Mechanism | Enforced by |
 |---|---|---|---|---|
-| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the black-and-white style, in the isolated client world with no way to send messages back (§5c). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
+| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
 | B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants the 18 app commands and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews below the toolbar, `clipsToBounds`. Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs`, `Browser::sync_visibility`, `browser_invariants.rs` |
@@ -138,22 +138,30 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   entries are validated to `[a-z0-9-.]` domains before they go into a regex. Rule lists are not a
   page-to-native channel.
 
-## 5c. User scripts, black-and-white mode, split view
+## 5c. User scripts, view modes, split view
 
 - **User scripts and styles** (`snorkle_core::userscripts`, `snorkle-content/src/ios/injection.rs`)
   are the one owner-approved exception to "no scripts in content". They are installed as
   main-frame `WKUserScript`s in WebKit's isolated client world and guarded by
   `location.hostname`. There is no native bridge. See SECURITY_REVIEW I1/I2.
-- **Black-and-white** uses the same mechanism with a constant style, plus one
-  `evaluateJavaScript` to toggle already-loaded pages.
-- **Split view:** the core keeps `split: Option<SplitView>`. Visibility effects carry a `Pane`
-  (`Full`, `Left` or `Right`), and the host places each container in its half, with a 2 pt
-  divider. Both panes are protected from discard. Choosing a tab outside the pair, or closing
-  one of its tabs, ends the split. A tap in a pane focuses it.
+- **View modes** use the same mechanism with constant styles, plus one `evaluateJavaScript` to
+  update already-loaded pages. Pages are black and white by default; the palette button shows
+  colour and the images button hides images (`img`, `picture`, SVG `image`, CSS background
+  images). Both are session-only (`Shared::view_mode`, not persisted), so every launch starts
+  in black and white with images shown. Hidden `<img>` elements are still downloaded; CSS
+  background images are not.
+- **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
+  tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects
+  carry a `Pane` (`Full`, `Left` or `Right`), and the host places each container in its half,
+  with a 2 pt divider. The panes on screen are protected from discard; pairs not on screen can
+  be discarded and are restored together when chosen. Choosing a tab outside any pair shows it
+  alone and keeps the pairs. Closing a tab, pairing one of its tabs elsewhere, or unsplitting
+  ends a pair. The sidebar shows each pair as one row with a half per tab; dragging a half out
+  of the row unsplits it. Pairs are not saved in the session. A tap in a pane focuses it.
 
 ## 5b. Chrome layout
 
-Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, and dragging one tab onto another opens split view. The bottom bar holds the menu (History, Settings), new tab, new private tab and black-and-white. In windows at least 700 pt wide the sidebar is
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices). The bottom bar holds the menu (History, Settings), new tab, new private tab, colour and hide images. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both

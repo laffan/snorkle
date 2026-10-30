@@ -153,18 +153,31 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 36. **[verify] Black-and-white mode.** `html{filter:grayscale(1)}` should not break fixed
     positioning (the CSS spec exempts the root element) and should cost little GPU on long
     pages. Video and canvas get the filter too. Pages can remove the style element (cosmetic
-    only).
+    only). It is now on by default (2026-10-30) and colour is a session-only toggle: check that
+    the first page after launch never paints in colour.
+    **Hidden images** (2026-10-30) use a second constant style at document start. To check: no
+    image flashes before the style applies; iframes (main-frame-only scripts) still show their
+    images; `<img>` files are still downloaded (only CSS background images are skipped).
+    **[decide]** Block image loads too, with a WebKit content rule (`resource-type: image`,
+    saves data, needs a reload to toggle), and whether either mode should be remembered across
+    launches.
 37. **[verify] Split view.** Tap-to-focus uses a gesture recognizer that fires simultaneously with
     WebKit's own and does not cancel touches. Confirm links and scrolling are unaffected. The
     50/50 split has no draggable divider yet. The memory budget counts both panes as protected;
-    split is refused when the budget is below 2 live views.
+    split is refused when the budget is below 2 live views. Several pairs can exist (2026-10-30);
+    only the one on screen is protected. **[gap]** Pairs are not saved in the session, and
+    private and normal tabs cannot be paired (the sidebar lists them separately).
 38. **[verify] Sidebar resizing** reports the new content inset once per animation frame, so the
     page re-lays out continuously while dragging. Check smoothness on heavy pages; if it is
     choppy, move the content view only on release and show a placeholder edge while dragging.
 39. **[verify] Drag and drop on touch.** Uses long-press (280 ms) then pointer events, with
     `touchmove.preventDefault()` once dragging. Verify there is no conflict with iPadOS
     long-press menus or text selection in the chrome webview. Private tabs cannot be dropped
-    into bookmarks. Tabs themselves cannot be reordered yet.
+    into bookmarks. Tabs themselves cannot be reordered yet. Dragging a tab out of a split pair
+    onto the page area relies on the chrome webview still receiving the pointer while it is
+    over a native content view (touch sequences stay with the view they began in); verify.
+    Tab close buttons show on hover (`any-hover: hover`) and on the active tab otherwise; check
+    a first tap on a tab still opens it on iPadOS with a trackpad attached.
 40. **[decide] "Empty Cache"** clears the HTTP disk and memory caches of the default and current
     private stores. It does not clear cookies, local storage or service-worker caches. A fuller
     "Clear website data" option is a separate decision.

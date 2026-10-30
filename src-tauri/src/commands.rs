@@ -14,6 +14,7 @@ use snorkle_core::browser::ChromeState;
 use snorkle_core::input::InputError;
 use snorkle_core::tabs::{Profile, TabId};
 use snorkle_core::url_display::{self, DisplayUrl};
+use snorkle_core::userscripts::ViewMode;
 use snorkle_core::Url;
 
 use crate::state::{now_ms, with_host, Shared};
@@ -240,25 +241,26 @@ pub fn split_tabs(s: S<'_>, tab: u64, with: u64) {
     with_browser(&s, |b| b.split(TabId(tab), TabId(with), now_ms()));
 }
 
+/// Ends the split pair holding `tab` (dragging a tab out of its pair, or
+/// the toolbar's Unsplit button).
 #[tauri::command]
-pub fn unsplit(s: S<'_>) {
-    with_browser(&s, |b| b.unsplit());
+pub fn unsplit(s: S<'_>, tab: u64) {
+    with_browser(&s, |b| b.unsplit(TabId(tab)));
 }
 
 #[tauri::command]
-pub fn get_settings(s: S<'_>) -> snorkle_core::storage::Settings {
-    s.store.as_ref().map(|st| st.settings()).unwrap_or_default()
+pub fn get_view_mode(s: S<'_>) -> ViewMode {
+    s.view_mode()
 }
 
-/// Black-and-white rendering for all pages, applied immediately.
+/// Colour or black and white, images shown or hidden, for all pages,
+/// applied immediately. Not persisted.
 #[tauri::command]
-pub async fn set_grayscale(s: S<'_>, on: bool) -> Result<(), String> {
-    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
-    let mut settings = store.settings();
-    settings.grayscale = on;
-    store.set_settings(settings).map_err(|e| e.to_string())?;
-    crate::scripts::apply(&s, Some(snorkle_core::userscripts::grayscale_toggle_js(on)));
-    Ok(())
+pub fn set_view_mode(s: S<'_>, color: bool, hide_images: bool) -> ViewMode {
+    let mode = ViewMode { color, hide_images };
+    *s.view_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode;
+    crate::scripts::apply(&s, Some(snorkle_core::userscripts::view_mode_js(mode)));
+    mode
 }
 
 /// Empties the HTTP caches (not cookies or site data).

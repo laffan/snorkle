@@ -87,7 +87,8 @@ pub enum Pane {
     Right,
 }
 
-/// Two tabs shown side by side.
+/// Two tabs shown side by side. A tab belongs to at most one pair; the
+/// pair holding the active tab is the one on screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct SplitView {
     pub left: TabId,
@@ -185,7 +186,10 @@ pub struct ChromeState {
     pub active: Option<TabId>,
     pub os: OsSupport,
     pub content_visible: bool,
+    /// The pair on screen (the one holding the active tab), if any.
     pub split: Option<SplitView>,
+    /// Every pair, shown or not.
+    pub splits: Vec<SplitView>,
     pub max_live_tabs: usize,
     pub adblock: AdblockStatus,
 }
@@ -204,7 +208,7 @@ pub struct Browser {
     search: SearchEngine,
     chrome_overlay: bool,
     shown: Vec<(TabId, Pane)>,
-    split: Option<SplitView>,
+    splits: Vec<SplitView>,
     adblock_allowed: BTreeSet<String>,
     adblock_status: AdblockStatus,
 }
@@ -222,7 +226,7 @@ impl Browser {
             search: input::DEFAULT_SEARCH,
             chrome_overlay: false,
             shown: Vec::new(),
-            split: None,
+            splits: Vec::new(),
             adblock_allowed: BTreeSet::new(),
             adblock_status: AdblockStatus::Off,
         }
@@ -319,10 +323,6 @@ impl Browser {
     }
 
     fn activate_into(&mut self, id: TabId, now: u64, out: &mut Vec<Effect>) {
-        // Choosing a tab outside the split ends the split.
-        if self.split.is_some_and(|s| s.left != id && s.right != id) {
-            self.split = None;
-        }
         if let Some(prev) = self.active {
             if let Some(t) = self.tab_mut(prev) {
                 t.last_active_ms = now;
@@ -332,36 +332,54 @@ impl Browser {
             return;
         }
         self.active = Some(id);
+        // Choosing a tab in a pair shows the pair, so its partner needs a
+        // live view too.
+        if let Some(partner) = self.pair_of(id).map(|s| if s.left == id { s.right } else { s.left }) {
+            self.restore_if_unloaded(partner, now, out);
+        }
         self.restore_if_unloaded(id, now, out);
         self.enforce_budget(now, out);
         self.sync_visibility(out);
     }
 
-    /// Shows `dragged` beside `target` (target left, dragged right) and
-    /// focuses `dragged`. Both get live web views.
+    /// Pairs `dragged` with `target` (target left, dragged right) and
+    /// focuses `dragged`. Both get live web views. Any pair either tab was
+    /// in ends. Tabs of different profiles are never paired.
     pub fn split(&mut self, dragged: TabId, target: TabId, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
         // Both panes need live web views; never exceed the memory budget.
-        if dragged == target || self.budget.max_live < 2 || self.tab(dragged).is_none() || self.tab(target).is_none() {
+        if dragged == target || self.budget.max_live < 2 {
             return out;
         }
-        self.split = Some(SplitView { left: target, right: dragged });
-        self.restore_if_unloaded(target, now, &mut out);
+        match (self.tab(dragged), self.tab(target)) {
+            (Some(d), Some(t)) if d.profile == t.profile => {}
+            _ => return out,
+        }
+        self.splits.retain(|s| ![s.left, s.right].iter().any(|t| *t == dragged || *t == target));
+        self.splits.push(SplitView { left: target, right: dragged });
         self.activate_into(dragged, now, &mut out);
         out.push(Effect::NotifyChrome);
         out
     }
 
-    pub fn unsplit(&mut self) -> Vec<Effect> {
+    /// Ends the pair holding `id`, if any. Both tabs stay open and the
+    /// active tab stays active (full width if its pair was on screen).
+    pub fn unsplit(&mut self, id: TabId) -> Vec<Effect> {
         let mut out = Vec::new();
-        self.split = None;
+        let Some(pair) = self.pair_of(id) else { return out };
+        self.splits.retain(|s| *s != pair);
         self.sync_visibility(&mut out);
         out.push(Effect::NotifyChrome);
         out
     }
 
+    /// The pair on screen: the one holding the active tab.
     pub fn split_view(&self) -> Option<SplitView> {
-        self.split
+        self.active.and_then(|a| self.pair_of(a))
+    }
+
+    fn pair_of(&self, id: TabId) -> Option<SplitView> {
+        self.splits.iter().copied().find(|s| s.left == id || s.right == id)
     }
 
     fn restore_if_unloaded(&mut self, id: TabId, now: u64, out: &mut Vec<Effect>) {
@@ -378,10 +396,10 @@ impl Browser {
     }
 
     /// The active tab and its split partner are never discarded by the
-    /// budget or memory warnings.
+    /// budget or memory warnings. Pairs not on screen can be discarded.
     fn is_protected(&self, id: TabId) -> bool {
         Some(id) == self.active
-            || self.split.is_some_and(|s| s.left == id || s.right == id)
+            || self.split_view().is_some_and(|s| s.left == id || s.right == id)
             // The opener of the active popup stays alive so the popup can
             // hand its result back (OAuth).
             || self.active.and_then(|a| self.tab(a)).and_then(|t| t.opener) == Some(id)
@@ -392,9 +410,7 @@ impl Browser {
         let Some(idx) = self.tabs.iter().position(|t| t.id == id) else { return out };
         let tab = self.tabs.remove(idx);
         self.shown.retain(|(t, _)| *t != id);
-        if self.split.is_some_and(|s| s.left == id || s.right == id) {
-            self.split = None;
-        }
+        self.splits.retain(|s| s.left != id && s.right != id);
         if tab.life == Life::Live {
             out.push(Effect::DestroyView { tab: id, keep_state: false });
         }
@@ -984,7 +1000,7 @@ impl Browser {
         if self.chrome_overlay {
             return Vec::new();
         }
-        let wanted = match (self.split, self.active) {
+        let wanted = match (self.split_view(), self.active) {
             (Some(s), _) => vec![(s.left, Pane::Left), (s.right, Pane::Right)],
             (None, Some(a)) => vec![(a, Pane::Full)],
             (None, None) => Vec::new(),
@@ -1051,7 +1067,8 @@ impl Browser {
             active: self.active,
             os: self.os,
             content_visible: !self.shown.is_empty(),
-            split: self.split,
+            split: self.split_view(),
+            splits: self.splits.clone(),
             max_live_tabs: self.budget.max_live,
             adblock: self.adblock_status.clone(),
         }

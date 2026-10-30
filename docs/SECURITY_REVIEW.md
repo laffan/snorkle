@@ -13,7 +13,7 @@ review on every change.
 | `crates/snorkle-core/src/url_display.rs`, `idn.rs` | Anti-spoofing display |
 | `crates/snorkle-core/src/input.rs` | Address-bar input → URL |
 | `crates/snorkle-core/src/storage.rs` | Persistence |
-| `crates/snorkle-core/src/userscripts.rs`, `crates/snorkle-content/src/ios/injection.rs` | Script injection into content (user scripts, black-and-white mode) |
+| `crates/snorkle-core/src/userscripts.rs`, `crates/snorkle-content/src/ios/injection.rs` | Script injection into content (user scripts, view modes: black and white, hidden images) |
 | `crates/snorkle-core/src/blocking.rs`, `crates/snorkle-content/src/ios/rules.rs`, `src-tauri/src/adblock.rs` | Content blocking, allowlist regex generation, WebKit rule store |
 | `crates/snorkle-content/src/lib.rs` (`CONTENT_VIEW_SPEC`) | Content web view configuration |
 | `crates/snorkle-content/src/ios/*.rs` | Native boundary, unsafe FFI, hand-written bindings |
@@ -55,7 +55,7 @@ Native → page code paths (not channels back to native, but reviewed the same w
 |---|---|---|---|
 | I1 | User scripts and styles (`WKUserScript`) | User-written CSS/JS for domains they chose | Isolated default client world; main frame only; guarded by the document's real `location.hostname`; CSS and domain embedded as escaped JSON literals; no message handler or `GM_*` API. Every saved script's source is present (guarded) in every page's client world. |
 | F1 | Pinned-grid favicons (`ios/favicon.rs`) | Fixed HTML `<img src="https://<validated host>/favicon.ico">` in a hidden web view: JS off, non-persistent store, only `about:blank` navigation allowed | WebKit decodes the image in its sandbox; the app receives snapshot pixels and re-encodes a PNG. Storage accepts only PNGs ≤ 64 KB, and the chrome receives them as `data:` URLs (`img-src 'self' data:`, the only `data:` in its CSP). App-initiated request: one per pinned host. |
-| I2 | Black-and-white mode | Constant `html{filter:grayscale(1)}` style, via user script and one `evaluateJavaScript` (no completion handler) | Same world and frame constraints; takes no input |
+| I2 | View modes: black and white (default on), hidden images | Constant styles (`GRAYSCALE_CSS`, `NO_IMAGES_CSS` in `userscripts.rs`), via user script and one `evaluateJavaScript` (no completion handler) | Same world and frame constraints; takes no input. Session-only state |
 
 Sign-off log:
 
@@ -64,6 +64,7 @@ Sign-off log:
 | 2026-10-29 | Content web views built with objc2-web-kit instead of wry (Tauri/wry cannot host child webviews on iOS) | Owner (in session) |
 | 2026-10-30 | Popups keep `window.opener` (C5) to fix OAuth logins, owner request; favicons via sandboxed snapshot (F1), owner choice; native keyboard shortcuts (C12) | Owner (in session) |
 | 2026-10-29 | Script injection into content: user scripts/styles per domain and black-and-white mode (I1, I2), confined to `ios/injection.rs` (tripwire allowlist) | Owner (feature request in session) |
+| 2026-10-30 | Black and white on by default, colour and hidden images as session-only toggles (I2 extended with a second constant style), owner request | **Pending owner sign-off** |
 
 ## Checklist for AI-assisted changes in review-required areas
 

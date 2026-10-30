@@ -421,19 +421,92 @@ fn split_shows_both_tabs_side_by_side() {
 }
 
 #[test]
-fn split_ends_when_a_tab_outside_it_is_chosen_or_a_pane_closes() {
+fn split_pairs_survive_choosing_another_tab_and_end_when_a_pane_closes() {
     let mut b = browser(6);
     let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
     let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
     let (d, _) = open_and_load(&mut b, "https://d.example/", 2);
     b.split(c, a, 3);
     let out = b.activate(d, 4);
-    assert!(b.view().split.is_none());
+    assert!(b.view().split.is_none(), "a tab outside the pair is shown alone");
+    assert_eq!(b.view().splits, vec![SplitView { left: a, right: c }], "the pair is kept");
     assert!(out.contains(&Effect::HideView(a)) && out.contains(&Effect::HideView(c)));
     assert!(out.contains(&Effect::ShowView { tab: d, pane: Pane::Full }));
-    b.split(d, a, 5);
+    // Choosing either tab of the pair shows the pair again.
+    let out = b.activate(a, 5);
+    assert_eq!(b.view().split, Some(SplitView { left: a, right: c }));
+    assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }));
+    assert!(out.contains(&Effect::ShowView { tab: c, pane: Pane::Right }));
     b.close(a, 6);
+    assert!(b.view().splits.is_empty());
     assert!(b.view().split.is_none());
+}
+
+#[test]
+fn several_pairs_and_repairing() {
+    let mut b = browser(8);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
+    let (d, _) = open_and_load(&mut b, "https://d.example/", 2);
+    let (e, _) = open_and_load(&mut b, "https://e.example/", 3);
+    b.split(c, a, 4);
+    b.split(e, d, 5);
+    assert_eq!(b.view().splits, vec![SplitView { left: a, right: c }, SplitView { left: d, right: e }]);
+    assert_eq!(b.view().split, Some(SplitView { left: d, right: e }));
+    // Pairing tabs from two pairs ends both and makes one new pair.
+    b.split(d, a, 6);
+    assert_eq!(b.view().splits, vec![SplitView { left: a, right: d }]);
+}
+
+#[test]
+fn dragging_a_tab_out_of_its_pair_unsplits_it() {
+    let mut b = browser(6);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
+    let (d, _) = open_and_load(&mut b, "https://d.example/", 2);
+    b.split(c, a, 3);
+    b.activate(d, 4);
+    // Unsplitting a pair that is not on screen changes nothing visible.
+    assert!(!b.unsplit(a).iter().any(|e| matches!(e, Effect::ShowView { .. } | Effect::HideView(_))));
+    assert!(b.view().splits.is_empty());
+    assert!(b.unsplit(a).is_empty(), "no pair left");
+    // Unsplitting the pair on screen leaves the active tab full width.
+    b.split(c, a, 5);
+    let out = b.unsplit(a);
+    assert_eq!(b.active(), Some(c));
+    assert!(out.contains(&Effect::HideView(a)));
+    assert!(out.contains(&Effect::ShowView { tab: c, pane: Pane::Full }));
+}
+
+#[test]
+fn private_and_default_tabs_are_never_paired() {
+    let mut b = browser(4);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (p, _) = b.new_tab(Profile::Private, 1);
+    assert!(b.split(p, a, 2).is_empty());
+    assert!(b.view().splits.is_empty());
+}
+
+#[test]
+fn hidden_pair_can_be_discarded_and_comes_back_whole() {
+    let mut b = browser(2);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
+    b.split(c, a, 2);
+    let (d, _) = open_and_load(&mut b, "https://d.example/", 3);
+    assert!(b.live_count() <= 2);
+    let out = b.activate(a, 4);
+    assert_eq!(b.view().split, Some(SplitView { left: a, right: c }));
+    assert_eq!(b.live_count(), 2);
+    let created: Vec<_> = out
+        .iter()
+        .filter_map(|e| match e {
+            Effect::CreateView { tab, .. } => Some(*tab),
+            _ => None,
+        })
+        .collect();
+    assert!(!created.is_empty(), "discarded panes are restored");
+    assert!(b.tab(d).is_some());
 }
 
 #[test]

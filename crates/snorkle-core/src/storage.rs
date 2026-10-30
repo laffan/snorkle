@@ -87,25 +87,14 @@ struct Data {
     bookmarks: Vec<Bookmark>,
     /// Sites (registrable domains) where the user turned ad blocking off.
     adblock_allowed: BTreeSet<String>,
-    settings: Settings,
     user_scripts: Vec<UserScript>,
     pins: Vec<Bookmark>,
-}
-
-/// User preferences that native code needs (UI-only preferences such as the
-/// sidebar width stay in the chrome's localStorage).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Settings {
-    /// Render pages in black and white.
-    pub grayscale: bool,
 }
 
 const HISTORY_FILE: &str = "history.json";
 const BOOKMARKS_FILE: &str = "bookmarks.json";
 const SESSION_FILE: &str = "session.json";
 const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
-const SETTINGS_FILE: &str = "settings.json";
 const USER_SCRIPTS_FILE: &str = "user-scripts.json";
 const PINS_FILE: &str = "pins.json";
 const ICONS_DIR: &str = "icons";
@@ -141,7 +130,6 @@ impl Store {
             .filter_map(|s| crate::blocking::normalise_site(s))
             .take(MAX_BOOKMARKS)
             .collect();
-        let settings: Settings = load_or_reset(&dir.join(SETTINGS_FILE));
         let mut user_scripts: Vec<UserScript> = load_or_reset::<Vec<UserScript>>(&dir.join(USER_SCRIPTS_FILE))
             .into_iter()
             .filter_map(|s| userscripts::validate(s).ok())
@@ -157,7 +145,7 @@ impl Store {
             None => false,
         });
         pins.truncate(MAX_PINS);
-        Ok(Store { dir, inner: Mutex::new(Data { history, bookmarks, adblock_allowed, settings, user_scripts, pins }) })
+        Ok(Store { dir, inner: Mutex::new(Data { history, bookmarks, adblock_allowed, user_scripts, pins }) })
     }
 
     fn data(&self) -> std::sync::MutexGuard<'_, Data> {
@@ -311,19 +299,6 @@ impl Store {
         fs::create_dir_all(&dir)?;
         atomic_write(&dir.join(format!("{host}.png")), png)?;
         Ok(true)
-    }
-
-    pub fn settings(&self) -> Settings {
-        self.data().settings.clone()
-    }
-
-    pub fn set_settings(&self, settings: Settings) -> std::io::Result<()> {
-        let snapshot = {
-            let mut d = self.data();
-            d.settings = settings;
-            serde_json::to_vec(&d.settings)?
-        };
-        atomic_write(&self.dir.join(SETTINGS_FILE), &snapshot)
     }
 
     pub fn user_scripts(&self) -> Vec<UserScript> {
@@ -574,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn user_scripts_and_settings_roundtrip() {
+    fn user_scripts_roundtrip() {
         let dir = tmpdir("userscripts");
         let s = Store::open(&dir).unwrap();
         let us = |d: &str, js: &str| UserScript { domain: d.into(), css: String::new(), js: js.into(), enabled: true };
@@ -583,7 +558,6 @@ mod tests {
         assert!(s.save_user_script(us("not a domain", "c()")).is_err());
         assert_eq!(s.user_scripts().len(), 1);
         assert_eq!(s.user_scripts()[0].js, "b()");
-        s.set_settings(Settings { grayscale: true }).unwrap();
         drop(s);
         fs::write(
             dir.join(USER_SCRIPTS_FILE),
@@ -592,7 +566,6 @@ mod tests {
         .unwrap();
         let s = Store::open(&dir).unwrap();
         assert_eq!(s.user_scripts().len(), 1, "tampered entries are dropped on load");
-        assert!(s.settings().grayscale);
         s.delete_user_script("ok.example").unwrap();
         assert!(s.user_scripts().is_empty());
     }
