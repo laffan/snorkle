@@ -56,7 +56,8 @@ fn scan_allowing(dirs: &[&str], ext: &str, forbidden: &[&str], allowed: &[(&str,
 }
 
 /// Owner sign-off 2026-10-29: user scripts/styles and black-and-white mode,
-/// injected into the isolated client world from this one file only.
+/// injected into the isolated client world from this one file only; and
+/// 2026-10-30: the page console hook and its message handler (C13).
 const INJECTION_FILE: &str = "crates/snorkle-content/src/ios/injection.rs";
 
 #[test]
@@ -88,6 +89,10 @@ fn no_webkit_page_to_native_channels() {
             (INJECTION_FILE, "addUserScript"),
             (INJECTION_FILE, "WKUserScript"),
             (INJECTION_FILE, "evaluateJavaScript"),
+            // Owner request 2026-10-30: page console capture (C13), on demand.
+            (INJECTION_FILE, "WKScriptMessageHandler"),
+            (INJECTION_FILE, "addScriptMessageHandler"),
+            (INJECTION_FILE, "pageWorld"),
         ],
     );
 }

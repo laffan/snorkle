@@ -12,12 +12,15 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use snorkle_content::{ContentEvents, ContentHost};
 use snorkle_core::browser::{Browser, ChromeState, Effect, NavErrorKind, NavKind, PopupStyle, Verdict};
+use snorkle_core::console::{self, ConsoleLog};
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, Store};
 use snorkle_core::tabs::TabId;
@@ -48,6 +51,10 @@ pub enum ChromeEvent<'a> {
     Shortcut(&'a str),
     /// Pinned grid content (e.g. a favicon) changed.
     PinsChanged,
+    /// A new console entry.
+    Console(&'a console::Entry),
+    /// Console entries were removed (cleared, or the private session ended).
+    ConsoleReset,
 }
 
 pub type Emitter = Box<dyn Fn(ChromeEvent<'_>) + Send + Sync>;
@@ -60,13 +67,26 @@ pub struct Shared {
     /// Black and white / hidden images. In memory only, so every launch
     /// starts in black and white.
     pub view_mode: Mutex<ViewMode>,
+    /// In-app console (in memory only).
+    pub console: Mutex<ConsoleLog>,
+    /// Whether the console records (and pages get the console hook). On by
+    /// default in debug builds only.
+    pub console_capture: AtomicBool,
 }
 
 impl Shared {
     pub fn new(browser: Browser, store: Option<Store>, emit: Emitter) -> Arc<Self> {
         let store = store.map(Arc::new);
         let storage_tx = store.clone().map(|s| Mutex::new(spawn_storage_worker(s)));
-        Arc::new(Shared { browser: Mutex::new(browser), store, storage_tx, emit, view_mode: Mutex::default() })
+        Arc::new(Shared {
+            browser: Mutex::new(browser),
+            store,
+            storage_tx,
+            emit,
+            view_mode: Mutex::default(),
+            console: Mutex::default(),
+            console_capture: AtomicBool::new(cfg!(debug_assertions)),
+        })
     }
 
     pub fn browser(&self) -> MutexGuard<'_, Browser> {
@@ -85,9 +105,43 @@ impl Shared {
         (self.emit)(ChromeEvent::Toast(msg));
     }
 
+    pub fn console_log(&self) -> MutexGuard<'_, ConsoleLog> {
+        self.console.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn capturing(&self) -> bool {
+        self.console_capture.load(Ordering::Relaxed)
+    }
+
+    /// Records an app message in the console (if capturing). Must be called
+    /// WITHOUT the browser lock held (it checks whether `tab` is private).
+    pub fn log(&self, level: console::Level, tab: Option<TabId>, text: &str) {
+        if cfg!(debug_assertions) {
+            eprintln!("[snorkle] {text}");
+        }
+        if !self.capturing() {
+            return;
+        }
+        let private = tab.is_some_and(|t| self.browser().tab(t).is_some_and(|t| t.is_private()));
+        let entry = self.console_log().app(now_ms(), level, tab, private, text).clone();
+        (self.emit)(ChromeEvent::Console(&entry));
+    }
+
+    /// Records what a page wrote to its console (see `ContentEvents`).
+    fn page_log(&self, tab: Option<TabId>, host: &str, main_frame: bool, body: &str) {
+        if !self.capturing() {
+            return;
+        }
+        let private = tab.is_some_and(|t| self.browser().tab(t).is_some_and(|t| t.is_private()));
+        let entry = self.console_log().page(now_ms(), tab, private, host, main_frame, body).cloned();
+        if let Some(entry) = entry {
+            (self.emit)(ChromeEvent::Console(&entry));
+        }
+    }
+
     /// Routes effects. Must be called WITHOUT the browser lock held.
     pub fn run(self: &Arc<Self>, effects: Vec<Effect>) {
-        debug_log_effects(&effects);
+        self.log_effects(&effects);
         let mut host_effects = Vec::new();
         let mut notify = false;
         for e in effects {
@@ -97,6 +151,11 @@ impl Shared {
                     self.storage(StorageJob::History { url: url.to_string(), title })
                 }
                 Effect::PersistSession(s) => self.storage(StorageJob::Session(s)),
+                Effect::ReleasePrivateData => {
+                    self.console_log().drop_private();
+                    (self.emit)(ChromeEvent::ConsoleReset);
+                    host_effects.push(Effect::ReleasePrivateData);
+                }
                 other => host_effects.push(other),
             }
         }
@@ -124,15 +183,40 @@ impl Shared {
     }
 }
 
-/// Debug builds only: prints what the core decided, so navigation can be
-/// followed in the terminal running `tauri dev` / `tauri ios dev`. URLs of
-/// private tabs are printed too; never enable this in release builds.
-fn debug_log_effects(effects: &[Effect]) {
-    if cfg!(debug_assertions) {
+impl Shared {
+    /// Logs what the core decided, so navigation can be followed in the
+    /// in-app console (while capturing) and, in debug builds, the terminal
+    /// running `tauri dev` / `tauri ios dev`. Entries about private tabs
+    /// are dropped from the console when the private session ends.
+    fn log_effects(&self, effects: &[Effect]) {
+        if !cfg!(debug_assertions) && !self.capturing() {
+            return;
+        }
+        let private: HashSet<TabId> = {
+            let b = self.browser();
+            b.view().tabs.iter().filter(|t| t.private).map(|t| t.id).collect()
+        };
         for e in effects {
-            match e {
-                Effect::NotifyChrome | Effect::PersistSession(_) => {}
-                other => eprintln!("[snorkle] effect {other:?}"),
+            let tab = match e {
+                Effect::NotifyChrome | Effect::PersistSession(_) => continue,
+                Effect::CreateView { tab, .. }
+                | Effect::AdoptPopup { tab }
+                | Effect::DestroyView { tab, .. }
+                | Effect::ShowView { tab, .. }
+                | Effect::Load { tab, .. } => Some(*tab),
+                Effect::HideView(t) | Effect::GoBack(t) | Effect::GoForward(t) | Effect::Reload(t) | Effect::Stop(t) => {
+                    Some(*t)
+                }
+                _ => None,
+            };
+            if cfg!(debug_assertions) {
+                eprintln!("[snorkle] effect {e:?}");
+            }
+            if self.capturing() {
+                let text = format!("effect {e:?}");
+                let p = tab.is_some_and(|t| private.contains(&t));
+                let entry = self.console_log().app(now_ms(), console::Level::Debug, tab, p, &text).clone();
+                (self.emit)(ChromeEvent::Console(&entry));
             }
         }
     }
@@ -210,9 +294,8 @@ impl Events {
 impl ContentEvents for Events {
     fn decide_navigation(&self, tab: TabId, url: &Url, frame: Frame, kind: NavKind) -> Verdict {
         let (verdict, effects) = self.shared.browser().decide_navigation(tab, url, frame, kind, now_ms());
-        if cfg!(debug_assertions) {
-            eprintln!("[snorkle] policy tab={} {frame:?} {kind:?} {url} -> {verdict:?}", tab.0);
-        }
+        let level = if verdict == Verdict::Cancel { console::Level::Warn } else { console::Level::Debug };
+        self.shared.log(level, Some(tab), &format!("policy {frame:?} {kind:?} {url} -> {verdict:?}"));
         self.shared.run(effects);
         verdict
     }
@@ -221,6 +304,9 @@ impl ContentEvents for Events {
     }
     fn popup_requested(&self, opener: TabId, url: Option<Url>, style: PopupStyle) -> Option<TabId> {
         let (tab, effects) = self.shared.browser().open_popup(opener, url.as_ref(), style, now_ms());
+        let shown = url.as_ref().map_or("about:blank".to_string(), |u| u.to_string());
+        let result = tab.map_or("refused".to_string(), |t| format!("tab {}", t.0));
+        self.shared.log(console::Level::Info, Some(opener), &format!("popup {style:?} {shown} -> {result}"));
         self.shared.run(effects);
         tab
     }
@@ -271,6 +357,9 @@ impl ContentEvents for Events {
         if self.shared.browser().active() != Some(tab) {
             self.apply(|b| b.activate(tab, now_ms()));
         }
+    }
+    fn console_message(&self, tab: Option<TabId>, origin_host: String, main_frame: bool, body: String) {
+        self.shared.page_log(tab, &origin_host, main_frame, &body);
     }
     fn memory_warning(&self) {
         self.apply(|b| b.on_memory_warning());

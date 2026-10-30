@@ -86,6 +86,10 @@ pub trait ContentEvents: 'static {
     fn shortcut(&self, shortcut: Shortcut);
     /// The user tapped inside a content pane (focus it in split view).
     fn focus_requested(&self, tab: TabId);
+    /// A page's console output or uncaught error (only while console
+    /// capture is on). `body` is page-controlled; `tab`, `origin_host` and
+    /// `main_frame` come from WebKit.
+    fn console_message(&self, tab: Option<TabId>, origin_host: String, main_frame: bool, body: String);
     fn memory_warning(&self);
     fn did_enter_background(&self);
 }
@@ -104,6 +108,9 @@ pub struct ContentViewSpec {
     pub script_message_handlers: &'static [&'static str],
     /// `WKWebViewConfiguration.setURLSchemeHandler` schemes.
     pub url_scheme_handlers: &'static [&'static str],
+    /// The one message handler installed on demand: page console capture,
+    /// page world only, only while the user has capture on (channel C13).
+    pub console_capture_handler: &'static str,
     /// Block `window.open` without a user gesture.
     pub javascript_can_open_windows_automatically: bool,
     /// Element fullscreen lets a page hide browser chrome and draw a fake
@@ -130,6 +137,7 @@ pub const CONTENT_VIEW_SPEC: ContentViewSpec = ContentViewSpec {
     user_scripts: &[],
     script_message_handlers: &[],
     url_scheme_handlers: &[],
+    console_capture_handler: snorkle_core::console::PAGE_HANDLER_NAME,
     javascript_can_open_windows_automatically: false,
     element_fullscreen: false,
     upgrade_known_hosts_to_https: true,

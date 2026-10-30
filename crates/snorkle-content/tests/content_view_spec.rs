@@ -13,6 +13,13 @@ fn no_page_to_native_channels() {
 }
 
 #[test]
+fn console_capture_is_the_only_on_demand_channel() {
+    // Signed off 2026-10-30 (SECURITY_REVIEW C13): installed only while the
+    // user has console capture on.
+    assert_eq!(S.console_capture_handler, snorkle_core::console::PAGE_HANDLER_NAME);
+}
+
+#[test]
 fn anti_spoofing_and_popup_settings() {
     assert!(!S.javascript_can_open_windows_automatically);
     assert!(!S.element_fullscreen, "element fullscreen lets a page hide the address bar");

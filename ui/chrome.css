@@ -235,6 +235,32 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 #scripts-new { margin-top: 12px; }
 
+/* ---- console ------------------------------------------------------------ */
+#console {
+  /* `left` is set from JS (docked sidebar width); height is --console-h. */
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; height: var(--console-h, 34vh);
+  display: flex; flex-direction: column; background: var(--bar); border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.console-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.console-head .icon { min-width: 32px; height: 32px; font-size: 20px; }
+.seg { display: inline-flex; background: var(--field); border-radius: 8px; padding: 2px; }
+.seg button { font-size: 12px; padding: 4px 8px; border-radius: 6px; }
+.seg button[aria-pressed="true"] { background: var(--bar); font-weight: 600; }
+#console-capture[aria-pressed="true"] { color: var(--danger); }
+.console-note { margin: 0; padding: 6px 10px; font-size: 12px; background: var(--warn-bg); }
+.console-list {
+  flex: 1; overflow-y: auto; margin: 0; padding: 0; list-style: none;
+  font: 12px/1.4 ui-monospace, Menlo, monospace; -webkit-user-select: text; user-select: text;
+}
+.console-list li { display: flex; gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--line); align-items: baseline; }
+.console-list .when { color: var(--muted); flex: 0 0 auto; }
+.console-list .src { color: var(--muted); flex: 0 0 auto; max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-list .msg { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.console-list li.warn { background: var(--warn-bg); }
+.console-list li.error { color: var(--danger); }
+.console-list li.debug .msg { color: var(--muted); }
+
 /* ---- pinned grid ------------------------------------------------------- */
 .pingrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; min-height: 60px; padding: 2px; border-radius: 12px; }
 .pingrid.drop-target { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }

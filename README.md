@@ -51,6 +51,9 @@ On Linux, the Tauri test build needs the WebKitGTK development packages
   host on macOS, so pages never render (a banner says so). The Web Inspector opens
   automatically in debug builds, and the terminal prints `[snorkle] policy …` / `effect …` lines
   for every navigation decision.
+- **In-app console** (Menu → Console): the same browser log plus page console output and errors,
+  on the device itself. Recording is on by default in debug builds; see
+  `docs/ARCHITECTURE.md` §5d.
 - `npm run tauri ios dev`: the real browser, in the iPad Simulator or on a device. First run:
   1. Xcode with the iPadOS 26/27 SDK; `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`.
   2. `npm run tauri icon src-tauri/icons/icon.png && npm run tauri ios init`

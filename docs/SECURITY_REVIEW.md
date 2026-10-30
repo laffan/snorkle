@@ -13,6 +13,7 @@ review on every change.
 | `crates/snorkle-core/src/url_display.rs`, `idn.rs` | Anti-spoofing display |
 | `crates/snorkle-core/src/input.rs` | Address-bar input → URL |
 | `crates/snorkle-core/src/storage.rs` | Persistence |
+| `crates/snorkle-core/src/console.rs` | In-app console: page console messages (C13) |
 | `crates/snorkle-core/src/userscripts.rs`, `crates/snorkle-content/src/ios/injection.rs` | Script injection into content (user scripts, view modes: black and white, hidden images) |
 | `crates/snorkle-core/src/blocking.rs`, `crates/snorkle-content/src/ios/rules.rs`, `src-tauri/src/adblock.rs` | Content blocking, allowlist regex generation, WebKit rule store |
 | `crates/snorkle-content/src/lib.rs` (`CONTENT_VIEW_SPEC`) | Content web view configuration |
@@ -47,6 +48,7 @@ Current channels (all carry WebKit-generated data, none carry page-chosen messag
 | C8 | `webViewWebContentProcessDidTerminate` | Tab id | Page can cause a crash | Bounded reload, then a notice |
 | C9 | Auth challenge / deprecated TLS | Challenge | Server | Always default handling / refuse |
 | C10 | Tap on a content pane (`UITapGestureRecognizer`) | Tab id only | None (native UI event, not page-generated) | Focuses that tab in split view |
+| C13 | Page console capture: `WKScriptMessageHandler` `snorkleConsole`, page world, all frames, **only while the user has Record on** in the console (default on in debug builds only, off in release; session-only) | A string: level letter + text | Full: the hook replaces `console.*` in the page's own world, and any page or frame can post anything to the handler | String bodies only. Attributed by WebKit (`frameInfo` origin, sending web view → tab). Sanitised per line (bidi/control/invisible removed), ≤ 4,000 chars and 40 lines, ≤ 100 messages per tab per 10 s, ≤ 1,000 entries kept, in memory only, private-tab entries dropped with the private session. Only stored and rendered with `textContent`; nothing acts on it. The handler's presence is visible to pages while recording (fingerprintable). Installed and removed in `ios/injection.rs` only. |
 | C12 | `UIKeyCommand` on content containers (⌘T, ⌘S, ⌘1–5) | Which shortcut | None (hardware keyboard via UIKit; pages cannot synthesise it) | Forwarded to the chrome as a shortcut name |
 
 Native → page code paths (not channels back to native, but reviewed the same way):
@@ -65,6 +67,7 @@ Sign-off log:
 | 2026-10-30 | Popups keep `window.opener` (C5) to fix OAuth logins, owner request; favicons via sandboxed snapshot (F1), owner choice; native keyboard shortcuts (C12) | Owner (in session) |
 | 2026-10-29 | Script injection into content: user scripts/styles per domain and black-and-white mode (I1, I2), confined to `ios/injection.rs` (tripwire allowlist) | Owner (feature request in session) |
 | 2026-10-30 | Black and white on by default, colour and hidden images as session-only toggles (I2 extended with a second constant style), owner request | **Pending owner sign-off** |
+| 2026-10-30 | In-app console with page console capture (C13): a page-world script and message handler, on demand, to debug sign-in popups without a Mac. Tripwire allowlist extended for `ios/injection.rs` | Owner (feature request in session); **written sign-off pending** |
 
 ## Checklist for AI-assisted changes in review-required areas
 

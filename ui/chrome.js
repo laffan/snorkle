@@ -18,6 +18,7 @@
 
   let state = null;
   let editing = false;
+  let consoleOpen = false;
   let panel = null; // null | 'history'
   let modalOpen = false;
   let scriptsOpen = false;
@@ -787,6 +788,10 @@
     $('chrome').style.left = left + 'px';
     const top = Math.ceil($('chrome').getBoundingClientRect().bottom);
     const overlay = !!panel || modalOpen || scriptsOpen || (narrow && sidebarOpen);
+    // The docked console takes the bottom of the content area.
+    const con = $('console');
+    con.style.left = left + 'px';
+    const bottom = consoleOpen ? Math.ceil(con.getBoundingClientRect().height) : 0;
     // The chrome surface (start page, notices) covers the focused pane: in
     // split view that is one half of the content area (matching the native
     // pane frames: 2 pt divider, halves floored).
@@ -802,10 +807,11 @@
     s.style.top = top + 'px';
     s.style.left = sLeft + 'px';
     s.style.right = sRight + 'px';
-    const key = top + ':' + left + ':' + overlay;
+    s.style.bottom = bottom + 'px';
+    const key = top + ':' + left + ':' + bottom + ':' + overlay;
     if (key === lastLayout) return;
     lastLayout = key;
-    invoke('set_chrome_layout', { top, left, overlay });
+    invoke('set_chrome_layout', { top, left, bottom, overlay });
   }
 
   // ---- ad blocking ------------------------------------------------------
@@ -857,7 +863,109 @@
       .catch((e) => toast(String(e)));
   }
 
+  // ---- console -----------------------------------------------------------
+  //
+  // Entries come from Rust (browser events, and page console output while
+  // recording) plus the chrome's own errors and notes. All text, page
+  // messages included, is set with textContent only.
+
+  const MAX_CONSOLE = 1000;
+  let consoleEntries = [];
+  let consoleCapture = false;
+  let consoleFilter = 'all';
+  let chromeSeq = 0;
+  let consoleQueued = false;
+
+  function addConsole(entry) {
+    consoleEntries.push(entry);
+    if (consoleEntries.length > MAX_CONSOLE) consoleEntries.splice(0, consoleEntries.length - MAX_CONSOLE);
+    if (consoleOpen && !consoleQueued) {
+      consoleQueued = true;
+      requestAnimationFrame(() => { consoleQueued = false; renderConsole(); });
+    }
+  }
+
+  // The chrome's own messages (not from Rust or pages).
+  function chromeLog(level, text) {
+    addConsole({ seq: 'c' + chromeSeq++, time_ms: Math.round(performance.now()), origin: 'chrome', level, tab: null, host: '', main_frame: true, text: String(text) });
+  }
+
+  function loadConsole() {
+    return T.core.invoke('get_console').then((c) => {
+      consoleCapture = c.capture;
+      const mine = consoleEntries.filter((e) => e.origin === 'chrome');
+      consoleEntries = c.entries.concat(mine).sort((a, b) => a.time_ms - b.time_ms);
+      renderConsole();
+    }).catch(() => {});
+  }
+
+  function visibleEntries() {
+    const tabOnly = $('console-tab-only').checked;
+    const t = activeTab();
+    return consoleEntries.filter((e) => {
+      if (consoleFilter === 'page' && e.origin !== 'page') return false;
+      if (consoleFilter === 'app' && e.origin === 'page') return false;
+      if (consoleFilter === 'errors' && e.level !== 'error' && e.level !== 'warn') return false;
+      if (tabOnly && t && e.tab !== t.id) return false;
+      return true;
+    });
+  }
+
+  function sourceLabel(e) {
+    if (e.origin === 'page') return (e.host || '(no origin)') + (e.main_frame ? '' : ' (frame)');
+    return e.origin === 'chrome' ? 'chrome' : 'browser';
+  }
+
+  function stamp(ms) {
+    const s = ms / 1000;
+    return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+  }
+
+  function renderConsole() {
+    const list = $('console-list');
+    const atEnd = list.scrollTop + list.clientHeight >= list.scrollHeight - 24;
+    list.replaceChildren();
+    for (const e of visibleEntries()) {
+      const li = el('li', e.level);
+      li.append(el('span', 'when', stamp(e.time_ms)), el('span', 'src', sourceLabel(e)), el('span', 'msg', e.text));
+      list.appendChild(li);
+    }
+    if (!list.childElementCount) list.appendChild(el('li', 'debug', consoleCapture ? 'Nothing logged yet.' : 'Recording is off. Tap Record to log browser events and page console output.'));
+    if (atEnd) list.scrollTop = list.scrollHeight;
+    const rec = $('console-capture');
+    rec.setAttribute('aria-pressed', String(consoleCapture));
+    rec.textContent = consoleCapture ? '● Recording' : 'Record';
+    document.querySelectorAll('#console .seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.filter === consoleFilter)));
+  }
+
+  function setConsole(open) {
+    closeMenu();
+    consoleOpen = open;
+    $('console').hidden = !open;
+    if (open) loadConsole();
+    reportLayout();
+  }
+
+  function setCapture(on) {
+    T.core.invoke('set_console_capture', { on }).then(() => {
+      consoleCapture = on;
+      const note = $('console-note');
+      note.hidden = !on;
+      note.textContent = 'Page console output is recorded from the next page load. Reload a page to capture it from the start.';
+      renderConsole();
+    }).catch((e) => toast(String(e)));
+  }
+
+  function copyConsole() {
+    const text = visibleEntries().map((e) => `${stamp(e.time_ms)} [${e.level}] ${sourceLabel(e)}: ${e.text}`).join('\n');
+    navigator.clipboard.writeText(text).then(() => toast('Console copied.'), () => toast('Could not copy (clipboard unavailable).'));
+  }
+
+  window.addEventListener('error', (e) => chromeLog('error', `Uncaught ${e.message} (${e.filename}:${e.lineno})`));
+  window.addEventListener('unhandledrejection', (e) => chromeLog('error', 'Unhandled rejection: ' + String(e.reason)));
+
   function toast(msg) {
+    chromeLog('info', 'toast: ' + msg);
     const t = $('toast');
     t.textContent = msg;
     t.hidden = false;
@@ -935,6 +1043,17 @@
   $('menu').addEventListener('click', () => (menuOpen ? closeMenu() : openMenu()));
   $('menu-history').addEventListener('click', openPanel);
   $('menu-settings').addEventListener('click', () => setModal(true));
+  $('menu-console').addEventListener('click', () => setConsole(!consoleOpen));
+  $('console-close').addEventListener('click', () => setConsole(false));
+  $('console-capture').addEventListener('click', () => setCapture(!consoleCapture));
+  $('console-clear').addEventListener('click', () => {
+    consoleEntries = [];
+    invoke('clear_console');
+    renderConsole();
+  });
+  $('console-copy').addEventListener('click', copyConsole);
+  $('console-tab-only').addEventListener('change', renderConsole);
+  document.querySelectorAll('#console .seg button').forEach((b) => b.addEventListener('click', () => { consoleFilter = b.dataset.filter; renderConsole(); }));
   $('modal-close').addEventListener('click', () => setModal(false));
   $('modal').addEventListener('click', (ev) => { if (ev.target === $('modal')) setModal(false); });
   $('empty-cache').addEventListener('click', () => invoke('empty_cache').then(() => toast('Cache emptied.')));
@@ -1013,6 +1132,8 @@
   T.event.listen('toast', (e) => toast(String(e.payload)));
   T.event.listen('shortcut', (e) => runShortcut(String(e.payload)));
   T.event.listen('pins', () => loadPins());
+  T.event.listen('console', (e) => addConsole(e.payload));
+  T.event.listen('console_reset', () => loadConsole());
   T.core.invoke('get_state').then((s) => { state = s; render(); });
   loadBookmarks();
   loadPins();

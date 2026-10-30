@@ -46,7 +46,8 @@ fn args(cmd: &str) -> serde_json::Value {
     match cmd {
         "navigate" => json!({ "tab": 1, "input": "https://example.com/" }),
         "new_tab" => json!({ "private": false }),
-        "set_chrome_layout" => json!({ "top": 80.0, "left": 264.0, "overlay": false }),
+        "set_chrome_layout" => json!({ "top": 80.0, "left": 264.0, "bottom": 0.0, "overlay": false }),
+        "set_console_capture" => json!({ "on": false }),
         "remove_bookmark" => json!({ "url": "https://example.com/" }),
         "list_history" => json!({ "limit": 10 }),
         "bookmark_tab" => json!({ "tab": 1, "index": 0 }),
@@ -55,7 +56,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "set_view_mode" => json!({ "color": false, "hideImages": false }),
         "delete_user_script" => json!({ "domain": "example.com" }),
         "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),
-        "get_view_mode" | "empty_cache" | "list_user_scripts" | "list_pins" => json!({}),
+        "get_view_mode" | "get_console" | "clear_console" | "empty_cache" | "list_user_scripts" | "list_pins" => json!({}),
         "pin_tab" => json!({ "tab": 1, "index": 0 }),
         "pin_bookmark" | "move_pin" => json!({ "url": "https://example.com/", "index": 0 }),
         "unpin" => json!({ "url": "https://example.com/", "bookmarkIndex": null }),

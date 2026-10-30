@@ -33,6 +33,6 @@ objc2-web-kit = { version = "=0.3.2", features = [
   "WKContentRuleList", "WKContentRuleListStore", "WKFrameInfo", "WKNavigation",
   "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences",
   "WKSecurityOrigin", "WKUIDelegate", "WKUserContentController", "WKWebViewConfiguration",
-  "WKUserScript", "WKContentWorld", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
+  "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
   "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences",
 ] }

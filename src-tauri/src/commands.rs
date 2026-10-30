@@ -107,8 +107,8 @@ pub fn dismiss_notice(s: S<'_>, tab: u64) {
 /// chrome is showing UI over the content area (menus, the sidebar in narrow
 /// windows), so content must be hidden.
 #[tauri::command]
-pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, overlay: bool) {
-    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left)));
+pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, bottom: f64, overlay: bool) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, bottom)));
     with_browser(&s, |b| b.set_chrome_overlay(overlay));
 }
 
@@ -261,6 +261,30 @@ pub fn set_view_mode(s: S<'_>, color: bool, hide_images: bool) -> ViewMode {
     *s.view_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode;
     crate::scripts::apply(&s, Some(snorkle_core::userscripts::view_mode_js(mode)));
     mode
+}
+
+#[derive(Serialize)]
+pub struct ConsoleState {
+    capture: bool,
+    entries: Vec<snorkle_core::console::Entry>,
+}
+
+#[tauri::command]
+pub fn get_console(s: S<'_>) -> ConsoleState {
+    ConsoleState { capture: s.capturing(), entries: s.console_log().entries() }
+}
+
+/// Starts or stops recording, and installs or removes the page console
+/// hook (channel C13) in every content view, from their next load.
+#[tauri::command]
+pub fn set_console_capture(s: S<'_>, on: bool) {
+    s.console_capture.store(on, std::sync::atomic::Ordering::Relaxed);
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_console_capture(on)));
+}
+
+#[tauri::command]
+pub fn clear_console(s: S<'_>) {
+    s.console_log().clear();
 }
 
 /// Empties the HTTP caches (not cookies or site data).

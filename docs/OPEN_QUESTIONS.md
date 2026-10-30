@@ -199,4 +199,10 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     Fetching `<link rel=icon>` would need JS or HTML parsing in the hidden view, so it is not done.
 43. **[decide] ⌘1–5 order** is pins, bookmarks, then tabs. Opening a pin or bookmark switches to
     a tab already showing that exact URL, else uses the current tab if empty, else a new tab.
-
+44. **[verify] Console capture on device.** Check: the page-world hook is installed before page
+    scripts run (document start) in iframes too, e.g. Google's sign-in button frame; removing
+    the handler and scripts when Record is turned off takes effect on the next load;
+    `WKScriptMessage.webView` matches the mounted web view (used to attribute messages to tabs;
+    popups share their opener's content controller); the clipboard copy works in the chrome
+    webview. **[decide]** Release builds record nothing until the user turns Record on; pages can
+    detect the hook while it is on.

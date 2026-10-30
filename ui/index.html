@@ -41,6 +41,7 @@
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
       <button id="menu-history" role="menuitem">History</button>
+      <button id="menu-console" role="menuitem">Console</button>
       <button id="menu-settings" role="menuitem">Settings</button>
     </div>
     <div id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
@@ -148,6 +149,29 @@
       </div>
     </div>
   </div>
+
+  <!-- Console, docked under the content area (pages stay visible above
+       it). Page messages are page-controlled text: rendered with
+       textContent only. -->
+  <section id="console" aria-label="Console" hidden>
+    <div class="console-head">
+      <strong>Console</strong>
+      <div class="seg" role="group" aria-label="Show">
+        <button data-filter="all" aria-pressed="true">All</button>
+        <button data-filter="page" aria-pressed="false">Pages</button>
+        <button data-filter="app" aria-pressed="false">Browser</button>
+        <button data-filter="errors" aria-pressed="false">Errors</button>
+      </div>
+      <label class="check small"><input id="console-tab-only" type="checkbox"> This tab</label>
+      <span class="spacer"></span>
+      <button id="console-capture" class="pillbtn" aria-pressed="false" title="Record browser events, and page console output from the next page load">Record</button>
+      <button id="console-copy" class="pillbtn">Copy</button>
+      <button id="console-clear" class="pillbtn">Clear</button>
+      <button id="console-close" class="icon" aria-label="Close console">×</button>
+    </div>
+    <p id="console-note" class="console-note" hidden></p>
+    <ol id="console-list" class="console-list"></ol>
+  </section>
 
   <div id="drop-line" hidden></div>
 </body>

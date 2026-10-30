@@ -41,7 +41,7 @@ impl ContentHost {
         self.applied.push(effect.clone());
     }
 
-    pub fn set_insets(&mut self, top: f64, left: f64) {
+    pub fn set_insets(&mut self, top: f64, left: f64, _bottom: f64) {
         self.top = crate::clamp_inset(top, 1024.0);
         self.left = crate::clamp_inset(left, 1366.0);
     }
@@ -55,6 +55,8 @@ impl ContentHost {
     pub fn set_injections(&mut self, _injections: &[snorkle_core::userscripts::Injection], _run_now: Option<&str>) {}
 
     pub fn clear_cache(&mut self) {}
+
+    pub fn set_console_capture(&mut self, _on: bool) {}
 
     /// No WebKit off iOS: no favicons.
     pub fn fetch_favicon(&mut self, _host: String, done: crate::FaviconDone) {

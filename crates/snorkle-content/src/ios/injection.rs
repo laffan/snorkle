@@ -1,28 +1,44 @@
 //! SECURITY-REVIEW: the ONLY place that injects scripts into content web
 //! views (owner-approved 2026-10-29 for user scripts/styles and
-//! black-and-white mode; see docs/SECURITY_REVIEW.md). The tripwire tests
-//! allow `WKUserScript`, `addUserScript` and `evaluateJavaScript` in this
-//! file only.
+//! black-and-white mode; see docs/SECURITY_REVIEW.md) and the only place
+//! with a script message handler (the console, owner request 2026-10-30,
+//! channel C13). The tripwire tests allow `WKUserScript`, `addUserScript`,
+//! `evaluateJavaScript`, `WKScriptMessageHandler`,
+//! `addScriptMessageHandler` and `pageWorld` in this file only.
 //!
 //! Security assumptions:
 //! - Sources come from `snorkle_core::userscripts::injections` /
-//!   `view_mode_js` (validated, guarded, literals escaped).
-//! - Everything runs in WebKit's isolated default client world, main frame
-//!   only, so pages cannot see or call the injected code.
-//! - No script message handler exists: injected code has no way to send
-//!   anything back to native code. `evaluateJavaScript` is called without a
+//!   `view_mode_js` (validated, guarded, literals escaped) and the constant
+//!   `snorkle_core::console::PAGE_HOOK_JS`.
+//! - User scripts and view modes run in WebKit's isolated default client
+//!   world, main frame only, so pages cannot see or call them, and cannot
+//!   send anything back. `evaluateJavaScript` is called without a
 //!   completion handler, so no page-influenced value is ever read back.
+//! - Exception, only while console capture is on: the console hook runs in
+//!   the page world of every frame and posts to one message handler, which
+//!   pages can also call directly. The handler accepts string bodies only
+//!   and passes them, with WebKit's frame origin and the sending tab, to
+//!   `ContentEvents::console_message`, which only records them as text
+//!   (sanitised, size- and rate-limited in `snorkle_core::console`). When
+//!   capture is off the handler and hook are removed from every controller.
 
 #![allow(non_snake_case)]
 
+use std::rc::Rc;
+
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
-use objc2::{extern_methods, MainThreadMarker, MainThreadOnly};
-use objc2_foundation::{NSError, NSString};
-use objc2_web_kit::{WKContentWorld, WKFrameInfo, WKUserContentController, WKUserScript, WKUserScriptInjectionTime};
+use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
+use objc2::{define_class, extern_methods, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2_foundation::{NSError, NSObjectProtocol, NSString};
+use objc2_web_kit::{
+    WKContentWorld, WKFrameInfo, WKScriptMessage, WKScriptMessageHandler, WKUserContentController, WKUserScript,
+    WKUserScriptInjectionTime,
+};
+use snorkle_core::console::{PAGE_HANDLER_NAME, PAGE_HOOK_JS};
 use snorkle_core::userscripts::{InjectAt, Injection};
 
 use super::bindings::WKWebView;
+use crate::ContentEvents;
 
 impl WKWebView {
     extern_methods!(
@@ -42,12 +58,65 @@ impl WKWebView {
 
 /// Compiled user scripts, opaque outside this module.
 #[derive(Default)]
-pub struct Scripts(Vec<Retained<WKUserScript>>);
+pub struct Scripts(Vec<Retained<WKUserScript>>, Option<Console>);
 
-/// Builds main-frame-only user scripts in the default client world.
-pub fn make_scripts(mtm: MainThreadMarker, injections: &[Injection]) -> Scripts {
+/// The console hook and its handler, present only while capture is on.
+struct Console {
+    hook: Retained<WKUserScript>,
+    handler: Retained<ConsoleHandler>,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "SnorkleConsoleHandler"]
+    #[ivars = Rc<dyn ContentEvents>]
+    struct ConsoleHandler;
+
+    unsafe impl NSObjectProtocol for ConsoleHandler {}
+
+    unsafe impl WKScriptMessageHandler for ConsoleHandler {
+        /// Page console output (or anything a page posts to the handler).
+        /// String bodies only; attribution comes from WebKit.
+        #[unsafe(method(userContentController:didReceiveScriptMessage:))]
+        fn did_receive(&self, _controller: &WKUserContentController, message: &WKScriptMessage) {
+            unsafe {
+                let body = message.body();
+                let Some(text) = body.downcast_ref::<NSString>() else { return };
+                let frame = message.frameInfo();
+                let host = frame.securityOrigin().host().to_string();
+                let web: *const AnyObject = msg_send![message, webView];
+                let tab = super::tab_for_web_view(web);
+                self.ivars().console_message(tab, host, frame.isMainFrame(), text.to_string());
+            }
+        }
+    }
+);
+
+impl ConsoleHandler {
+    fn new(mtm: MainThreadMarker, events: Rc<dyn ContentEvents>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(events);
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// Builds main-frame-only user scripts in the default client world, plus
+/// the console hook (page world, all frames) when `console` is given.
+pub fn make_scripts(mtm: MainThreadMarker, injections: &[Injection], console: Option<&Rc<dyn ContentEvents>>) -> Scripts {
     let world = unsafe { WKContentWorld::defaultClientWorld(mtm) };
-    injections
+    let console = console.map(|events| unsafe {
+        Console {
+            hook: WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
+                WKUserScript::alloc(mtm),
+                &NSString::from_str(PAGE_HOOK_JS),
+                WKUserScriptInjectionTime::AtDocumentStart,
+                false,
+                &WKContentWorld::pageWorld(mtm),
+            ),
+            handler: ConsoleHandler::new(mtm, events.clone()),
+        }
+    });
+    let scripts: Vec<_> = injections
         .iter()
         .map(|i| {
             let at = match i.at {
@@ -64,21 +133,25 @@ pub fn make_scripts(mtm: MainThreadMarker, injections: &[Injection]) -> Scripts 
                 )
             }
         })
-        .collect::<Vec<_>>()
-        .into()
+        .collect();
+    Scripts(scripts, console)
 }
 
-impl From<Vec<Retained<WKUserScript>>> for Scripts {
-    fn from(v: Vec<Retained<WKUserScript>>) -> Self {
-        Scripts(v)
-    }
-}
-
-/// Replaces all user scripts on a web view's controller. Takes effect on the
-/// next page load.
-pub fn install(controller: &WKUserContentController, scripts: &Scripts) {
+/// Replaces all user scripts (and the console handler) on a web view's
+/// controller. Scripts take effect on the next page load. Popups share
+/// their opener's controller, so this runs more than once per controller:
+/// the handler is always removed before it is added (adding a name twice
+/// raises an exception).
+pub fn install(mtm: MainThreadMarker, controller: &WKUserContentController, scripts: &Scripts) {
     unsafe {
+        let page = WKContentWorld::pageWorld(mtm);
+        let name = NSString::from_str(PAGE_HANDLER_NAME);
         controller.removeAllUserScripts();
+        controller.removeScriptMessageHandlerForName_contentWorld(&name, &page);
+        if let Some(c) = &scripts.1 {
+            controller.addScriptMessageHandler_contentWorld_name(ProtocolObject::from_ref(&*c.handler), &page, &name);
+            controller.addUserScript(&c.hook);
+        }
         for s in &scripts.0 {
             controller.addUserScript(s);
         }

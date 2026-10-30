@@ -7,8 +7,9 @@
 //!   the area below the chrome toolbar. A page therefore cannot draw over
 //!   the address bar; the chrome hides content views (via `HideView`)
 //!   whenever it shows anything that overlaps the content area.
-//! - Configurations are built only from `CONTENT_VIEW_SPEC`; no user
-//!   scripts, script message handlers or URL scheme handlers are installed.
+//! - Configurations are built only from `CONTENT_VIEW_SPEC`; no URL scheme
+//!   handlers are installed. User scripts and the console handler (only
+//!   while console capture is on) are installed by `injection.rs`.
 //! - A popup sheet (`Pane::Sheet`) is centred in the content area over a
 //!   dimming backdrop that swallows touches, so the page underneath keeps
 //!   running but cannot be used until the sheet closes. Both stay below the
@@ -83,6 +84,7 @@ struct View {
 
 impl Drop for View {
     fn drop(&mut self) {
+        WEB_VIEW_TABS.with(|m| m.borrow_mut().remove(&(Retained::as_ptr(&self.web) as usize)));
         unsafe {
             for key in KVO_KEYS {
                 self.web.removeObserver_forKeyPath(&self.kvo, &NSString::from_str(key));
@@ -100,6 +102,7 @@ pub struct ContentHost {
     root: Retained<UIView>,
     top: Cell<f64>,
     left: Cell<f64>,
+    bottom: Cell<f64>,
     views: HashMap<TabId, View>,
     /// `interactionState` of discarded tabs (in memory only).
     saved: HashMap<TabId, Retained<AnyObject>>,
@@ -108,6 +111,9 @@ pub struct ContentHost {
     events: Rc<dyn ContentEvents>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     scripts: injection::Scripts,
+    injections: Vec<Injection>,
+    /// Page console capture (channel C13); off unless the user turns it on.
+    console: bool,
     /// Dims the content area under a popup sheet and swallows its touches.
     backdrop: Retained<UIView>,
 }
@@ -154,6 +160,7 @@ impl ContentHost {
             root,
             top: Cell::new(0.0),
             left: Cell::new(0.0),
+            bottom: Cell::new(0.0),
             views: HashMap::new(),
             saved: HashMap::new(),
             default_store,
@@ -161,6 +168,8 @@ impl ContentHost {
             events,
             observers,
             scripts: injection::Scripts::default(),
+            injections: Vec::new(),
+            console: false,
         }
     }
 
@@ -172,9 +181,10 @@ impl ContentHost {
         let b = self.root.bounds();
         let top = clamp_inset(self.top.get(), b.size.height);
         let left = clamp_inset(self.left.get(), b.size.width);
+        let bottom = clamp_inset(self.bottom.get(), b.size.height);
         CGRect::new(
             CGPoint::new(left, top),
-            CGSize::new((b.size.width - left).max(0.0), (b.size.height - top).max(0.0)),
+            CGSize::new((b.size.width - left).max(0.0), (b.size.height - top - bottom).max(0.0)),
         )
     }
 
@@ -225,11 +235,13 @@ impl ContentHost {
 
     /// Insets of the content area, in points, reported by the trusted
     /// chrome UI: `top` is the bottom edge of the toolbar, `left` the right
-    /// edge of the docked tab sidebar (0 when collapsed). Content containers
-    /// never extend over either.
-    pub fn set_insets(&mut self, top: f64, left: f64) {
+    /// edge of the docked tab sidebar (0 when collapsed), `bottom` the
+    /// height of the docked console (0 when closed). Content containers
+    /// never extend over any of them.
+    pub fn set_insets(&mut self, top: f64, left: f64, bottom: f64) {
         self.top.set(top);
         self.left.set(left);
+        self.bottom.set(bottom);
         for v in self.views.values() {
             v.container.setFrame(self.pane_frame(v.pane.get()));
         }
@@ -241,13 +253,23 @@ impl ContentHost {
     /// given, is run once in every loaded page (used to toggle
     /// black-and-white without reloading).
     pub fn set_injections(&mut self, injections: &[Injection], run_now: Option<&str>) {
-        self.scripts = injection::make_scripts(self.mtm, injections);
+        self.injections = injections.to_vec();
+        let console = self.console.then_some(&self.events);
+        self.scripts = injection::make_scripts(self.mtm, injections, console);
         for v in self.views.values() {
-            injection::install(&v.controller, &self.scripts);
+            injection::install(self.mtm, &v.controller, &self.scripts);
             if let Some(js) = run_now {
                 injection::run_now(self.mtm, &v.web, js);
             }
         }
+    }
+
+    /// Turns page console capture on or off for every content view. Takes
+    /// effect from the next page load.
+    pub fn set_console_capture(&mut self, on: bool) {
+        self.console = on;
+        let injections = std::mem::take(&mut self.injections);
+        self.set_injections(&injections, None);
     }
 
     /// Fetches a favicon for `host` in a sandboxed, throwaway web view (see
@@ -432,8 +454,9 @@ impl ContentHost {
 
         container.addSubview(&web);
         self.root.addSubview(&container);
-        injection::install(&controller, &self.scripts);
+        injection::install(mtm, &controller, &self.scripts);
         rules::register(tab, controller.clone());
+        WEB_VIEW_TABS.with(|m| m.borrow_mut().insert(Retained::as_ptr(&web) as usize, tab));
 
         let tap = TapFocus::new(mtm, TabIvars::new(tab, self.events.clone()));
         let recognizer = UITapGestureRecognizer::initWithTarget_action(
@@ -515,8 +538,16 @@ pub(crate) unsafe fn build_web_view(
 }
 
 thread_local! {
+    /// Mounted web views by address, to attribute console messages (which
+    /// name their web view) to a tab.
+    static WEB_VIEW_TABS: RefCell<HashMap<usize, TabId>> = RefCell::new(HashMap::new());
     /// Popup web views returned to WebKit, waiting for `Effect::AdoptPopup`.
     static PENDING_POPUPS: RefCell<HashMap<TabId, WebViewParts>> = RefCell::new(HashMap::new());
+}
+
+/// The tab of a mounted web view, by address.
+pub(crate) fn tab_for_web_view(web: *const AnyObject) -> Option<TabId> {
+    WEB_VIEW_TABS.with(|m| m.borrow().get(&(web as usize)).copied())
 }
 
 /// Creates the popup web view for `tab` with WebKit's configuration, parks

@@ -13,6 +13,7 @@
 
 pub mod blocking;
 pub mod browser;
+pub mod console;
 pub mod idn;
 pub mod input;
 pub mod os;

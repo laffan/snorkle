@@ -48,8 +48,8 @@ linked. Two copies would register duplicate Objective-C classes.
 
 | # | Boundary | Direction | Mechanism | Enforced by |
 |---|---|---|---|---|
-| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
-| B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants the 18 app commands and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
+| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
+| B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants every app command in `command_list.rs` and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews below the toolbar, `clipsToBounds`. Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs`, `Browser::sync_visibility`, `browser_invariants.rs` |
 | B5 | App ↔ disk | native → storage | JSON files in the app container, written atomically off the main thread. Only http(s) URLs are stored, and only from non-private tabs. Data protection `NSFileProtectionComplete` (entitlement). | `storage.rs` tests, `browser_invariants.rs::private_tabs_never_reach_storage`, fuzz `browser_events` |
@@ -164,6 +164,23 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   alone and keeps the pairs. Closing a tab, pairing one of its tabs elsewhere, or unsplitting
   ends a pair. The sidebar shows each pair as one row with a half per tab; dragging a half out
   of the row unsplits it. Pairs are not saved in the session. A tap in a pane focuses it.
+
+## 5d. In-app console
+
+The Menu → Console panel is docked under the content area (the chrome reports a `bottom`
+inset, so pages stay visible above it). It shows, in memory only:
+
+- **Browser** entries: every navigation policy decision, every effect (views created, shown,
+  hidden, loads, popups), and the chrome's own toasts and script errors. These are what
+  `tauri dev` printed to the terminal, now visible on the device.
+- **Page** entries: `console.debug/log/info/warn/error`, uncaught errors and unhandled promise
+  rejections from every frame, attributed to the frame's origin. A constant hook
+  (`snorkle_core::console::PAGE_HOOK_JS`) is installed at document start in the page world while
+  recording is on, and posts to the `snorkleConsole` message handler (channel C13).
+
+Recording is on by default in debug builds and off in release builds, and resets every
+launch. Turning it on applies to pages from their next load. Filters: all, pages, browser,
+errors/warnings, this tab only. Copy puts the visible entries on the clipboard.
 
 ## 5b. Chrome layout
 
