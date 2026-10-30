@@ -42,6 +42,12 @@ pub enum Effect {
         profile: Profile,
         then: AfterCreate,
     },
+    /// Take ownership of the popup web view WebKit asked the platform to
+    /// create for this tab (`createWebViewWithConfiguration`); it shares the
+    /// opener's configuration and keeps `window.opener`.
+    AdoptPopup {
+        tab: TabId,
+    },
     /// Destroy the web view. With `keep_state`, the platform first saves
     /// `interactionState` so a later `Restore` brings back history/scroll.
     DestroyView {
@@ -374,7 +380,11 @@ impl Browser {
     /// The active tab and its split partner are never discarded by the
     /// budget or memory warnings.
     fn is_protected(&self, id: TabId) -> bool {
-        Some(id) == self.active || self.split.is_some_and(|s| s.left == id || s.right == id)
+        Some(id) == self.active
+            || self.split.is_some_and(|s| s.left == id || s.right == id)
+            // The opener of the active popup stays alive so the popup can
+            // hand its result back (OAuth).
+            || self.active.and_then(|a| self.tab(a)).and_then(|t| t.opener) == Some(id)
     }
 
     pub fn close(&mut self, id: TabId, now: u64) -> Vec<Effect> {
@@ -394,7 +404,12 @@ impl Browser {
         }
         if self.active == Some(id) {
             self.active = None;
-            let next = self.tabs.get(idx).or_else(|| idx.checked_sub(1).and_then(|i| self.tabs.get(i)));
+            // A closing popup returns to its opener.
+            let opener = tab.opener.and_then(|o| self.tab(o)).map(|t| t.id);
+            let next = opener
+                .and_then(|o| self.tabs.iter().find(|t| t.id == o))
+                .or_else(|| self.tabs.get(idx))
+                .or_else(|| idx.checked_sub(1).and_then(|i| self.tabs.get(i)));
             match next.map(|t| t.id) {
                 Some(n) => self.activate_into(n, now, &mut out),
                 None => {
@@ -643,6 +658,60 @@ impl Browser {
 
     /// `webView:createWebViewWithConfiguration:…` (target=_blank, window.open
     /// with a user gesture). The page gets no `window.opener` reference.
+    /// SECURITY-REVIEW: `window.open` / target=_blank. Called synchronously
+    /// from `createWebViewWithConfiguration`; returns the new tab when the
+    /// platform should create a real popup web view (which keeps a
+    /// `window.opener` relationship, needed by OAuth and payment flows).
+    /// WebKit applies `noopener` itself where the page asked for it (and to
+    /// `target=_blank` links by default). The popup's own navigations go
+    /// through `decide_navigation` like any other tab; the address bar keeps
+    /// showing each tab's committed URL, so an opener navigated by its popup
+    /// is visible.
+    pub fn open_popup(&mut self, opener: TabId, url: Option<&Url>, now: u64) -> (Option<TabId>, Vec<Effect>) {
+        let mut out = Vec::new();
+        let Some(op) = self.tab(opener) else { return (None, out) };
+        // The popup and its opener both stay live; never exceed the budget.
+        if !self.os.allows_browsing() || self.budget.max_live < 2 {
+            return (None, out);
+        }
+        let profile = op.profile;
+        let initiator = op.committed_url.clone();
+        if let Some(url) = url {
+            let req =
+                Request { url, frame: Frame::Main, source: Source::Page { user_gesture: true }, initiator: initiator.as_ref() };
+            match policy::decide(&req, self.exceptions(profile)) {
+                // http is upgraded by the popup's own navigation policy.
+                Decision::Allow | Decision::UpgradeToHttps(_) => {}
+                Decision::External(u) => {
+                    self.set_notice(opener, external_notice(&u));
+                    out.push(Effect::NotifyChrome);
+                    return (None, out);
+                }
+                Decision::Block(_) => return (None, out),
+            }
+        }
+        let id = self.alloc_id();
+        let insert_at = self.tabs.iter().position(|t| t.id == opener).map(|i| i + 1).unwrap_or(self.tabs.len());
+        let mut tab = Tab::new(id, profile, now);
+        tab.life = Life::Live;
+        tab.loading = true;
+        tab.opener = Some(opener);
+        self.tabs.insert(insert_at, tab);
+        out.push(Effect::AdoptPopup { tab: id });
+        self.activate_into(id, now, &mut out);
+        out.push(Effect::NotifyChrome);
+        (Some(id), out)
+    }
+
+    /// `webViewDidClose` (the page called `window.close()`). Only honoured
+    /// for popups, which return focus to their opener.
+    pub fn on_close_requested(&mut self, id: TabId, now: u64) -> Vec<Effect> {
+        match self.tab(id) {
+            Some(t) if t.opener.is_some() => self.close(id, now),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn on_new_window_request(&mut self, opener: TabId, url: &Url, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
         let Some(op) = self.tab(opener) else { return out };
@@ -874,7 +943,8 @@ impl Browser {
             .map(|t| (t.last_active_ms, t.id))
             .collect();
         background.sort_by_key(|b| std::cmp::Reverse(b.0)); // most recently used first
-        let protected = if self.split.is_some() { 2 } else { 1 };
+        let protected =
+            self.tabs.iter().filter(|t| t.life == Life::Live && self.is_protected(t.id)).count().max(1);
         let allowed = self.budget.max_live.saturating_sub(protected);
         for (i, (last, id)) in background.into_iter().enumerate() {
             if i >= allowed || now.saturating_sub(last) > self.budget.background_ttl_ms {

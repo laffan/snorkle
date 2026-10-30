@@ -55,7 +55,10 @@ fn args(cmd: &str) -> serde_json::Value {
         "set_grayscale" => json!({ "on": false }),
         "delete_user_script" => json!({ "domain": "example.com" }),
         "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),
-        "unsplit" | "get_settings" | "empty_cache" | "list_user_scripts" => json!({}),
+        "unsplit" | "get_settings" | "empty_cache" | "list_user_scripts" | "list_pins" => json!({}),
+        "pin_tab" => json!({ "tab": 1, "index": 0 }),
+        "pin_bookmark" | "move_pin" => json!({ "url": "https://example.com/", "index": 0 }),
+        "unpin" => json!({ "url": "https://example.com/", "bookmarkIndex": null }),
         "get_state" | "list_bookmarks" | "clear_history" => json!({}),
         _ => json!({ "tab": 1 }),
     }

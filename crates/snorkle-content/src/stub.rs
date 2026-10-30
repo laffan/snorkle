@@ -30,7 +30,7 @@ impl ContentHost {
 
     pub fn apply(&mut self, effect: &Effect) {
         match effect {
-            Effect::CreateView { tab, .. } => {
+            Effect::CreateView { tab, .. } | Effect::AdoptPopup { tab } => {
                 self.live.insert(*tab);
             }
             Effect::DestroyView { tab, .. } => {
@@ -55,6 +55,11 @@ impl ContentHost {
     pub fn set_injections(&mut self, _injections: &[snorkle_core::userscripts::Injection], _run_now: Option<&str>) {}
 
     pub fn clear_cache(&mut self) {}
+
+    /// No WebKit off iOS: no favicons.
+    pub fn fetch_favicon(&mut self, _host: String, done: crate::FaviconDone) {
+        done(None);
+    }
 
     pub fn live_views(&self) -> usize {
         self.live.len()

@@ -28,7 +28,7 @@
         "default-src": "'none'",
         "script-src": "'self'",
         "style-src": "'self'",
-        "img-src": "'self'",
+        "img-src": "'self' data:",
         "font-src": "'self'",
         "connect-src": "ipc: http://ipc.localhost",
         "frame-src": "'none'",

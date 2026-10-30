@@ -93,6 +93,27 @@ fuzz_target!(|data: &[u8]| {
                     e
                 })
                 .unwrap_or_default(),
+            13 if c & 4 == 0 => pick(&tabs)
+                .map(|(id, p)| {
+                    let (popup, e) = b.open_popup(id, Some(&url_for(p, c)), now);
+                    if let Some(pid) = popup {
+                        tabs.push((pid, p));
+                    }
+                    e
+                })
+                .unwrap_or_default(),
+            13 if c & 8 == 0 => pick(&tabs)
+                .map(|(id, _)| {
+                    let e = b.on_close_requested(id, now);
+                    tabs.retain(|t| b.tab(t.0).is_some());
+                    for t in b.view().tabs {
+                        if !tabs.iter().any(|x| x.0 == t.id) {
+                            tabs.push((t.id, if t.private { Profile::Private } else { Profile::Default }));
+                        }
+                    }
+                    e
+                })
+                .unwrap_or_default(),
             13 if c & 2 == 0 => match (pick(&tabs), tabs.get(c as usize % tabs.len().max(1)).copied()) {
                 (Some((x, _)), Some((y, _))) => b.split(x, y, now),
                 _ => vec![],

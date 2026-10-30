@@ -301,3 +301,85 @@ pub async fn delete_user_script(s: S<'_>, domain: String) -> Result<(), String> 
 fn wall_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
+
+#[derive(Serialize)]
+pub struct PinEntry {
+    url: String,
+    title: String,
+    display: DisplayUrl,
+    /// `data:image/png;base64,…` made by the app from the sandboxed
+    /// snapshot, or `None` (the chrome shows a letter tile).
+    icon: Option<String>,
+}
+
+#[tauri::command]
+pub fn list_pins(s: S<'_>) -> Vec<PinEntry> {
+    let Some(store) = s.store.as_ref() else { return Vec::new() };
+    store
+        .pins()
+        .into_iter()
+        .filter_map(|p| {
+            let display = url_display::display(&Url::parse(&p.url).ok()?);
+            let icon = snorkle_core::storage::favicon_host(&p.url)
+                .and_then(|h| store.icon(&h))
+                .and_then(|png| snorkle_core::storage::png_data_url(&png));
+            Some(PinEntry { url: p.url, title: p.title, display, icon })
+        })
+        .collect()
+}
+
+/// Pins the tab's committed URL (dragging a tab into the grid). Not for
+/// private tabs. False when the grid is full or the URL is already pinned.
+#[tauri::command]
+pub async fn pin_tab(s: S<'_>, tab: u64, index: usize) -> Result<bool, String> {
+    let (url, title) = {
+        let b = s.browser();
+        match b.tab(TabId(tab)) {
+            Some(t) if !t.is_private() => match &t.committed_url {
+                Some(u) => (u.to_string(), t.title.clone()),
+                None => return Ok(false),
+            },
+            _ => return Ok(false),
+        }
+    };
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    let added = store.insert_pin(&url, &title, index, wall_ms()).map_err(|e| e.to_string())?;
+    crate::pins::refresh_icons(&s);
+    Ok(added)
+}
+
+/// Moves a bookmark into the pinned grid.
+#[tauri::command]
+pub async fn pin_bookmark(s: S<'_>, url: String, index: usize) -> Result<bool, String> {
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    if store.pins().len() >= snorkle_core::storage::MAX_PINS {
+        return Ok(false);
+    }
+    let Some(b) = store.take_bookmark(&url).map_err(|e| e.to_string())? else { return Ok(false) };
+    let added = store.insert_pin(&b.url, &b.title, index, b.created_ms).map_err(|e| e.to_string())?;
+    if !added {
+        // Already pinned: keep the bookmark where it was not lost.
+        store.insert_bookmark(&b.url, &b.title, usize::MAX, b.created_ms).map_err(|e| e.to_string())?;
+    }
+    crate::pins::refresh_icons(&s);
+    Ok(added)
+}
+
+#[tauri::command]
+pub async fn move_pin(s: S<'_>, url: String, index: usize) -> Result<(), String> {
+    match s.store.clone() {
+        Some(store) => store.move_pin(&url, index).map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
+}
+
+/// Removes a pin; with `bookmark_index`, moves it into the bookmarks bar
+/// at that position instead of dropping it.
+#[tauri::command]
+pub async fn unpin(s: S<'_>, url: String, bookmark_index: Option<usize>) -> Result<(), String> {
+    let Some(store) = s.store.clone() else { return Ok(()) };
+    if let (Some(p), Some(i)) = (store.remove_pin(&url).map_err(|e| e.to_string())?, bookmark_index) {
+        store.insert_bookmark(&p.url, &p.title, i, p.created_ms).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

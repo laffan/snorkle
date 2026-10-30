@@ -256,7 +256,7 @@ fn private_and_default_use_distinct_profiles() {
 }
 
 #[test]
-fn popups_inherit_profile() {
+fn new_window_fallback_inherits_profile() {
     let mut b = browser(4);
     let (p, _) = b.new_tab(Profile::Private, 0);
     b.navigate_input(p, "https://a.example/", 0).unwrap();
@@ -470,4 +470,59 @@ fn split_with_self_is_ignored() {
     let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
     assert!(b.split(a, a, 1).is_empty());
     assert!(b.view().split.is_none());
+}
+
+// ---- popups (window.open with opener) -------------------------------------
+
+#[test]
+fn popup_keeps_opener_alive_and_returns_to_it_on_close() {
+    let mut b = browser(2);
+    let (op, _) = open_and_load(&mut b, "https://www.pinterest.com/", 0);
+    let (popup, out) = b.open_popup(op, Some(&u("https://accounts.google.com/o/oauth2/auth")), 1);
+    let popup = popup.expect("popup allowed");
+    assert!(out.contains(&Effect::AdoptPopup { tab: popup }));
+    assert!(!out.iter().any(|e| matches!(e, Effect::CreateView { .. })), "WebKit supplies the popup view");
+    assert_eq!(b.active(), Some(popup));
+    assert_eq!(b.tab(popup).unwrap().profile, Profile::Default);
+    // Memory pressure must not kill the opener while its popup is in front.
+    b.on_memory_warning();
+    assert_eq!(b.live_count(), 2);
+    // window.close() from the popup returns to the opener.
+    let out = b.on_close_requested(popup, 2);
+    assert!(out.contains(&Effect::DestroyView { tab: popup, keep_state: false }));
+    assert_eq!(b.active(), Some(op));
+}
+
+#[test]
+fn popups_inherit_private_profile() {
+    let mut b = browser(4);
+    let (p, _) = b.new_tab(Profile::Private, 0);
+    b.navigate_input(p, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, p, "https://a.example/");
+    let (popup, _) = b.open_popup(p, Some(&u("https://b.example/")), 1);
+    assert_eq!(b.tab(popup.unwrap()).unwrap().profile, Profile::Private);
+}
+
+#[test]
+fn window_close_is_ignored_for_normal_tabs() {
+    let mut b = browser(4);
+    let (t, _) = open_and_load(&mut b, "https://a.example/", 0);
+    assert!(b.on_close_requested(t, 1).is_empty());
+    assert!(b.tab(t).is_some());
+}
+
+#[test]
+fn popup_policy_blocks_dangerous_urls() {
+    let mut b = browser(4);
+    let (t, _) = open_and_load(&mut b, "https://a.example/", 0);
+    // (Page-initiated javascript: runs with the page's own privileges and is allowed by policy.)
+    for bad in ["data:text/html,x", "file:///etc/hosts", "tauri://localhost/"] {
+        let (popup, _) = b.open_popup(t, Some(&u(bad)), 1);
+        assert!(popup.is_none(), "{bad}");
+    }
+    let (popup, _) = b.open_popup(t, Some(&u("tel:+15555550100")), 1);
+    assert!(popup.is_none());
+    assert!(matches!(notice(&b, t), Some(Notice::ExternalApp { .. })));
+    // about:blank popups (filled by script) are allowed.
+    assert!(b.open_popup(t, None, 2).0.is_some());
 }

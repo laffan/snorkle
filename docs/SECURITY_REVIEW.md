@@ -40,18 +40,21 @@ Current channels (all carry WebKit-generated data, none carry page-chosen messag
 | C2 | `decidePolicyForNavigationResponse` | `canShowMIMEType` | Server chooses the MIME type | Non-renderable → cancel |
 | C3 | provisional start / commit / finish / fail | URL at commit, NSError domain/code/description | Server influences the error text | Text sanitised and length-capped; certificate errors classified by code |
 | C4 | KVO `URL`, `title`, `estimatedProgress`, `canGoBack/Forward`, `hasOnlySecureContent` | Those values | Page controls title and same-document URL | Title sanitised; URL accepted only if same-origin and not provisional |
-| C5 | `createWebViewWithConfiguration` | Popup URL | Page chooses it (requires a user gesture) | Policy-checked new tab; returns nil (no opener) |
+| C5 | `createWebViewWithConfiguration` | Popup URL | Page chooses it (requires a user gesture) | Policy-checked new tab. Since 2026-10-30 (to fix OAuth logins) returns a real web view built from WebKit's configuration, so `window.opener` works where WebKit allows it (WebKit applies `noopener` to `target=_blank` links and pages that ask for it). The opener can be navigated by its popup (tabnabbing), but the address bar always shows each tab's committed URL. |
+| C11 | `webViewDidClose` | Tab id | Page calls `window.close()` | Honoured only for popups; focus returns to the opener |
 | C6 | JS alert/confirm/prompt | Frame's security-origin host | Page triggers it | Suppressed; host shown in a toast, at most 20 per view |
 | C7 | Media capture / device-motion permission | Request type | Page triggers it | WebKit system prompt (`.prompt`) |
 | C8 | `webViewWebContentProcessDidTerminate` | Tab id | Page can cause a crash | Bounded reload, then a notice |
 | C9 | Auth challenge / deprecated TLS | Challenge | Server | Always default handling / refuse |
 | C10 | Tap on a content pane (`UITapGestureRecognizer`) | Tab id only | None (native UI event, not page-generated) | Focuses that tab in split view |
+| C12 | `UIKeyCommand` on content containers (⌘T, ⌘S, ⌘1–5) | Which shortcut | None (hardware keyboard via UIKit; pages cannot synthesise it) | Forwarded to the chrome as a shortcut name |
 
 Native → page code paths (not channels back to native, but reviewed the same way):
 
 | # | Path | What runs | Constraints |
 |---|---|---|---|
 | I1 | User scripts and styles (`WKUserScript`) | User-written CSS/JS for domains they chose | Isolated default client world; main frame only; guarded by the document's real `location.hostname`; CSS and domain embedded as escaped JSON literals; no message handler or `GM_*` API. Every saved script's source is present (guarded) in every page's client world. |
+| F1 | Pinned-grid favicons (`ios/favicon.rs`) | Fixed HTML `<img src="https://<validated host>/favicon.ico">` in a hidden web view: JS off, non-persistent store, only `about:blank` navigation allowed | WebKit decodes the image in its sandbox; the app receives snapshot pixels and re-encodes a PNG. Storage accepts only PNGs ≤ 64 KB, and the chrome receives them as `data:` URLs (`img-src 'self' data:`, the only `data:` in its CSP). App-initiated request: one per pinned host. |
 | I2 | Black-and-white mode | Constant `html{filter:grayscale(1)}` style, via user script and one `evaluateJavaScript` (no completion handler) | Same world and frame constraints; takes no input |
 
 Sign-off log:
@@ -59,6 +62,7 @@ Sign-off log:
 | Date | Change | Approved by |
 |---|---|---|
 | 2026-10-29 | Content web views built with objc2-web-kit instead of wry (Tauri/wry cannot host child webviews on iOS) | Owner (in session) |
+| 2026-10-30 | Popups keep `window.opener` (C5) to fix OAuth logins, owner request; favicons via sandboxed snapshot (F1), owner choice; native keyboard shortcuts (C12) | Owner (in session) |
 | 2026-10-29 | Script injection into content: user scripts/styles per domain and black-and-white mode (I1, I2), confined to `ios/injection.rs` (tripwire allowlist) | Owner (feature request in session) |
 
 ## Checklist for AI-assisted changes in review-required areas

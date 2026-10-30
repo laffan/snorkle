@@ -65,12 +65,16 @@ fn csp_is_strict() {
     assert_eq!(get("base-uri"), "'none'");
     assert_eq!(get("form-action"), "'none'");
     assert_eq!(get("connect-src"), "ipc: http://ipc.localhost");
+    // Pinned-grid favicons: PNGs the app re-encoded from a sandboxed
+    // snapshot, passed as data: URLs. Images only; nothing else may use data:.
+    assert_eq!(get("img-src"), "'self' data:");
     for (k, v) in csp.as_object().unwrap() {
         let v = v.as_str().unwrap();
-        for bad in
-            ["unsafe-inline", "unsafe-eval", "unsafe-hashes", "*", "https:", "data:", "blob:", "wasm-unsafe-eval"]
-        {
+        for bad in ["unsafe-inline", "unsafe-eval", "unsafe-hashes", "*", "https:", "blob:", "wasm-unsafe-eval"] {
             assert!(!v.split_whitespace().any(|t| t.contains(bad)), "CSP {k} contains {bad}");
+        }
+        if k != "img-src" {
+            assert!(!v.contains("data:"), "CSP {k} allows data:");
         }
     }
 }

@@ -32,4 +32,9 @@ pub const COMMANDS: &[&str] = &[
     "list_user_scripts",
     "save_user_script",
     "delete_user_script",
+    "list_pins",
+    "pin_tab",
+    "pin_bookmark",
+    "move_pin",
+    "unpin",
 ];

@@ -16,10 +16,12 @@
 
 mod bindings;
 mod delegates;
+mod favicon;
 mod injection;
+mod keys;
 mod rules;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -101,7 +103,6 @@ pub struct ContentHost {
     private_store: Option<Retained<WKWebsiteDataStore>>,
     events: Rc<dyn ContentEvents>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
-    user_agent: Retained<NSString>,
     scripts: injection::Scripts,
 }
 
@@ -147,7 +148,6 @@ impl ContentHost {
             private_store: None,
             events,
             observers,
-            user_agent: NSString::from_str(&crate::safari_desktop_user_agent(os_version())),
             scripts: injection::Scripts::default(),
         }
     }
@@ -208,6 +208,12 @@ impl ContentHost {
         }
     }
 
+    /// Fetches a favicon for `host` in a sandboxed, throwaway web view (see
+    /// `favicon.rs`). `done` runs on the main thread.
+    pub fn fetch_favicon(&mut self, host: String, done: crate::FaviconDone) {
+        favicon::fetch(self.mtm, &self.root, host, done);
+    }
+
     /// Empties the HTTP disk and memory caches of every profile's store.
     /// Cookies, storage and logins are kept.
     pub fn clear_cache(&mut self) {
@@ -240,6 +246,12 @@ impl ContentHost {
                         },
                     }
                     self.views.insert(*tab, view);
+                }
+                Effect::AdoptPopup { tab } => {
+                    if let Some(parts) = PENDING_POPUPS.with(|p| p.borrow_mut().remove(tab)) {
+                        let view = self.mount(*tab, parts);
+                        self.views.insert(*tab, view);
+                    }
                 }
                 Effect::DestroyView { tab, keep_state } => {
                     if let Some(v) = self.views.remove(tab) {
@@ -353,39 +365,24 @@ impl ContentHost {
             config.defaultWebpagePreferences().setPreferredContentMode(WKContentMode::Desktop);
         }
 
-        let controller = config.userContentController();
-
         let frame = self.content_frame();
-        let container = UIView::initWithFrame(UIView::alloc(mtm), frame);
+        let parts = build_web_view(mtm, tab, &config, CGRect::new(CGPoint::new(0.0, 0.0), frame.size), &self.events);
+        self.mount(tab, parts)
+    }
+
+    /// Puts a web view into a clipped container in the content area and
+    /// wires injection, content blocking and tap-to-focus. Used for views we
+    /// create and for popups WebKit asked us to create.
+    unsafe fn mount(&mut self, tab: TabId, parts: WebViewParts) -> View {
+        let mtm = self.mtm;
+        let WebViewParts { web, nav, ui, kvo } = parts;
+        let controller = web.configuration().userContentController();
+        let frame = self.content_frame();
+        let container = keys::KeyContainer::new_view(mtm, frame, self.events.clone());
         container.setClipsToBounds(true);
         container.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight);
         container.setHidden(true);
-
-        let web_frame = CGRect::new(CGPoint::new(0.0, 0.0), frame.size);
-        let web = WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), web_frame, &config);
-        web.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight);
-        if web.respondsToSelector(sel!(setInspectable:)) {
-            web.setInspectable(spec.inspectable);
-        }
-        web.setAllowsBackForwardNavigationGestures(spec.allows_back_forward_gestures);
-        web.setAllowsLinkPreview(spec.allows_link_preview);
-        if spec.safari_desktop_user_agent {
-            web.setCustomUserAgent(Some(&self.user_agent));
-        }
-
-        let nav = NavDelegate::new(mtm, TabIvars::new(tab, self.events.clone()));
-        let ui = UiDelegate::new(mtm, TabIvars::new(tab, self.events.clone()));
-        let kvo = Observer::new(mtm, TabIvars::new(tab, self.events.clone()));
-        web.setNavigationDelegate(Some(ProtocolObject::from_ref(&*nav)));
-        web.setUIDelegate(Some(ProtocolObject::from_ref(&*ui)));
-        for key in KVO_KEYS {
-            web.addObserver_forKeyPath_options_context(
-                &kvo,
-                &NSString::from_str(key),
-                NSKeyValueObservingOptions::New,
-                std::ptr::null_mut(),
-            );
-        }
+        web.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), frame.size));
 
         container.addSubview(&web);
         self.root.addSubview(&container);
@@ -422,6 +419,72 @@ impl ContentHost {
     pub fn install_rules(&mut self, key: String, make: crate::MakeRuleLists, done: crate::RulesDone) {
         rules::install(self.mtm, key, make, done);
     }
+}
+
+/// A configured content web view with its delegates, not yet placed.
+pub(crate) struct WebViewParts {
+    web: Retained<WKWebView>,
+    nav: Retained<NavDelegate>,
+    ui: Retained<UiDelegate>,
+    kvo: Retained<Observer>,
+}
+
+/// SECURITY-REVIEW: builds a content web view from `config` and attaches our
+/// delegates and observers. Used both for our own configurations and for
+/// the configuration WebKit passes to `createWebViewWithConfiguration`
+/// (popups), which already carries the opener's data store and content
+/// controller (and therefore its rule lists and injected scripts).
+pub(crate) unsafe fn build_web_view(
+    mtm: MainThreadMarker,
+    tab: TabId,
+    config: &WKWebViewConfiguration,
+    frame: CGRect,
+    events: &Rc<dyn ContentEvents>,
+) -> WebViewParts {
+    let spec = &CONTENT_VIEW_SPEC;
+    let web = WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, config);
+    web.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight);
+    if web.respondsToSelector(sel!(setInspectable:)) {
+        web.setInspectable(spec.inspectable);
+    }
+    web.setAllowsBackForwardNavigationGestures(spec.allows_back_forward_gestures);
+    web.setAllowsLinkPreview(spec.allows_link_preview);
+    if spec.safari_desktop_user_agent {
+        web.setCustomUserAgent(Some(&NSString::from_str(&crate::safari_desktop_user_agent(os_version()))));
+    }
+    let nav = NavDelegate::new(mtm, TabIvars::new(tab, events.clone()));
+    let ui = UiDelegate::new(mtm, TabIvars::new(tab, events.clone()));
+    let kvo = Observer::new(mtm, TabIvars::new(tab, events.clone()));
+    web.setNavigationDelegate(Some(ProtocolObject::from_ref(&*nav)));
+    web.setUIDelegate(Some(ProtocolObject::from_ref(&*ui)));
+    for key in KVO_KEYS {
+        web.addObserver_forKeyPath_options_context(
+            &kvo,
+            &NSString::from_str(key),
+            NSKeyValueObservingOptions::New,
+            std::ptr::null_mut(),
+        );
+    }
+    WebViewParts { web, nav, ui, kvo }
+}
+
+thread_local! {
+    /// Popup web views returned to WebKit, waiting for `Effect::AdoptPopup`.
+    static PENDING_POPUPS: RefCell<HashMap<TabId, WebViewParts>> = RefCell::new(HashMap::new());
+}
+
+/// Creates the popup web view for `tab` with WebKit's configuration, parks
+/// it until the core's `AdoptPopup` effect, and returns it to WebKit.
+pub(crate) unsafe fn create_popup(
+    mtm: MainThreadMarker,
+    tab: TabId,
+    config: &WKWebViewConfiguration,
+    events: &Rc<dyn ContentEvents>,
+) -> Retained<WKWebView> {
+    let parts = build_web_view(mtm, tab, config, CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0)), events);
+    let web = parts.web.clone();
+    PENDING_POPUPS.with(|p| p.borrow_mut().insert(tab, parts));
+    web
 }
 
 impl Drop for ContentHost {

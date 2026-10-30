@@ -38,6 +38,11 @@
     "allow-empty-cache",
     "allow-list-user-scripts",
     "allow-save-user-script",
-    "allow-delete-user-script"
+    "allow-delete-user-script",
+    "allow-list-pins",
+    "allow-pin-tab",
+    "allow-pin-bookmark",
+    "allow-move-pin",
+    "allow-unpin"
   ]
 }

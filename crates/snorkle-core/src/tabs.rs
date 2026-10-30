@@ -139,6 +139,9 @@ pub struct Tab {
     /// Whether the current commit has been written to history.
     pub history_recorded: bool,
     pub crash_times_ms: Vec<u64>,
+    /// Tab whose page opened this one as a popup (`window.open`), keeping a
+    /// `window.opener` relationship (OAuth / payment popups).
+    pub opener: Option<TabId>,
 }
 
 impl Tab {
@@ -161,6 +164,7 @@ impl Tab {
             notice: None,
             history_recorded: false,
             crash_times_ms: Vec::new(),
+            opener: None,
         }
     }
 

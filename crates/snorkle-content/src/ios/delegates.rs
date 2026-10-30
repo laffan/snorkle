@@ -238,21 +238,26 @@ define_class!(
     unsafe impl NSObjectProtocol for UiDelegate {}
 
     unsafe impl WKUIDelegate for UiDelegate {
-        /// target=_blank / window.open: open a new tab through the core's
-        /// policy and return nil, so the page never gets a handle to the
-        /// new browsing context (no `window.opener`).
+        /// target=_blank / window.open. The core runs the navigation policy
+        /// and creates a tab; we then return a real web view built from
+        /// WebKit's `configuration` (required by WebKit), so `window.opener`
+        /// works for OAuth/payment popups. WebKit itself applies `noopener`
+        /// where the page or link asks for it. Returning nil cancels.
         #[unsafe(method_id(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:))]
         fn create_web_view(
             &self,
             _web_view: &WKWebView,
-            _config: &WKWebViewConfiguration,
+            config: &WKWebViewConfiguration,
             action: &WKNavigationAction,
             _features: &WKWindowFeatures,
         ) -> Option<Retained<WKWebView>> {
-            if let Some(url) = unsafe { action.request().URL() }.as_deref().and_then(to_url) {
-                self.ivars().events.new_window_request(self.ivars().tab, url);
-            }
-            None
+            self.popup_for(config, action)
+        }
+
+        /// `window.close()`; the core only honours it for popups.
+        #[unsafe(method(webViewDidClose:))]
+        fn did_close(&self, _web_view: &WKWebView) {
+            self.ivars().events.close_requested(self.ivars().tab);
         }
 
         // JavaScript dialogs are suppressed for now (no trusted dialog UI
@@ -317,6 +322,19 @@ define_class!(
 );
 
 impl UiDelegate {
+    fn popup_for(&self, config: &WKWebViewConfiguration, action: &WKNavigationAction) -> Option<Retained<WKWebView>> {
+        let i = self.ivars();
+        let raw = unsafe { action.request().URL() };
+        let url = raw.as_deref().and_then(to_url);
+        // A URL that is present but does not parse is refused (fail closed);
+        // no URL at all means an about:blank popup.
+        if raw.is_some() && url.is_none() {
+            return None;
+        }
+        let tab = i.events.popup_requested(i.tab, url)?;
+        Some(unsafe { super::create_popup(self.mtm(), tab, config, &i.events) })
+    }
+
     pub fn new(mtm: MainThreadMarker, ivars: TabIvars) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }

@@ -5,6 +5,7 @@
 
 mod adblock;
 mod command_list;
+mod pins;
 mod scripts;
 pub mod commands;
 pub mod state;
@@ -57,6 +58,11 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::list_user_scripts,
         commands::save_user_script,
         commands::delete_user_script,
+        commands::list_pins,
+        commands::pin_tab,
+        commands::pin_bookmark,
+        commands::move_pin,
+        commands::unpin,
     ])
 }
 
@@ -90,6 +96,8 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         let _ = match ev {
             ChromeEvent::State(s) => handle.emit_to(CHROME_LABEL, "state", s),
             ChromeEvent::Toast(m) => handle.emit_to(CHROME_LABEL, "toast", m),
+            ChromeEvent::Shortcut(name) => handle.emit_to(CHROME_LABEL, "shortcut", name),
+            ChromeEvent::PinsChanged => handle.emit_to(CHROME_LABEL, "pins", ()),
         };
     });
     let allowlist = store.as_ref().map(|s| s.adblock_allowed()).unwrap_or_default();
@@ -104,6 +112,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     #[cfg(all(debug_assertions, desktop))]
     window.open_devtools();
 
+    pins::refresh_icons(&shared);
     // Injected scripts first, so restored views are created with them.
     scripts::apply(&shared, None);
     let effects = shared.browser().restore_session(&session, state::now_ms());

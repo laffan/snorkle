@@ -35,6 +35,26 @@ mod stub;
 #[cfg(not(target_os = "ios"))]
 pub use stub::{dispatch_main, os_version, physical_memory, ContentHost};
 
+/// Browser keyboard shortcuts handled natively (see `ios::keys`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shortcut {
+    NewTab,
+    ToggleSidebar,
+    /// ⌘1–⌘5: the n-th item in the sidebar (pins, bookmarks, then tabs).
+    Item(u8),
+}
+
+impl Shortcut {
+    /// Name passed to the chrome UI, which performs the action.
+    pub fn name(self) -> String {
+        match self {
+            Shortcut::NewTab => "new_tab".into(),
+            Shortcut::ToggleSidebar => "toggle_sidebar".into(),
+            Shortcut::Item(n) => format!("item:{n}"),
+        }
+    }
+}
+
 /// Callbacks from content web views into the browser core.
 ///
 /// Called on the main thread from inside WebKit delegate methods.
@@ -44,6 +64,11 @@ pub use stub::{dispatch_main, os_version, physical_memory, ContentHost};
 pub trait ContentEvents: 'static {
     fn decide_navigation(&self, tab: TabId, url: &Url, frame: Frame, kind: NavKind) -> Verdict;
     fn new_window_request(&self, opener: TabId, url: Url);
+    /// `window.open` / target=_blank: return the new tab if the platform
+    /// should create a popup web view for it (synchronous).
+    fn popup_requested(&self, opener: TabId, url: Option<Url>) -> Option<TabId>;
+    /// The page called `window.close()`.
+    fn close_requested(&self, tab: TabId);
     fn provisional_start(&self, tab: TabId);
     fn commit(&self, tab: TabId, url: Url);
     fn finish(&self, tab: TabId);
@@ -56,6 +81,8 @@ pub trait ContentEvents: 'static {
     fn process_terminated(&self, tab: TabId);
     /// A JavaScript alert/confirm/prompt was suppressed (no dialog UI yet).
     fn dialog_suppressed(&self, tab: TabId, origin_host: String);
+    /// A hardware-keyboard shortcut was pressed while a page had focus.
+    fn shortcut(&self, shortcut: Shortcut);
     /// The user tapped inside a content pane (focus it in split view).
     fn focus_requested(&self, tab: TabId);
     fn memory_warning(&self);
@@ -132,6 +159,8 @@ pub const DEFAULT_PROFILE_STORE_ID: [u8; 16] =
 /// Produces content-blocking rule-list JSON documents (runs off the main
 /// thread).
 pub type MakeRuleLists = Box<dyn FnOnce() -> Result<Vec<String>, String> + Send>;
+/// Completion of a favicon fetch: app-encoded PNG bytes, or `None`.
+pub type FaviconDone = Box<dyn FnOnce(Option<Vec<u8>>) + Send>;
 /// Completion of a rule-list install, with the number of lists installed.
 pub type RulesDone = Box<dyn FnOnce(Result<usize, String>) + Send>;
 

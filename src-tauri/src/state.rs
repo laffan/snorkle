@@ -43,6 +43,10 @@ pub enum StorageJob {
 pub enum ChromeEvent<'a> {
     State(&'a ChromeState),
     Toast(&'a str),
+    /// A native keyboard shortcut for the chrome to perform.
+    Shortcut(&'a str),
+    /// Pinned grid content (e.g. a favicon) changed.
+    PinsChanged,
 }
 
 pub type Emitter = Box<dyn Fn(ChromeEvent<'_>) + Send + Sync>;
@@ -51,7 +55,7 @@ pub struct Shared {
     browser: Mutex<Browser>,
     pub store: Option<Arc<Store>>,
     storage_tx: Option<Mutex<Sender<StorageJob>>>,
-    emit: Emitter,
+    pub(crate) emit: Emitter,
 }
 
 impl Shared {
@@ -207,6 +211,14 @@ impl ContentEvents for Events {
     fn new_window_request(&self, opener: TabId, url: Url) {
         self.apply(|b| b.on_new_window_request(opener, &url, now_ms()));
     }
+    fn popup_requested(&self, opener: TabId, url: Option<Url>) -> Option<TabId> {
+        let (tab, effects) = self.shared.browser().open_popup(opener, url.as_ref(), now_ms());
+        self.shared.run(effects);
+        tab
+    }
+    fn close_requested(&self, tab: TabId) {
+        self.apply(|b| b.on_close_requested(tab, now_ms()));
+    }
     fn provisional_start(&self, tab: TabId) {
         self.apply(|b| b.on_provisional_start(tab));
     }
@@ -242,6 +254,9 @@ impl ContentEvents for Events {
             let host = snorkle_core::text::sanitize_page_text(&origin_host, 80);
             self.shared.toast(&format!("{host} tried to show a dialog. Dialogs are not supported yet."));
         }
+    }
+    fn shortcut(&self, shortcut: snorkle_content::Shortcut) {
+        (self.shared.emit)(ChromeEvent::Shortcut(&shortcut.name()));
     }
     fn focus_requested(&self, tab: TabId) {
         // Only meaningful in split view; otherwise the tab is already active.

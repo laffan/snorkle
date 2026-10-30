@@ -71,10 +71,12 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 13. **[verify] PSL freshness.** The Public Suffix List is compiled in (`psl =2.1.245`). New
     private suffixes added after that release are misread as registrable domains until a
     dependency bump. **[decide]** Choose an update cadence.
-14. **[decide] Popups without `window.opener`.** Every popup becomes a separate tab with no
-    opener. This blocks tabnabbing but breaks OAuth/payment popups that `postMessage` back to the
-    opener. Supporting them means returning a WKWebView from `createWebViewWithConfiguration` with
-    WebKit's provided configuration. That is a new cross-view channel, so it needs a security review.
+14. **[verify] Popups with `window.opener`** (decided 2026-10-30, to fix Google sign-in on
+    Pinterest): popups are real web views built from WebKit's configuration and appear as a new
+    tab; `window.close()` returns to the opener, and the opener is protected from discard while
+    its popup is in front. To check on device: the Google → Pinterest flow completes; WebKit
+    applies `noopener` to `target=_blank` links; popups get the opener's rule lists and user
+    scripts (they share its content controller).
 15. **[decide][gap] JavaScript dialogs** (`alert`/`confirm`/`prompt`) are suppressed, and the chrome
     shows a note naming the origin. A trusted dialog UI (native `UIAlertController` titled with the
     origin, rate-limited, only for the active tab) is the obvious next step. It is native UI code
@@ -166,4 +168,14 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 40. **[decide] "Empty Cache"** clears the HTTP disk and memory caches of the default and current
     private stores. It does not clear cookies, local storage or service-worker caches. A fuller
     "Clear website data" option is a separate decision.
+41. **[verify] Keyboard shortcuts.** ⌘T/⌘S/⌘1–5 use `UIKeyCommand`s on content containers with
+    `wantsPriorityOverSystemBehavior`, so they take precedence over page shortcuts (e.g. ⌘S in web
+    editors). Check that UIKit offers them while a page has focus, and that the chrome's own
+    handler fires when the address bar or sidebar has focus.
+42. **[verify] Favicon snapshots.** Check: an off-screen web view inside the window renders, so
+    `takeSnapshot` returns pixels; the "blank icon" heuristic (PNG < 220 bytes) suits real sites;
+    sites without `/favicon.ico` (icon only in `<link rel=icon>`) fall back to letter tiles.
+    Fetching `<link rel=icon>` would need JS or HTML parsing in the hidden view, so it is not done.
+43. **[decide] ⌘1–5 order** is pins, bookmarks, then tabs. Opening a pin or bookmark switches to
+    a tab already showing that exact URL, else uses the current tab if empty, else a new tab.
 

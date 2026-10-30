@@ -23,6 +23,8 @@
   let scriptsOpen = false;
   let menuOpen = false;
   let bookmarks = [];
+  let pins = [];
+  const MAX_PINS = 4;
   let settings = { grayscale: false };
   let scripts = [];
   let editingDomain = null; // domain of the script open in the editor, or '' for new
@@ -272,6 +274,72 @@
     }
   }
 
+  // ---- opening links from pins / bookmarks / shortcuts -----------------------
+
+  // Switch to a tab already showing the URL; otherwise open it in the
+  // current tab if that is empty, or in a new tab.
+  function openLink(url, display) {
+    const existing = state && state.tabs.find((t) => t.url && display && t.url.full === display.full);
+    if (existing) {
+      invoke('activate_tab', { tab: existing.id });
+    } else {
+      const tab = activeTab();
+      if (tab && !tab.url && !tab.private) invoke('navigate', { tab: tab.id, input: url });
+      else T.core.invoke('new_tab', { private: false }).then((id) => invoke('navigate', { tab: id, input: url })).catch((e) => toast(String(e)));
+    }
+    if (narrow) setSidebar(false);
+  }
+
+  // ---- pinned grid ----------------------------------------------------------
+
+  function loadPins() {
+    return T.core.invoke('list_pins').then((items) => { pins = items; renderPins(); }).catch(() => {});
+  }
+
+  // Letter tile shown until (or instead of) a favicon.
+  function letterTile(display) {
+    const name = (display && display.registrable) || '?';
+    const t = el('span', 'letter', name.charAt(0).toUpperCase());
+    let h = 0;
+    for (const c of name) h = (h * 31 + c.codePointAt(0)) % 360;
+    t.style.background = `hsl(${h}, 45%, 45%)`;
+    return t;
+  }
+
+  function renderPins() {
+    const grid = $('pins');
+    grid.replaceChildren();
+    if (!pins.length) {
+      grid.appendChild(el('div', 'hint', 'Drag up to 4 tabs or bookmarks here.'));
+      return;
+    }
+    pins.forEach((p, index) => {
+      const node = el('div', 'pin');
+      node.dataset.index = String(index);
+      node.title = p.title || p.display.registrable;
+      const open = el('button', 'open');
+      open.setAttribute('aria-label', `Open ${p.title || p.display.registrable}`);
+      if (p.icon && p.icon.startsWith('data:image/png;base64,')) {
+        const img = el('img');
+        img.alt = '';
+        img.src = p.icon;
+        open.appendChild(img);
+      } else {
+        open.appendChild(letterTile(p.display));
+      }
+      open.addEventListener('click', () => { if (!suppressClick) openLink(p.url, p.display); });
+      const rm = el('button', 'unpin', '\u00D7');
+      rm.setAttribute('aria-label', 'Unpin');
+      rm.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        invoke('unpin', { url: p.url, bookmarkIndex: null }).then(loadPins);
+      });
+      node.append(open, rm);
+      node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'pin', url: p.url, index }));
+      grid.appendChild(node);
+    });
+  }
+
   // ---- bookmarks bar ------------------------------------------------------
 
   function loadBookmarks() {
@@ -293,12 +361,7 @@
       const host = el('span', 'h');
       fillLabels(host, b.display.registrable, false);
       open.appendChild(host);
-      open.addEventListener('click', () => {
-        if (suppressClick) return;
-        const tab = activeTab();
-        if (tab) invoke('navigate', { tab: tab.id, input: b.url });
-        if (narrow) setSidebar(false);
-      });
+      open.addEventListener('click', () => { if (!suppressClick) openLink(b.url, b.display); });
       const rm = el('button', 'close', '×');
       rm.setAttribute('aria-label', 'Remove bookmark');
       rm.addEventListener('click', (ev) => {
@@ -323,7 +386,7 @@
   let dragState = null;
 
   function armDrag(ev, node, item) {
-    if (ev.button > 0 || ev.target.closest('.close')) return;
+    if (ev.button > 0 || ev.target.closest('.close, .unpin')) return;
     cancelPending();
     const delay = ev.pointerType === 'mouse' ? 120 : DRAG_DELAY_MS;
     pendingDrag = { node, item, x: ev.clientX, y: ev.clientY, timer: setTimeout(startDrag, delay) };
@@ -353,6 +416,13 @@
   function dropTargetAt(x, y) {
     const hit = document.elementFromPoint(x, y);
     if (!hit) return null;
+    const grid = hit.closest('#pins');
+    if (grid) {
+      if (dragState.item.kind === 'tab' && dragState.item.private) return null; // never persist private tabs
+      const tiles = [...grid.querySelectorAll('.pin')];
+      const index = tiles.filter((t) => { const r = t.getBoundingClientRect(); return r.left + r.width / 2 < x; }).length;
+      return { kind: 'pins', index, grid };
+    }
     const list = hit.closest('#bookmarks');
     if (list) {
       if (dragState.item.kind === 'tab' && dragState.item.private) return null; // never persist private tabs
@@ -379,6 +449,8 @@
     if (!target) return;
     if (target.kind === 'tab') {
       target.node.classList.add('drop-target');
+    } else if (target.kind === 'pins') {
+      target.grid.classList.add('drop-target');
     } else {
       target.list.classList.add('drop-target');
       const lr = target.list.getBoundingClientRect();
@@ -413,6 +485,18 @@
     } else if (d.item.kind === 'bookmark' && t.kind === 'bookmarks') {
       const to = t.index > d.item.index ? t.index - 1 : t.index;
       if (to !== d.item.index) invoke('move_bookmark', { url: d.item.url, index: to }).then(loadBookmarks);
+    } else if (t.kind === 'pins' && d.item.kind === 'pin') {
+      const to = t.index > d.item.index ? t.index - 1 : t.index;
+      if (to !== d.item.index) invoke('move_pin', { url: d.item.url, index: to }).then(loadPins);
+    } else if (t.kind === 'pins') {
+      if (pins.length >= MAX_PINS) { toast(`Pinned holds up to ${MAX_PINS} sites. Unpin one first.`); return; }
+      const call = d.item.kind === 'tab'
+        ? T.core.invoke('pin_tab', { tab: d.item.id, index: t.index })
+        : T.core.invoke('pin_bookmark', { url: d.item.url, index: t.index });
+      call.then((ok) => { if (!ok) toast('Already pinned, or nothing to pin yet.'); return Promise.all([loadPins(), loadBookmarks()]); })
+        .catch((e) => toast(String(e)));
+    } else if (d.item.kind === 'pin' && t.kind === 'bookmarks') {
+      invoke('unpin', { url: d.item.url, bookmarkIndex: t.index }).then(() => Promise.all([loadPins(), loadBookmarks()]));
     }
   }
 
@@ -726,6 +810,50 @@
     reportLayout();
   }
 
+  // ---- keyboard shortcuts -------------------------------------------------
+  //
+  // ⌘T new tab, ⌘S toggle sidebar, ⌘1–⌘5 the first five sidebar items
+  // (pins, then bookmarks, then tabs). Handled here when the chrome has
+  // keyboard focus; when a page has focus, native UIKeyCommands forward the
+  // same names via the `shortcut` event.
+
+  function sidebarItems() {
+    const items = [];
+    for (const p of pins) items.push({ link: p });
+    for (const b of bookmarks) items.push({ link: b });
+    if (state) {
+      for (const t of state.tabs) if (!t.private) items.push({ tab: t });
+      for (const t of state.tabs) if (t.private) items.push({ tab: t });
+    }
+    return items;
+  }
+
+  function runShortcut(name) {
+    if (name === 'new_tab') {
+      if (narrow) setSidebar(false);
+      invoke('new_tab', { private: false }).then(beginEdit);
+    } else if (name === 'toggle_sidebar') {
+      setSidebar(!sidebarOpen);
+    } else if (name.startsWith('item:')) {
+      const item = sidebarItems()[Number(name.slice(5)) - 1];
+      if (!item) return;
+      if (item.tab) invoke('activate_tab', { tab: item.tab.id });
+      else openLink(item.link.url, item.link.display);
+    }
+  }
+
+  document.addEventListener('keydown', (ev) => {
+    if (!ev.metaKey || ev.altKey || ev.ctrlKey) return;
+    const k = ev.key.toLowerCase();
+    let name = null;
+    if (k === 't') name = 'new_tab';
+    else if (k === 's') name = 'toggle_sidebar';
+    else if (k >= '1' && k <= '5' && k.length === 1) name = 'item:' + k;
+    if (!name) return;
+    ev.preventDefault();
+    runShortcut(name);
+  });
+
   // ---- wiring -----------------------------------------------------------
 
   function withTab(f) {
@@ -826,10 +954,14 @@
   if (savedWidth) setSidebarWidth(savedWidth);
   applySidebar();
   renderBookmarks();
+  renderPins();
 
   T.event.listen('state', (e) => { state = e.payload; render(); });
   T.event.listen('toast', (e) => toast(String(e.payload)));
+  T.event.listen('shortcut', (e) => runShortcut(String(e.payload)));
+  T.event.listen('pins', () => loadPins());
   T.core.invoke('get_state').then((s) => { state = s; render(); });
   loadBookmarks();
+  loadPins();
   T.core.invoke('get_settings').then((s) => { settings = s; renderGrayscale(); }).catch(() => {});
 })();
