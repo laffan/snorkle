@@ -203,6 +203,17 @@
     <ol id="console-list" class="console-list"></ol>
   </section>
 
+  <!-- New tab: command palette (over the content area, which is hidden
+       while it is open). Titles and hosts are set with textContent. -->
+  <div id="palette" class="backdrop palette-backdrop" hidden>
+    <div class="palette" role="dialog" aria-label="New tab">
+      <input id="palette-input" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
+             enterkeyhint="go" placeholder="Search tabs and bookmarks, or enter an address" aria-label="Search tabs and bookmarks, or enter an address"
+             role="combobox" aria-controls="palette-list" aria-expanded="true" aria-autocomplete="list">
+      <ul id="palette-list" class="palette-list" role="listbox"></ul>
+    </div>
+  </div>
+
   <!-- Headers view: the page's outline, docked right of the page.
        Heading text is page-controlled: textContent only. -->
   <aside id="outline" class="sheet" aria-labelledby="outline-title" hidden>

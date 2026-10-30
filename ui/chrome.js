@@ -18,6 +18,7 @@
 
   let state = null;
   let editing = false;
+  let paletteOpen = false;
   let consoleOpen = false;
   let panel = null; // null | 'history'
   let modalOpen = false;
@@ -893,7 +894,7 @@
     // Native page views are drawn above the chrome, so nothing here can
     // float over a page: panels either dock beside it (shrinking the
     // content area) or set `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || (scriptsOpen && narrow) || (narrow && sidebarOpen);
+    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (narrow && sidebarOpen);
     // A docked right panel (site scripts) takes the right of the content area.
     const dock = rightPanel();
     const right = dock ? Math.min(420, Math.floor((window.innerWidth - left) * 0.45)) : 0;
@@ -1204,6 +1205,145 @@
     reportLayout();
   }
 
+  // ---- command palette (new tab) -------------------------------------------
+  //
+  // Arc-style: ⌘T or New Tab opens a palette instead of a blank tab. Typing
+  // fuzzy-matches open tabs, pins and bookmarks first; the last row searches
+  // or goes to what was typed in a new tab. Nothing is created until a row
+  // is chosen.
+
+  let paletteRows = [];
+  let paletteSel = 0;
+
+  // Subsequence match of `q` in `text`, scored: consecutive runs, word
+  // starts and an early first match score higher. Returns null if `q` is
+  // not a subsequence.
+  function fuzzy(q, text) {
+    const t = text.toLowerCase();
+    let score = 0;
+    let run = 0;
+    let ti = 0;
+    const hits = [];
+    for (const ch of q) {
+      const at = t.indexOf(ch, ti);
+      if (at < 0) return null;
+      run = at === ti && hits.length ? run + 1 : 0;
+      const wordStart = at === 0 || /[\s./\-_:]/.test(t[at - 1]);
+      score += 1 + run * 3 + (wordStart ? 4 : 0);
+      hits.push(at);
+      ti = at + 1;
+    }
+    score -= hits[0] * 0.2 + (t.length - q.length) * 0.02;
+    return { score, hits };
+  }
+
+  function paletteCandidates() {
+    const out = [];
+    if (state) {
+      for (const t of state.tabs) {
+        if (t.sheet_over !== null || t.launcher !== null) continue;
+        out.push({ kind: t.private ? 'Private' : 'Tab', title: t.title || (t.url ? t.url.registrable : 'New Tab'), host: t.url ? t.url.registrable : '', run: () => invoke('activate_tab', { tab: t.id }) });
+      }
+    }
+    for (const p of pins) out.push({ kind: 'Pinned', title: p.title || p.display.registrable, host: p.display.registrable, run: () => openLink(p.url) });
+    for (const b of bookmarks) out.push({ kind: 'Bookmark', title: b.title || b.display.registrable, host: b.display.registrable, run: () => openLink(b.url) });
+    return out;
+  }
+
+  function renderPalette() {
+    const q = $('palette-input').value.trim();
+    const ql = q.toLowerCase();
+    let rows;
+    if (!ql) {
+      rows = paletteCandidates().slice(0, 8).map((c) => ({ ...c, hits: [] }));
+    } else {
+      rows = paletteCandidates()
+        .map((c) => {
+          const m = fuzzy(ql, c.title);
+          const mh = fuzzy(ql, c.host);
+          const best = m && (!mh || m.score >= mh.score) ? m : mh;
+          return best && { ...c, score: best.score, hits: best === m ? best.hits : [] };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
+      rows.push({ kind: 'Go', title: q, host: '', hits: [], go: true, run: () => openTyped(q) });
+    }
+    paletteRows = rows;
+    paletteSel = Math.min(paletteSel, Math.max(0, rows.length - 1));
+    const list = $('palette-list');
+    list.replaceChildren();
+    rows.forEach((r, i) => {
+      const li = el('li');
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', String(i === paletteSel));
+      li.appendChild(el('span', 'kind', r.go ? (looksLikeAddress(q) ? 'Go to' : 'Search') : r.kind));
+      const t = el('span', 't');
+      // Highlight matched characters (built from text nodes, never markup).
+      const hits = new Set(r.hits);
+      [...r.title].forEach((ch, k) => t.appendChild(hits.has(k) ? el('mark', null, ch) : document.createTextNode(ch)));
+      li.appendChild(t);
+      if (r.host) li.appendChild(el('span', 'h', r.host));
+      li.addEventListener('pointerdown', (ev) => ev.preventDefault()); // keep the input focused
+      li.addEventListener('click', () => choosePalette(i));
+      list.appendChild(li);
+    });
+    if (!rows.length) list.appendChild(el('li', 'muted', 'No open tabs or bookmarks yet. Type an address or a search.'));
+  }
+
+  function looksLikeAddress(q) {
+    return /^[a-z][a-z0-9+.-]*:/i.test(q) || (/^[^\s]+\.[^\s]{2,}/.test(q) && !/\s/.test(q));
+  }
+
+  function openTyped(q) {
+    T.core.invoke('new_tab', { private: false })
+      .then((id) => invoke('navigate', { tab: id, input: q }))
+      .catch((e) => toast(String(e)));
+  }
+
+  function choosePalette(i) {
+    const r = paletteRows[i];
+    closePalette();
+    if (r) r.run();
+  }
+
+  function openPalette() {
+    closeMenu();
+    if (narrow) setSidebar(false);
+    paletteOpen = true;
+    paletteSel = 0;
+    $('palette').hidden = false;
+    const input = $('palette-input');
+    input.value = '';
+    renderPalette();
+    input.focus();
+    reportLayout();
+  }
+
+  function closePalette() {
+    paletteOpen = false;
+    $('palette').hidden = true;
+    $('palette-input').blur();
+    reportLayout();
+  }
+
+  $('palette-input').addEventListener('input', () => { paletteSel = 0; renderPalette(); });
+  $('palette-input').addEventListener('keydown', (ev) => {
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      const n = paletteRows.length;
+      if (n) paletteSel = (paletteSel + (ev.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      renderPalette();
+    } else if (ev.key === 'Enter') {
+      ev.preventDefault();
+      choosePalette(paletteSel);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      closePalette();
+    }
+  });
+  $('palette').addEventListener('click', (ev) => { if (ev.target === $('palette')) closePalette(); });
+
   // ---- keyboard shortcuts -------------------------------------------------
   //
   // ⌘T new tab, ⌘S toggle sidebar, ⌘1–⌘5 the first five sidebar items
@@ -1225,8 +1365,7 @@
 
   function runShortcut(name) {
     if (name === 'new_tab') {
-      if (narrow) setSidebar(false);
-      invoke('new_tab', { private: false }).then(beginEdit);
+      openPalette();
     } else if (name === 'toggle_sidebar') {
       setSidebar(!sidebarOpen);
     } else if (name.startsWith('item:')) {
@@ -1258,11 +1397,7 @@
   $('back').addEventListener('click', withTab((t) => invoke('go_back', { tab: t.id })));
   $('forward').addEventListener('click', withTab((t) => invoke('go_forward', { tab: t.id })));
   $('reload').addEventListener('click', withTab((t) => invoke(t.loading ? 'stop' : 'reload', { tab: t.id })));
-  $('menu-new-tab').addEventListener('click', () => {
-    closeMenu();
-    if (narrow) setSidebar(false);
-    invoke('new_tab', { private: false }).then(beginEdit);
-  });
+  $('menu-new-tab').addEventListener('click', () => { closeMenu(); openPalette(); });
   $('menu-new-private').addEventListener('click', () => {
     closeMenu();
     if (narrow) setSidebar(false);
@@ -1322,7 +1457,8 @@
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
-    if (menuOpen) closeMenu();
+    if (paletteOpen) closePalette();
+    else if (menuOpen) closeMenu();
     else if (modalOpen) setModal(false);
     else if (scriptsOpen) setScripts(false);
     else if (panel) closePanel();

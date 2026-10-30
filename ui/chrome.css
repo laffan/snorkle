@@ -306,6 +306,25 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .console-list li.error { font-weight: 700; }
 .console-list li.debug .msg { color: var(--muted); }
 
+/* ---- command palette ---------------------------------------------------- */
+.palette-backdrop { align-items: flex-start; padding-top: max(12vh, calc(env(safe-area-inset-top) + 40px)); }
+.palette {
+  width: min(640px, 100%); background: var(--bar); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .35); overflow: hidden;
+}
+#palette-input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--line); outline: none; background: transparent;
+  padding: 18px 20px; font-size: 20px;
+}
+.palette-list { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow-y: auto; }
+.palette-list li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; cursor: pointer; }
+.palette-list li[aria-selected="true"] { background: var(--fg); color: var(--bar); }
+.palette-list li[aria-selected="true"] .h, .palette-list li[aria-selected="true"] .kind { color: var(--bar); opacity: .75; }
+.palette-list .t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.palette-list .h { color: var(--muted); font-size: 13px; flex: 0 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 40%; }
+.palette-list .kind { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; flex: 0 0 auto; width: 64px; }
+.palette-list mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
+
 /* ---- pinned grid ------------------------------------------------------- */
 .pingrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; min-height: 60px; padding: 2px; border-radius: 12px; }
 .pingrid.drop-target { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }
