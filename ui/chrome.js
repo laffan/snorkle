@@ -192,6 +192,7 @@
     $('sheet-close').hidden = !state.sheet;
     $('sheet-pill').hidden = !state.sheet;
     renderShield(tab);
+    renderScriptsMark(tab);
     $('private-pill').hidden = !(tab && tab.private);
 
     const d = tab && tab.url;
@@ -755,11 +756,23 @@
 
   // ---- site scripts -------------------------------------------------------
 
+  // Ring around the { } button when an enabled script applies to the page
+  // (same rule as the injected guard: the domain or one of its subdomains).
+  function renderScriptsMark(tab) {
+    let host = '';
+    try { host = tab && tab.url ? new URL(tab.url.full).hostname.toLowerCase() : ''; } catch (e) { host = ''; }
+    const has = !!host && scripts.some((s) => s.enabled && (host === s.domain || host.endsWith('.' + s.domain)));
+    const b = $('scripts-btn');
+    b.classList.toggle('has-script', has);
+    b.title = has ? 'Site scripts (active on this site)' : 'Site scripts';
+  }
+
   function loadScripts() {
     return T.core.invoke('list_user_scripts').then((items) => { scripts = items; renderScripts(); }).catch((e) => toast(String(e)));
   }
 
   function renderScripts() {
+    renderScriptsMark(activeTab());
     const list = $('scripts-list');
     list.replaceChildren();
     if (!scripts.length) {
@@ -834,6 +847,7 @@
   function setScripts(open) {
     scriptsOpen = open;
     $('scripts-pop').hidden = !open;
+    $('scripts-pop').classList.toggle('dock', open && !narrow);
     if (open) {
       $('script-editor').hidden = true;
       loadScripts();
@@ -871,20 +885,31 @@
     const left = sidebarOpen && !narrow ? Math.ceil($('sidebar').offsetWidth) : 0;
     $('chrome').style.left = left + 'px';
     const top = Math.ceil($('chrome').getBoundingClientRect().bottom);
-    const overlay = !!panel || modalOpen || scriptsOpen || (narrow && sidebarOpen);
+    // Native page views are drawn above the chrome, so nothing here can
+    // float over a page: panels either dock beside it (shrinking the
+    // content area) or set `overlay`, which hides the page.
+    const overlay = !!panel || modalOpen || (scriptsOpen && narrow) || (narrow && sidebarOpen);
+    // A docked right panel (site scripts) takes the right of the content area.
+    const dock = rightPanel();
+    const right = dock ? Math.min(420, Math.floor((window.innerWidth - left) * 0.45)) : 0;
+    if (dock) {
+      dock.style.top = top + 'px';
+      dock.style.width = right + 'px';
+    }
     // The docked console takes the bottom of the content area.
     const con = $('console');
     con.style.left = left + 'px';
+    con.style.right = right + 'px';
     const bottom = consoleOpen ? Math.ceil(con.getBoundingClientRect().height) : 0;
     // The chrome surface (start page, notices) covers the focused pane: in
     // split view that is one half of the content area (matching the native
     // pane frames: 2 pt divider, halves floored).
     let sLeft = left;
-    let sRight = 0;
+    let sRight = right;
     if (state && state.split && !overlay) {
-      const w = window.innerWidth - left;
+      const w = window.innerWidth - left - right;
       const half = Math.floor((w - 2) / 2);
-      if (state.active === state.split.left) sRight = w - half;
+      if (state.active === state.split.left) sRight = right + w - half;
       else sLeft = left + w - half;
     }
     const s = $('surface');
@@ -892,10 +917,16 @@
     s.style.left = sLeft + 'px';
     s.style.right = sRight + 'px';
     s.style.bottom = bottom + 'px';
-    const key = top + ':' + left + ':' + bottom + ':' + overlay;
+    const key = [top, left, right, bottom, overlay].join(':');
     if (key === lastLayout) return;
     lastLayout = key;
-    invoke('set_chrome_layout', { top, left, bottom, overlay });
+    invoke('set_chrome_layout', { top, left, right, bottom, overlay });
+  }
+
+  // The panel docked on the right of the content area, if any.
+  function rightPanel() {
+    if (scriptsOpen && !narrow) return $('scripts-pop');
+    return null;
   }
 
   // ---- ad blocking ------------------------------------------------------
@@ -1240,5 +1271,6 @@
   T.core.invoke('get_state').then((s) => { state = s; render(); });
   loadBookmarks();
   loadPins();
+  loadScripts();
   T.core.invoke('get_view_mode').then((m) => { viewMode = m; renderViewMode(); }).catch(() => {});
 })();

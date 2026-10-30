@@ -107,8 +107,8 @@ pub fn dismiss_notice(s: S<'_>, tab: u64) {
 /// chrome is showing UI over the content area (menus, the sidebar in narrow
 /// windows), so content must be hidden.
 #[tauri::command]
-pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, bottom: f64, overlay: bool) {
-    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, bottom)));
+pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, right: f64, bottom: f64, overlay: bool) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, right, bottom)));
     with_browser(&s, |b| b.set_chrome_overlay(overlay));
 }
 

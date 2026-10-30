@@ -166,6 +166,14 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   ends a pair. The sidebar shows each pair as one row with a half per tab; dragging a half out
   of the row unsplits it. Pairs are not saved in the session. A tap in a pane focuses it.
 
+## 5e. Docked panels
+
+Native page views sit above the chrome's webview, so the chrome can never draw over a page.
+Panels that should leave the page visible dock beside it instead: the chrome reports `right`
+and `bottom` insets and the host shrinks the content area. The site-scripts panel docks on the
+right (in narrow windows it overlays and hides the page); the console docks at the bottom. A
+ring around the `{ }` button marks pages an enabled site script applies to.
+
 ## 5d. In-app console
 
 The Menu → Console panel is docked under the content area (the chrome reports a `bottom`

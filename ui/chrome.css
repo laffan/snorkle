@@ -251,6 +251,13 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
   right: max(12px, env(safe-area-inset-right)); width: min(560px, calc(100% - 24px));
   max-height: calc(100% - env(safe-area-inset-top) - 80px); overflow-y: auto;
 }
+/* Docked beside the page (top and width set from JS). */
+.sheet.dock {
+  top: 0; right: 0; bottom: 0; max-height: none; border-radius: 0; box-shadow: none;
+  border: 0; border-left: 1px solid var(--line); z-index: 12;
+  padding-right: max(20px, env(safe-area-inset-right)); padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+#scripts-btn.has-script { box-shadow: 0 0 0 2px var(--fg) inset; border-radius: 20px; }
 .option { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
 .option > div { flex: 1; }
 .option-title { font-weight: 600; }

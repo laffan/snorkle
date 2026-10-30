@@ -46,7 +46,7 @@ fn args(cmd: &str) -> serde_json::Value {
     match cmd {
         "navigate" => json!({ "tab": 1, "input": "https://example.com/" }),
         "new_tab" => json!({ "private": false }),
-        "set_chrome_layout" => json!({ "top": 80.0, "left": 264.0, "bottom": 0.0, "overlay": false }),
+        "set_chrome_layout" => json!({ "top": 80.0, "left": 264.0, "right": 0.0, "bottom": 0.0, "overlay": false }),
         "set_console_capture" => json!({ "on": false }),
         "clear_website_data" => json!({ "kind": "cache" }),
         "open_launcher" => json!({ "url": "https://example.com/" }),

@@ -41,7 +41,7 @@ impl ContentHost {
         self.applied.push(effect.clone());
     }
 
-    pub fn set_insets(&mut self, top: f64, left: f64, _bottom: f64) {
+    pub fn set_insets(&mut self, top: f64, left: f64, _right: f64, _bottom: f64) {
         self.top = crate::clamp_inset(top, 1024.0);
         self.left = crate::clamp_inset(left, 1366.0);
     }

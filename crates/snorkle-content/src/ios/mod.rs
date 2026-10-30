@@ -104,6 +104,7 @@ pub struct ContentHost {
     root: Retained<UIView>,
     top: Cell<f64>,
     left: Cell<f64>,
+    right: Cell<f64>,
     bottom: Cell<f64>,
     views: HashMap<TabId, View>,
     /// `interactionState` of discarded tabs (in memory only).
@@ -162,6 +163,7 @@ impl ContentHost {
             root,
             top: Cell::new(0.0),
             left: Cell::new(0.0),
+            right: Cell::new(0.0),
             bottom: Cell::new(0.0),
             views: HashMap::new(),
             saved: HashMap::new(),
@@ -183,10 +185,11 @@ impl ContentHost {
         let b = self.root.bounds();
         let top = clamp_inset(self.top.get(), b.size.height);
         let left = clamp_inset(self.left.get(), b.size.width);
+        let right = clamp_inset(self.right.get(), b.size.width);
         let bottom = clamp_inset(self.bottom.get(), b.size.height);
         CGRect::new(
             CGPoint::new(left, top),
-            CGSize::new((b.size.width - left).max(0.0), (b.size.height - top - bottom).max(0.0)),
+            CGSize::new((b.size.width - left - right).max(0.0), (b.size.height - top - bottom).max(0.0)),
         )
     }
 
@@ -237,12 +240,14 @@ impl ContentHost {
 
     /// Insets of the content area, in points, reported by the trusted
     /// chrome UI: `top` is the bottom edge of the toolbar, `left` the right
-    /// edge of the docked tab sidebar (0 when collapsed), `bottom` the
-    /// height of the docked console (0 when closed). Content containers
-    /// never extend over any of them.
-    pub fn set_insets(&mut self, top: f64, left: f64, bottom: f64) {
+    /// edge of the docked tab sidebar (0 when collapsed), `right` the width
+    /// of a docked right panel (site scripts, headers), `bottom` the height
+    /// of the docked console (0 when closed). Content containers never
+    /// extend over any of them.
+    pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64) {
         self.top.set(top);
         self.left.set(left);
+        self.right.set(right);
         self.bottom.set(bottom);
         for v in self.views.values() {
             v.container.setFrame(self.pane_frame(v.pane.get()));
