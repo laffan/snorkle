@@ -357,6 +357,11 @@
       if (p.icon && p.icon.startsWith('data:image/png;base64,')) {
         const img = el('img');
         img.alt = '';
+        // Never show a broken image: fall back to the letter tile.
+        img.addEventListener('error', () => {
+          chromeLog('warn', `favicon for ${p.display.registrable} could not be displayed (${p.icon.length} chars)`);
+          img.replaceWith(letterTile(p.display));
+        });
         img.src = p.icon;
         open.appendChild(img);
       } else {
@@ -447,6 +452,17 @@
     p.node.classList.add('drag-src');
     document.body.classList.add('dragging');
     dragState = { item: p.item, node: p.node, ghost, dx: p.x - rect.left, dy: p.y - rect.top, target: null };
+    showDropZone(p.item);
+  }
+
+  // While dragging something that can be bookmarked, the bookmarks list
+  // grows a visible target at its end (once it has items, the empty-list
+  // hint is gone and there is otherwise little to aim at).
+  function showDropZone(item) {
+    const list = $('bookmarks');
+    if (item.kind === 'tab' && item.private) return; // never persist private tabs
+    if (!list.querySelector('.bm')) return; // the empty-list hint is the target
+    list.appendChild(el('div', 'drop-zone', item.kind === 'bookmark' ? 'Move to the end' : 'Drop here to bookmark'));
   }
 
   function dropTargetAt(x, y) {
@@ -498,6 +514,8 @@
       target.grid.classList.add('drop-target');
     } else {
       target.list.classList.add('drop-target');
+      const zone = target.list.querySelector('.drop-zone');
+      if (zone) zone.classList.toggle('hot', target.index === target.items.length);
       const lr = target.list.getBoundingClientRect();
       let y;
       if (!target.items.length) y = lr.top + lr.height / 2;
@@ -506,7 +524,7 @@
       line.style.left = lr.left + 6 + 'px';
       line.style.width = lr.width - 12 + 'px';
       line.style.top = y + 'px';
-      line.hidden = false;
+      line.hidden = !!(zone && zone.classList.contains('hot'));
     }
   }
 
@@ -514,6 +532,7 @@
     const d = dragState;
     dragState = null;
     document.body.classList.remove('dragging');
+    document.querySelectorAll('.drop-zone').forEach((n) => n.remove());
     d.ghost.remove();
     d.node.classList.remove('drag-src');
     showDropFeedback(null);
@@ -963,6 +982,8 @@
 
   window.addEventListener('error', (e) => chromeLog('error', `Uncaught ${e.message} (${e.filename}:${e.lineno})`));
   window.addEventListener('unhandledrejection', (e) => chromeLog('error', 'Unhandled rejection: ' + String(e.reason)));
+  document.addEventListener('securitypolicyviolation', (e) =>
+    chromeLog('error', `CSP blocked ${e.blockedURI.slice(0, 40)} (${e.violatedDirective})`));
 
   function toast(msg) {
     chromeLog('info', 'toast: ' + msg);

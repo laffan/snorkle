@@ -97,7 +97,10 @@ const SESSION_FILE: &str = "session.json";
 const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
 const USER_SCRIPTS_FILE: &str = "user-scripts.json";
 const PINS_FILE: &str = "pins.json";
-const ICONS_DIR: &str = "icons";
+/// Versioned: v1 icons were the raw snapshot encoding, which the chrome
+/// could fail to display; they are deleted and fetched again.
+const ICONS_DIR: &str = "icons-v2";
+const OLD_ICONS_DIRS: &[&str] = &["icons"];
 
 impl Store {
     /// Opens (or creates) the store. Corrupt files are moved aside to
@@ -105,6 +108,9 @@ impl Store {
     pub fn open(dir: impl Into<PathBuf>) -> std::io::Result<Self> {
         let dir = dir.into();
         fs::create_dir_all(&dir)?;
+        for old in OLD_ICONS_DIRS {
+            let _ = fs::remove_dir_all(dir.join(old));
+        }
         let mut history: Vec<HistoryEntry> = load_or_reset(&dir.join(HISTORY_FILE));
         history.retain_mut(|h| match storable_url(&h.url) {
             Some(u) => {
@@ -413,8 +419,37 @@ pub fn favicon_host(url: &str) -> Option<String> {
     }
 }
 
+/// A small, plain PNG: signature, then an IHDR of at most 512×512 pixels,
+/// 8 bits per channel, RGB or RGBA, not interlaced (what the favicon
+/// fetcher produces). Anything else is refused rather than handed to the
+/// chrome.
 fn is_png(bytes: &[u8]) -> bool {
-    bytes.len() <= MAX_ICON_BYTES && bytes.starts_with(PNG_SIGNATURE)
+    if bytes.len() > MAX_ICON_BYTES || bytes.len() < 33 || !bytes.starts_with(PNG_SIGNATURE) {
+        return false;
+    }
+    let ihdr = &bytes[8..33];
+    let be32 = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+    let (len, kind, w, h) = (be32(&ihdr[0..4]), &ihdr[4..8], be32(&ihdr[8..12]), be32(&ihdr[12..16]));
+    let (depth, color, interlace) = (ihdr[16], ihdr[17], ihdr[20]);
+    len == 13 && kind == b"IHDR" && (1..=512).contains(&w) && (1..=512).contains(&h) && depth == 8
+        && matches!(color, 2 | 6) && interlace == 0
+}
+
+/// Describes a stored icon for the console ("128×128 RGBA, 5321 bytes").
+pub fn png_summary(bytes: &[u8]) -> String {
+    if bytes.len() < 33 || !bytes.starts_with(PNG_SIGNATURE) {
+        return format!("not a PNG, {} bytes", bytes.len());
+    }
+    let be32 = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+    format!(
+        "{}×{}, depth {}, colour type {}, interlace {}, {} bytes",
+        be32(&bytes[16..20]),
+        be32(&bytes[20..24]),
+        bytes[24],
+        bytes[25],
+        bytes[28],
+        bytes.len()
+    )
 }
 
 /// `data:image/png;base64,…` for a validated PNG, for the chrome UI.
@@ -592,13 +627,40 @@ mod tests {
     fn icons_must_be_small_pngs() {
         let dir = tmpdir("icons");
         let s = Store::open(&dir).unwrap();
-        let png = [PNG_SIGNATURE, b"rest"].concat();
+        let png = test_png(64, 8, 6);
         assert!(s.save_icon("www.example.com", &png).unwrap());
+        // Unusual encodings are refused: 16-bit, palette, too large.
+        assert!(!s.save_icon("www.example.com", &test_png(64, 16, 6)).unwrap());
+        assert!(!s.save_icon("www.example.com", &test_png(64, 8, 3)).unwrap());
+        assert!(!s.save_icon("www.example.com", &test_png(4096, 8, 6)).unwrap());
+        assert!(!s.save_icon("www.example.com", &[PNG_SIGNATURE, b"rest"].concat()).unwrap());
         assert_eq!(s.icon("www.example.com").unwrap(), png);
         assert!(!s.save_icon("www.example.com", b"<svg onload=alert(1)>").unwrap());
         assert!(!s.save_icon("../../etc/passwd", &png).unwrap());
         assert!(!s.save_icon("x.example", &[PNG_SIGNATURE, &vec![0u8; MAX_ICON_BYTES]].concat()).unwrap());
         assert!(s.icon("nope.example").is_none());
+    }
+
+    /// Signature + IHDR (+ a stand-in for the rest of the file).
+    fn test_png(size: u32, depth: u8, color: u8) -> Vec<u8> {
+        let mut v = PNG_SIGNATURE.to_vec();
+        v.extend_from_slice(&13u32.to_be_bytes());
+        v.extend_from_slice(b"IHDR");
+        v.extend_from_slice(&size.to_be_bytes());
+        v.extend_from_slice(&size.to_be_bytes());
+        v.extend_from_slice(&[depth, color, 0, 0, 0]);
+        v.extend_from_slice(&[0, 0, 0, 0]); // CRC (not checked)
+        v
+    }
+
+    #[test]
+    fn old_icon_cache_is_removed() {
+        let dir = tmpdir("oldicons");
+        fs::create_dir_all(dir.join("icons")).unwrap();
+        fs::write(dir.join("icons/www.example.com.png"), test_png(64, 8, 6)).unwrap();
+        let s = Store::open(&dir).unwrap();
+        assert!(s.icon("www.example.com").is_none(), "refetched in the new format");
+        assert!(!dir.join("icons").exists());
     }
 
     #[test]
@@ -611,8 +673,9 @@ mod tests {
 
     #[test]
     fn data_url_encoding() {
-        let png = [PNG_SIGNATURE, b"ab"].concat();
-        assert_eq!(png_data_url(&png).unwrap(), "data:image/png;base64,iVBORw0KGgphYg==");
+        let png = test_png(16, 8, 6);
+        let url = png_data_url(&png).unwrap();
+        assert!(url.starts_with("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAAAAAA"));
         assert!(png_data_url(b"GIF89a").is_none());
     }
 

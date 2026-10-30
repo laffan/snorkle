@@ -5,7 +5,8 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use snorkle_core::storage::favicon_host;
+use snorkle_core::console::Level;
+use snorkle_core::storage::{favicon_host, png_summary};
 
 use crate::state::{with_host, ChromeEvent, Shared};
 
@@ -27,12 +28,13 @@ pub fn refresh_icons(shared: &Arc<Shared>) {
         let s = shared.clone();
         let st = store.clone();
         let h = host.clone();
-        let done: snorkle_content::FaviconDone = Box::new(move |png| {
-            if let Some(png) = png {
-                if st.save_icon(&h, &png).unwrap_or(false) {
-                    (s.emit)(ChromeEvent::PinsChanged);
-                }
+        let done: snorkle_content::FaviconDone = Box::new(move |png| match png {
+            Some(png) if st.save_icon(&h, &png).unwrap_or(false) => {
+                s.log(Level::Info, None, &format!("favicon {h}: {}", png_summary(&png)));
+                (s.emit)(ChromeEvent::PinsChanged);
             }
+            Some(png) => s.log(Level::Warn, None, &format!("favicon {h} refused: {}", png_summary(&png))),
+            None => s.log(Level::Info, None, &format!("favicon {h}: none (blank or timed out)")),
         });
         snorkle_content::dispatch_main(move || with_host(|host_view| host_view.fetch_favicon(host, done)));
     }

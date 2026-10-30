@@ -197,6 +197,11 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     `takeSnapshot` returns pixels; the "blank icon" heuristic (PNG < 220 bytes) suits real sites;
     sites without `/favicon.ico` (icon only in `<link rel=icon>`) fall back to letter tiles.
     Fetching `<link rel=icon>` would need JS or HTML parsing in the hidden view, so it is not done.
+    2026-10-30: icons showed as broken images on device. The cause was not identified (no device
+    here); the snapshot is now redrawn into a standard-range 8-bit sRGB bitmap before PNG encoding,
+    storage accepts only 8-bit RGB/RGBA PNGs up to 512 px, the old icon cache is deleted, and the
+    chrome falls back to the letter tile if an image still fails. The console logs each fetch
+    ("favicon <host>: 128×128, depth 8, …") and any display failure.
 43. **[decide] ⌘1–5 order** is pins, bookmarks, then tabs. Opening a pin or bookmark switches to
     a tab already showing that exact URL, else uses the current tab if empty, else a new tab.
 44. **[verify] Console capture on device.** Check: the page-world hook is installed before page

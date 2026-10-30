@@ -12,9 +12,12 @@
 //!    WebContent process.
 //! 2. Our navigation delegate allows only that `about:blank` document.
 //! 3. When loading finishes, WebKit renders a 64×64 snapshot; the app
-//!    receives decoded pixels (a `UIImage` backed by WebKit's bitmap) and
-//!    re-encodes them as PNG with UIKit. Only that app-made PNG reaches
-//!    storage and the chrome UI.
+//!    receives decoded pixels (a `UIImage` backed by WebKit's bitmap),
+//!    redraws them into a standard-range 8-bit sRGB bitmap (128×128 px)
+//!    and encodes that as PNG with UIKit. Only that app-made PNG reaches
+//!    storage (which checks its header) and the chrome UI. The redraw
+//!    matters: snapshots on wide-colour screens can use pixel formats the
+//!    chrome then failed to display.
 //!
 //! A missing favicon renders as nothing (`alt=""`), giving a transparent
 //! snapshot; PNGs below `MIN_ICON_BYTES` are treated as "no icon" (a
@@ -27,18 +30,22 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::ptr::NonNull;
 use std::time::Duration;
 
 use block2::RcBlock;
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{Bool, NSObject};
-use objc2::{define_class, extern_methods, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
+use objc2::{define_class, extern_methods, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
     NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential, NSURLSessionAuthChallengeDisposition,
     NSURL,
 };
-use objc2_ui_kit::{UIColor, UIImage, UIView};
+use objc2_ui_kit::{
+    UIColor, UIGraphicsImageRenderer, UIGraphicsImageRendererContext, UIGraphicsImageRendererFormat,
+    UIGraphicsImageRendererFormatRange, UIImage, UIView,
+};
 use objc2_web_kit::{
     WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate, WKSnapshotConfiguration,
     WKWebViewConfiguration, WKWebsiteDataStore,
@@ -152,15 +159,30 @@ fn snapshot(generation: u64) {
         cfg.setRect(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(SIZE, SIZE)));
         cfg.setAfterScreenUpdates(true);
         let block = RcBlock::new(move |image: *mut UIImage, _err: *mut NSError| {
-            let png = image
-                .as_ref()
-                .and_then(|img| img.png_representation())
-                .map(|data| data.to_vec())
-                .filter(|bytes| bytes.len() >= MIN_ICON_BYTES);
+            let png = image.as_ref().map(plain_png).filter(|bytes| bytes.len() >= MIN_ICON_BYTES);
             finish(generation, png);
         });
         web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
     }
+}
+
+/// Redraws `image` into a standard-range (8-bit sRGB) bitmap at 2× and
+/// encodes it as PNG, whatever pixel format the snapshot had.
+fn plain_png(image: &UIImage) -> Vec<u8> {
+    let format = UIGraphicsImageRendererFormat::preferredFormat();
+    format.setScale(2.0);
+    format.setOpaque(false);
+    format.setPreferredRange(UIGraphicsImageRendererFormatRange::Standard);
+    let renderer = UIGraphicsImageRenderer::initWithSize_format(
+        UIGraphicsImageRenderer::alloc(),
+        CGSize::new(SIZE, SIZE),
+        &format,
+    );
+    let image = image.retain();
+    let draw = RcBlock::new(move |_ctx: NonNull<UIGraphicsImageRendererContext>| {
+        image.drawInRect(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(SIZE, SIZE)));
+    });
+    unsafe { renderer.PNGDataWithActions(RcBlock::as_ptr(&draw)) }.to_vec()
 }
 
 fn finish(generation: u64, png: Option<Vec<u8>>) {

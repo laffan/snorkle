@@ -71,6 +71,11 @@ body.dragging #side-scroll { overflow-y: hidden; }
 .tablist, .droplist { display: flex; flex-direction: column; gap: 2px; }
 .droplist { min-height: 44px; border-radius: 10px; padding: 2px 0; }
 .droplist.drop-target { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }
+.drop-zone {
+  display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 4px;
+  border: 2px dashed var(--line); border-radius: 10px; font-size: 13px; color: var(--muted);
+}
+.drop-zone.hot { border-color: var(--accent); color: var(--accent); background: var(--field); }
 .hint { font-size: 13px; color: var(--muted); padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
 
 .tab, .bm { display: flex; align-items: center; border-radius: 10px; touch-action: manipulation; }
