@@ -23,5 +23,6 @@ pub mod tabs;
 pub mod text;
 pub mod url_display;
 pub mod userscripts;
+pub mod viewmodes;
 
 pub use url::Url;

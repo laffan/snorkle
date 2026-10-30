@@ -54,6 +54,9 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::unsplit,
         commands::get_view_mode,
         commands::set_view_mode,
+        commands::set_tab_view_exempt,
+        commands::get_headings,
+        commands::scroll_to_heading,
         commands::clear_website_data,
         commands::open_launcher,
         commands::get_console,
@@ -104,6 +107,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::PinsChanged => handle.emit_to(CHROME_LABEL, "pins", ()),
             ChromeEvent::Console(entry) => handle.emit_to(CHROME_LABEL, "console", entry),
             ChromeEvent::ConsoleReset => handle.emit_to(CHROME_LABEL, "console_reset", ()),
+            ChromeEvent::Headings(tab, list) => {
+                handle.emit_to(CHROME_LABEL, "headings", serde_json::json!({ "tab": tab, "headings": list }))
+            }
         };
     });
     let allowlist = store.as_ref().map(|s| s.adblock_allowed()).unwrap_or_default();
@@ -122,7 +128,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     // Injected scripts first, so restored views are created with them.
     let capture = shared.capturing();
     snorkle_content::dispatch_main(move || state::with_host(|h| h.set_console_capture(capture)));
-    scripts::apply(&shared, None);
+    scripts::apply(&shared, false);
     let effects = shared.browser().restore_session(&session, state::now_ms());
     shared.run(effects);
 

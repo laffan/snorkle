@@ -14,7 +14,7 @@ use snorkle_core::browser::ChromeState;
 use snorkle_core::input::InputError;
 use snorkle_core::tabs::{Profile, TabId};
 use snorkle_core::url_display::{self, DisplayUrl};
-use snorkle_core::userscripts::ViewMode;
+use snorkle_core::viewmodes::{self, Heading, ViewModes};
 use snorkle_core::Url;
 
 use crate::state::{now_ms, with_host, Shared};
@@ -270,19 +270,78 @@ pub fn unsplit(s: S<'_>, tab: u64) {
     with_browser(&s, |b| b.unsplit(TabId(tab)));
 }
 
-#[tauri::command]
-pub fn get_view_mode(s: S<'_>) -> ViewMode {
-    s.view_mode()
+/// App-wide view modes and the tabs exempted from them.
+#[derive(Serialize)]
+pub struct ViewModesState {
+    modes: ViewModes,
+    /// Tab id → modes that tab is exempted from.
+    exempt: std::collections::HashMap<u64, Vec<viewmodes::Kind>>,
 }
 
-/// Colour or black and white, images shown or hidden, for all pages,
-/// applied immediately. Not persisted.
+fn view_modes_state(s: &S<'_>) -> ViewModesState {
+    let exempt = s.exempt().iter().filter(|(_, k)| !k.is_empty()).map(|(t, k)| (t.0, k.iter().copied().collect())).collect();
+    ViewModesState { modes: s.view_modes(), exempt }
+}
+
+/// Applies view-mode changes to every page at once, and drops outlines of
+/// tabs whose headers view is now off.
+fn apply_view_modes(s: &S<'_>) {
+    let modes = s.view_modes();
+    let exempt = s.exempt().clone();
+    let cleared: Vec<TabId> = s
+        .headings_of()
+        .keys()
+        .copied()
+        .filter(|t| !modes.for_tab(&exempt.get(t).cloned().unwrap_or_default()).headers)
+        .collect();
+    for t in cleared {
+        s.headings_of().remove(&t);
+        (s.emit)(crate::state::ChromeEvent::Headings(t, &[]));
+    }
+    crate::scripts::apply(s, true);
+}
+
 #[tauri::command]
-pub fn set_view_mode(s: S<'_>, color: bool, hide_images: bool) -> ViewMode {
-    let mode = ViewMode { color, hide_images };
-    *s.view_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode;
-    crate::scripts::apply(&s, Some(snorkle_core::userscripts::view_mode_js(mode)));
-    mode
+pub fn get_view_mode(s: S<'_>) -> ViewModesState {
+    view_modes_state(&s)
+}
+
+/// Turns a view mode on or off app-wide, applied immediately. Not persisted.
+#[tauri::command]
+pub fn set_view_mode(s: S<'_>, mode: viewmodes::Kind, on: bool) -> ViewModesState {
+    s.view_modes.lock().unwrap_or_else(|e| e.into_inner()).set(mode, on);
+    apply_view_modes(&s);
+    view_modes_state(&s)
+}
+
+/// "Disable for this tab": exempts (or stops exempting) one tab from a
+/// view mode. Not persisted.
+#[tauri::command]
+pub fn set_tab_view_exempt(s: S<'_>, tab: u64, mode: viewmodes::Kind, exempt: bool) -> ViewModesState {
+    let tab = TabId(tab);
+    if s.browser().tab(tab).is_some() {
+        let mut map = s.exempt();
+        let set = map.entry(tab).or_default();
+        if exempt {
+            set.insert(mode);
+        } else {
+            set.remove(&mode);
+        }
+    }
+    apply_view_modes(&s);
+    view_modes_state(&s)
+}
+
+/// The latest outline of a tab's page (headers view).
+#[tauri::command]
+pub fn get_headings(s: S<'_>, tab: u64) -> Vec<Heading> {
+    s.headings_of().get(&TabId(tab)).cloned().unwrap_or_default()
+}
+
+/// Scrolls a tab's page to one of its headings (headers view).
+#[tauri::command]
+pub fn scroll_to_heading(tab: u64, index: u32) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.scroll_to_heading(TabId(tab), index)));
 }
 
 #[derive(Serialize)]
@@ -344,7 +403,7 @@ pub async fn save_user_script(
     let saved = store
         .save_user_script(snorkle_core::userscripts::UserScript { domain, css, js, enabled })
         .map_err(|e| e.to_string())?;
-    crate::scripts::apply(&s, None);
+    crate::scripts::apply(&s, false);
     Ok(saved)
 }
 
@@ -352,7 +411,7 @@ pub async fn save_user_script(
 pub async fn delete_user_script(s: S<'_>, domain: String) -> Result<(), String> {
     let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
     store.delete_user_script(&domain).map_err(|e| e.to_string())?;
-    crate::scripts::apply(&s, None);
+    crate::scripts::apply(&s, false);
     Ok(())
 }
 

@@ -35,6 +35,7 @@
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="spacer"></span>
       <button id="color" class="icon" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
+      <button id="headers" class="icon" aria-label="Headers view" title="Headers view" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M8 12h12M12 18h8"/></svg></button>
       <button id="images" class="icon" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/></svg></button>
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
@@ -44,6 +45,11 @@
       <button id="menu-history" role="menuitem">History</button>
       <button id="menu-console" role="menuitem">Console</button>
       <button id="menu-settings" role="menuitem">Settings</button>
+    </div>
+    <!-- Long-press on a view-mode button. -->
+    <div id="vm-pop" class="popup vm-pop" role="menu" hidden>
+      <div id="vm-title" class="vm-title"></div>
+      <button id="vm-tab" role="menuitem"></button>
     </div>
     <div id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
   </aside>
@@ -196,6 +202,13 @@
     <p id="console-note" class="console-note" hidden></p>
     <ol id="console-list" class="console-list"></ol>
   </section>
+
+  <!-- Headers view: the page's outline, docked right of the page.
+       Heading text is page-controlled: textContent only. -->
+  <aside id="outline" class="sheet" aria-labelledby="outline-title" hidden>
+    <div class="modal-head"><h1 id="outline-title">Headers</h1></div>
+    <ol id="outline-list" class="outline-list"></ol>
+  </aside>
 
   <div id="drop-line" hidden></div>
 </body>

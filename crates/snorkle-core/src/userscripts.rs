@@ -1,7 +1,7 @@
-//! SECURITY-REVIEW: user scripts and styles ("Greasemonkey-like"), plus the
-//! browser's own view modes (black and white, hidden images). Approved by
-//! the owner 2026-10-29 as the first script injection into content (see
-//! docs/SECURITY_REVIEW.md).
+//! SECURITY-REVIEW: user scripts and styles ("Greasemonkey-like"). Approved
+//! by the owner 2026-10-29 as the first script injection into content (see
+//! docs/SECURITY_REVIEW.md). The browser's own view modes are in
+//! `crate::viewmodes`.
 //!
 //! This module validates what the user saved and generates the exact
 //! JavaScript sources the content host installs as `WKUserScript`s.
@@ -90,71 +90,10 @@ pub struct Injection {
     pub at: InjectAt,
 }
 
-/// How pages are drawn. Session-only (not persisted): every launch starts
-/// in black and white with images and video hidden.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ViewMode {
-    /// Show pages in colour (off: black and white).
-    pub color: bool,
-    /// Hide images and video before pages are drawn.
-    pub hide_images: bool,
-}
-
-impl Default for ViewMode {
-    fn default() -> Self {
-        ViewMode { color: false, hide_images: true }
-    }
-}
-
-/// A constant style the browser itself injects.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FixedStyle {
-    Grayscale,
-    NoImages,
-}
-
-/// Fixed style for black-and-white mode. `filter` on the root element does
-/// not create a containing block for fixed-position content.
-pub const GRAYSCALE_CSS: &str = "html{filter:grayscale(1)!important}";
-/// Fixed style for hidden images and video: image and video elements, and
-/// embedded players of the common video sites, are removed from layout,
-/// and CSS background images are dropped (WebKit then does not fetch them;
-/// `<img>` sources are still fetched). Inline SVG icons stay visible.
-pub const NO_IMAGES_CSS: &str = concat!(
-    "img,picture,input[type=image],svg image,object[type^=\"image/\"],embed[type^=\"image/\"],",
-    "video,object[type^=\"video/\"],embed[type^=\"video/\"],",
-    "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
-    "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
-    "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"]",
-    "{display:none!important}*,*::before,*::after{background-image:none!important}"
-);
-
-impl FixedStyle {
-    fn id(self) -> &'static str {
-        match self {
-            FixedStyle::Grayscale => "__snorkle_grayscale",
-            FixedStyle::NoImages => "__snorkle_no_images",
-        }
-    }
-    fn css(self) -> &'static str {
-        match self {
-            FixedStyle::Grayscale => GRAYSCALE_CSS,
-            FixedStyle::NoImages => NO_IMAGES_CSS,
-        }
-    }
-}
-
-/// Builds every injected source: the view-mode styles that are on and each
-/// enabled user script.
-pub fn injections(scripts: &[UserScript], view: ViewMode) -> Vec<Injection> {
+/// Builds the injected source of each enabled user script. (View modes are
+/// in `crate::viewmodes`.)
+pub fn injections(scripts: &[UserScript]) -> Vec<Injection> {
     let mut out = Vec::new();
-    if !view.color {
-        out.push(Injection { source: fixed_style_js(FixedStyle::Grayscale, true), at: InjectAt::DocumentStart });
-    }
-    if view.hide_images {
-        out.push(Injection { source: fixed_style_js(FixedStyle::NoImages, true), at: InjectAt::DocumentStart });
-    }
     for s in scripts.iter().filter(|s| s.enabled) {
         // Re-validate: stored data is not trusted blindly.
         let Ok(domain) = normalise_domain(&s.domain) else { continue };
@@ -181,25 +120,7 @@ pub fn injections(scripts: &[UserScript], view: ViewMode) -> Vec<Injection> {
     out
 }
 
-/// Brings an already-loaded page in line with `view` (adds or removes the
-/// view-mode styles). Constant code; takes no page input and returns nothing.
-pub fn view_mode_js(view: ViewMode) -> String {
-    fixed_style_js(FixedStyle::Grayscale, !view.color) + &fixed_style_js(FixedStyle::NoImages, view.hide_images)
-}
-
-fn fixed_style_js(style: FixedStyle, on: bool) -> String {
-    let id = json_str(style.id());
-    if on {
-        format!(
-            "(function(){{if(document.getElementById({id}))return;var st=document.createElement('style');st.id={id};st.textContent={};(document.head||document.documentElement).appendChild(st);}})();",
-            json_str(style.css())
-        )
-    } else {
-        format!("(function(){{var st=document.getElementById({id});if(st)st.remove();}})();")
-    }
-}
-
-fn json_str(s: &str) -> String {
+pub(crate) fn json_str(s: &str) -> String {
     // serde_json escapes quotes, backslashes and control characters; also
     // escape '<' and U+2028/2029 so the literal is inert in any context.
     serde_json::to_string(s)
@@ -229,10 +150,7 @@ mod tests {
 
     #[test]
     fn css_cannot_break_out() {
-        let inj = injections(
-            &[s("example.com", "</style><script>alert(1)</script>\"});alert(2);//", "")],
-            ViewMode { color: true, hide_images: false },
-        );
+        let inj = injections(&[s("example.com", "</style><script>alert(1)</script>\"});alert(2);//", "")]);
         assert_eq!(inj.len(), 1);
         let src = &inj[0].source;
         assert!(!src.contains("</style>"));
@@ -245,7 +163,7 @@ mod tests {
     #[test]
     fn guard_and_timing() {
         let inj =
-            injections(&[s("example.com", "a{}", "console.log(1)")], ViewMode { color: true, hide_images: false });
+            injections(&[s("example.com", "a{}", "console.log(1)")]);
         assert_eq!(inj.len(), 2);
         assert_eq!(inj[0].at, InjectAt::DocumentStart);
         assert_eq!(inj[1].at, InjectAt::DocumentEnd);
@@ -258,28 +176,7 @@ mod tests {
         let mut off = s("example.com", "a{}", "x()");
         off.enabled = false;
         let tampered = s("evil\"]);alert(1);//", "a{}", "x()");
-        assert!(injections(&[off, tampered], ViewMode { color: true, hide_images: false }).is_empty());
-    }
-
-    #[test]
-    fn view_modes() {
-        // Default: black and white, images and video hidden.
-        let inj = injections(&[], ViewMode::default());
-        assert_eq!(inj.len(), 2);
-        assert!(inj[0].source.contains("grayscale(1)"));
-        assert!(inj[1].source.contains("video,"));
-        assert_eq!(inj[0].at, InjectAt::DocumentStart);
-        let inj = injections(&[], ViewMode { color: true, hide_images: true });
-        assert_eq!(inj.len(), 1);
-        assert!(inj[0].source.contains("background-image:none"));
-        assert!(injections(&[], ViewMode { color: true, hide_images: false }).is_empty());
-
-        let js = view_mode_js(ViewMode { color: true, hide_images: true });
-        assert!(js.contains("getElementById(\"__snorkle_grayscale\");if(st)st.remove()"));
-        assert!(js.contains("display:none"));
-        let js = view_mode_js(ViewMode { color: false, hide_images: false });
-        assert!(js.contains("grayscale(1)"));
-        assert!(js.contains("getElementById(\"__snorkle_no_images\");if(st)st.remove()"));
+        assert!(injections(&[off, tampered]).is_empty());
     }
 
     #[test]

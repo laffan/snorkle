@@ -26,7 +26,10 @@
   let bookmarks = [];
   let pins = [];
   const MAX_PINS = 4;
-  let viewMode = { color: false, hide_images: true }; // session-only, set in Rust
+  // View modes (session-only, kept in Rust): app-wide on/off, and tabs
+  // exempted from a mode ("Disable for this tab").
+  let viewModes = { modes: { desaturate: true, hide_media: true, headers: false }, exempt: {} };
+  let headingsByTab = new Map();
   let scripts = [];
   let editingDomain = null; // domain of the script open in the editor, or '' for new
   let tabsKey = '';
@@ -78,6 +81,7 @@
     renderOs();
     renderTabs();
     renderLauncherSelection();
+    renderViewMode();
     renderToolbar(tab);
     renderSurface(tab);
     reportLayout();
@@ -848,6 +852,7 @@
     scriptsOpen = open;
     $('scripts-pop').hidden = !open;
     $('scripts-pop').classList.toggle('dock', open && !narrow);
+    renderOutline();
     if (open) {
       $('script-editor').hidden = true;
       loadScripts();
@@ -923,9 +928,11 @@
     invoke('set_chrome_layout', { top, left, right, bottom, overlay });
   }
 
-  // The panel docked on the right of the content area, if any.
+  // The panel docked on the right of the content area, if any: site
+  // scripts while open, else the headers outline.
   function rightPanel() {
     if (scriptsOpen && !narrow) return $('scripts-pop');
+    if (outlineShown()) return $('outline');
     return null;
   }
 
@@ -962,21 +969,126 @@
       : 'Per-site settings can’t be changed in a private tab';
   }
 
-  function renderViewMode() {
-    const c = $('color');
-    c.classList.toggle('on', viewMode.color);
-    c.setAttribute('aria-pressed', String(viewMode.color));
-    // Images and video are hidden by default; the button shows them.
-    const i = $('images');
-    i.classList.toggle('on', !viewMode.hide_images);
-    i.setAttribute('aria-pressed', String(!viewMode.hide_images));
+  // ---- view modes ---------------------------------------------------------
+  //
+  // Each button toggles its mode app-wide; a long press offers "Disable for
+  // this tab". The colour and images buttons are "pressed" when the mode is
+  // OFF (colour shown, media shown); the headers button when it is ON.
+
+  const VIEW_BUTTONS = [
+    { id: 'color', mode: 'desaturate', pressedWhenOff: true, name: 'Black and white' },
+    { id: 'images', mode: 'hide_media', pressedWhenOff: true, name: 'Hide images and video' },
+    { id: 'headers', mode: 'headers', pressedWhenOff: false, name: 'Headers view' },
+  ];
+
+  function exemptFor(tabId, mode) {
+    return tabId !== null && tabId !== undefined && (viewModes.exempt[tabId] || []).includes(mode);
   }
 
-  function setViewMode(change) {
-    const next = { ...viewMode, ...change };
-    T.core.invoke('set_view_mode', { color: next.color, hideImages: next.hide_images })
-      .then((m) => { viewMode = m; renderViewMode(); })
-      .catch((e) => toast(String(e)));
+  // Whether `mode` is in effect for a tab.
+  function modeOn(mode, tabId) {
+    return viewModes.modes[mode] && !exemptFor(tabId, mode);
+  }
+
+  function renderViewMode() {
+    const tab = state ? state.active : null;
+    for (const b of VIEW_BUTTONS) {
+      const on = modeOn(b.mode, tab);
+      const pressed = b.pressedWhenOff ? !on : on;
+      const btn = $(b.id);
+      const exempt = viewModes.modes[b.mode] && exemptFor(tab, b.mode);
+      btn.classList.toggle('on', pressed && !exempt);
+      btn.classList.toggle('exempt', exempt);
+      btn.setAttribute('aria-pressed', String(pressed));
+      btn.title = exempt ? `${b.name}: off for this tab (long-press to change)` : `${b.name} (long-press for this tab)`;
+    }
+    renderOutline();
+  }
+
+  function applyViewModes(p) {
+    p.then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch((e) => toast(String(e)));
+  }
+
+  function toggleMode(mode) {
+    applyViewModes(T.core.invoke('set_view_mode', { mode, on: !viewModes.modes[mode] }));
+  }
+
+  // Long press (or right click) on a view-mode button.
+  let vmPress = null;
+  let vmTarget = null;
+  function openVmPop(b) {
+    const tab = state && state.active;
+    if (tab === null || tab === undefined) return;
+    vmTarget = b;
+    const exempt = exemptFor(tab, b.mode);
+    const appOn = viewModes.modes[b.mode];
+    $('vm-title').textContent = `${b.name}: ${appOn ? 'on' : 'off'} for all tabs`;
+    const item = $('vm-tab');
+    item.disabled = !appOn && !exempt;
+    item.textContent = exempt ? 'Use the app setting for this tab' : appOn ? 'Disable for this tab' : 'Turn it on to set it per tab';
+    closeMenu();
+    $('vm-pop').hidden = false;
+  }
+  function closeVmPop() { $('vm-pop').hidden = true; vmTarget = null; }
+
+  for (const b of VIEW_BUTTONS) {
+    const btn = $(b.id);
+    btn.addEventListener('pointerdown', (ev) => {
+      if (ev.button > 0) return;
+      clearTimeout(vmPress && vmPress.timer);
+      vmPress = { fired: false, timer: setTimeout(() => { vmPress.fired = true; openVmPop(b); }, 500) };
+    });
+    const cancel = () => { if (vmPress) clearTimeout(vmPress.timer); };
+    btn.addEventListener('pointerup', cancel);
+    btn.addEventListener('pointerleave', cancel);
+    btn.addEventListener('pointercancel', cancel);
+    btn.addEventListener('contextmenu', (ev) => { ev.preventDefault(); cancel(); if (vmPress) vmPress.fired = true; openVmPop(b); });
+    btn.addEventListener('click', () => {
+      if (vmPress && vmPress.fired) { vmPress = null; return; } // the long press already acted
+      vmPress = null;
+      toggleMode(b.mode);
+    });
+  }
+  $('vm-tab').addEventListener('click', () => {
+    const b = vmTarget;
+    const tab = state && state.active;
+    closeVmPop();
+    if (!b || tab === null) return;
+    applyViewModes(T.core.invoke('set_tab_view_exempt', { tab, mode: b.mode, exempt: !exemptFor(tab, b.mode) }));
+  });
+
+  // ---- headers view (outline) ---------------------------------------------
+
+  function outlineShown() {
+    return !!state && !narrow && !scriptsOpen && modeOn('headers', state.active);
+  }
+
+  function renderOutline() {
+    const show = outlineShown();
+    $('outline').hidden = !show;
+    $('outline').classList.toggle('dock', show);
+    if (!show) return;
+    const tab = state.active;
+    if (!headingsByTab.has(tab)) {
+      headingsByTab.set(tab, []);
+      T.core.invoke('get_headings', { tab }).then((h) => { headingsByTab.set(tab, h); renderOutline(); }).catch(() => {});
+    }
+    const items = headingsByTab.get(tab) || [];
+    const list = $('outline-list');
+    list.replaceChildren();
+    if (!items.length) {
+      list.appendChild(el('li', 'muted', 'No headings on this page yet.'));
+      return;
+    }
+    const min = Math.min(...items.map((h) => h.level));
+    for (const h of items) {
+      const li = el('li');
+      const b = el('button', 'l' + (h.level - min + 1), h.text);
+      b.style.paddingLeft = 8 + (h.level - min) * 14 + 'px';
+      b.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
+      li.appendChild(b);
+      list.appendChild(li);
+    }
   }
 
   // ---- console -----------------------------------------------------------
@@ -1156,8 +1268,7 @@
     if (narrow) setSidebar(false);
     invoke('new_tab', { private: true }).then(beginEdit);
   });
-  $('color').addEventListener('click', () => setViewMode({ color: !viewMode.color }));
-  $('images').addEventListener('click', () => setViewMode({ hide_images: !viewMode.hide_images }));
+
   $('sidebar-toggle').addEventListener('click', () => setSidebar(!sidebarOpen));
   $('unsplit').addEventListener('click', withTab((t) => invoke('unsplit', { tab: t.id })));
   $('sheet-close').addEventListener('click', () => { if (state && state.sheet !== null) invoke('close_tab', { tab: state.sheet }); });
@@ -1204,6 +1315,7 @@
   // Taps outside close the menu, and the overlaid sidebar in narrow windows.
   document.addEventListener('pointerdown', (ev) => {
     if (menuOpen && !$('menu-pop').contains(ev.target) && ev.target !== $('menu')) closeMenu();
+    if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
     if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('sidebar-toggle')) {
       setSidebar(false);
     }
@@ -1272,5 +1384,9 @@
   loadBookmarks();
   loadPins();
   loadScripts();
-  T.core.invoke('get_view_mode').then((m) => { viewMode = m; renderViewMode(); }).catch(() => {});
+  T.core.invoke('get_view_mode').then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch(() => {});
+  T.event.listen('headings', (e) => {
+    headingsByTab.set(e.payload.tab, e.payload.headings);
+    if (state && e.payload.tab === state.active) renderOutline();
+  });
 })();

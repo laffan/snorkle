@@ -52,7 +52,9 @@ impl ContentHost {
         std::thread::spawn(move || done(make().map(|lists| lists.len())));
     }
 
-    pub fn set_injections(&mut self, _injections: &[snorkle_core::userscripts::Injection], _run_now: Option<&str>) {}
+    pub fn set_injections(&mut self, _injections: crate::Injections, _run_now: bool) {}
+
+    pub fn scroll_to_heading(&mut self, _tab: snorkle_core::tabs::TabId, _index: u32) {}
 
     pub fn clear_data(&mut self, _kind: crate::DataKind) {}
 

@@ -12,7 +12,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -24,7 +24,7 @@ use snorkle_core::console::{self, ConsoleLog};
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, Store};
 use snorkle_core::tabs::TabId;
-use snorkle_core::userscripts::ViewMode;
+use snorkle_core::viewmodes::{self, Heading, ViewModes};
 use snorkle_core::Url;
 
 /// Monotonic milliseconds since app start (for tab LRU/TTL bookkeeping).
@@ -53,6 +53,8 @@ pub enum ChromeEvent<'a> {
     PinsChanged,
     /// A new console entry.
     Console(&'a console::Entry),
+    /// A tab's page outline changed (headers view).
+    Headings(TabId, &'a [Heading]),
     /// Console entries were removed (cleared, or the private session ended).
     ConsoleReset,
 }
@@ -64,9 +66,13 @@ pub struct Shared {
     pub store: Option<Arc<Store>>,
     storage_tx: Option<Mutex<Sender<StorageJob>>>,
     pub(crate) emit: Emitter,
-    /// Black and white / hidden images. In memory only, so every launch
-    /// starts in black and white.
-    pub view_mode: Mutex<ViewMode>,
+    /// App-wide view modes. In memory only, so every launch starts with
+    /// the defaults (black and white, media hidden).
+    pub view_modes: Mutex<ViewModes>,
+    /// Tabs exempted from view modes ("Disable for this tab"). In memory only.
+    pub view_exempt: Mutex<HashMap<TabId, BTreeSet<viewmodes::Kind>>>,
+    /// Latest outline per tab (headers view).
+    pub headings: Mutex<HashMap<TabId, Vec<Heading>>>,
     /// In-app console (in memory only).
     pub console: Mutex<ConsoleLog>,
     /// Whether the console records (and pages get the console hook). On by
@@ -83,7 +89,9 @@ impl Shared {
             store,
             storage_tx,
             emit,
-            view_mode: Mutex::default(),
+            view_modes: Mutex::default(),
+            view_exempt: Mutex::default(),
+            headings: Mutex::default(),
             console: Mutex::default(),
             console_capture: AtomicBool::new(cfg!(debug_assertions)),
         })
@@ -93,8 +101,21 @@ impl Shared {
         self.browser.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub fn view_mode(&self) -> ViewMode {
-        *self.view_mode.lock().unwrap_or_else(|e| e.into_inner())
+    pub fn view_modes(&self) -> ViewModes {
+        *self.view_modes.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn exempt(&self) -> MutexGuard<'_, HashMap<TabId, BTreeSet<viewmodes::Kind>>> {
+        self.view_exempt.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn headings_of(&self) -> MutexGuard<'_, HashMap<TabId, Vec<Heading>>> {
+        self.headings.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn set_headings(&self, tab: TabId, list: Vec<Heading>) {
+        (self.emit)(ChromeEvent::Headings(tab, &list));
+        self.headings_of().insert(tab, list);
     }
 
     pub fn view(&self) -> ChromeState {
@@ -304,6 +325,15 @@ impl ContentEvents for Events {
     }
     fn popup_requested(&self, opener: TabId, url: Option<Url>, style: PopupStyle) -> Option<TabId> {
         let (tab, effects) = self.shared.browser().open_popup(opener, url.as_ref(), style, now_ms());
+        // A popup shares its opener's content controller, so it takes the
+        // opener's view-mode exemptions (installed before it is mounted).
+        if let Some(t) = tab {
+            let inherited = self.shared.exempt().get(&opener).cloned();
+            if let Some(set) = inherited {
+                self.shared.exempt().insert(t, set);
+                crate::scripts::apply(&self.shared, false);
+            }
+        }
         let shown = url.as_ref().map_or("about:blank".to_string(), |u| u.to_string());
         let result = tab.map_or("refused".to_string(), |t| format!("tab {}", t.0));
         self.shared.log(console::Level::Info, Some(opener), &format!("popup {style:?} {shown} -> {result}"));
@@ -317,6 +347,10 @@ impl ContentEvents for Events {
         self.apply(|b| b.on_provisional_start(tab));
     }
     fn commit(&self, tab: TabId, url: Url) {
+        // A new document: its outline comes from its own extractor.
+        if self.shared.headings_of().contains_key(&tab) {
+            self.shared.set_headings(tab, Vec::new());
+        }
         self.apply(|b| b.on_commit(tab, url));
     }
     fn finish(&self, tab: TabId) {
@@ -360,6 +394,13 @@ impl ContentEvents for Events {
     }
     fn console_message(&self, tab: Option<TabId>, origin_host: String, main_frame: bool, body: String) {
         self.shared.page_log(tab, &origin_host, main_frame, &body);
+    }
+    fn headings(&self, tab: Option<TabId>, body: String) {
+        let Some(tab) = tab else { return };
+        match viewmodes::parse_headings(&body) {
+            Some(list) => self.shared.set_headings(tab, list),
+            None => self.shared.log(console::Level::Warn, Some(tab), "headers view: malformed outline ignored"),
+        }
     }
     fn memory_warning(&self) {
         self.apply(|b| b.on_memory_warning());

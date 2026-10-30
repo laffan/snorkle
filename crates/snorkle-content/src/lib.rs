@@ -18,9 +18,12 @@
 //! failure callbacks (needed for HTTPS-first fallback) and popup handling.
 //! The browser chrome itself still uses Tauri + wry.
 
+use std::collections::HashMap;
+
 use snorkle_core::browser::{NavErrorKind, NavKind, PopupStyle, Verdict};
 use snorkle_core::policy::Frame;
 use snorkle_core::tabs::TabId;
+use snorkle_core::userscripts::Injection;
 use url::Url;
 
 pub use snorkle_core::browser::Effect;
@@ -34,6 +37,32 @@ pub use ios::{dispatch_main, os_version, physical_memory, ContentHost};
 mod stub;
 #[cfg(not(target_os = "ios"))]
 pub use stub::{dispatch_main, os_version, physical_memory, ContentHost};
+
+/// Everything injected into content views: the user's scripts (every tab)
+/// and the view-mode sources, app-wide with per-tab overrides for tabs
+/// exempted from a mode.
+#[derive(Clone, Debug, Default)]
+pub struct Injections {
+    pub user: Vec<Injection>,
+    pub view: ViewInjections,
+    pub tabs: HashMap<TabId, ViewInjections>,
+}
+
+/// View-mode sources for one set of modes.
+#[derive(Clone, Debug, Default)]
+pub struct ViewInjections {
+    pub sources: Vec<Injection>,
+    /// Brings an already-loaded page in line with these modes.
+    pub apply_js: String,
+    /// Install the headings message handler (headers mode on).
+    pub headings: bool,
+}
+
+impl Injections {
+    pub fn view_for(&self, tab: TabId) -> &ViewInjections {
+        self.tabs.get(&tab).unwrap_or(&self.view)
+    }
+}
 
 /// Website data the user can delete (Settings). Applies to the default
 /// profile's store and the current private store.
@@ -106,6 +135,10 @@ pub trait ContentEvents: 'static {
     /// capture is on). `body` is page-controlled; `tab`, `origin_host` and
     /// `main_frame` come from WebKit.
     fn console_message(&self, tab: Option<TabId>, origin_host: String, main_frame: bool, body: String);
+    /// The headers view's extractor reported the page's headings (a JSON
+    /// string, only while headers mode is on for the tab). `body` is
+    /// derived from page content; `tab` comes from WebKit.
+    fn headings(&self, tab: Option<TabId>, body: String);
     fn memory_warning(&self);
     fn did_enter_background(&self);
 }

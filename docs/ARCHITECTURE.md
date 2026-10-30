@@ -150,9 +150,15 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   are the one owner-approved exception to "no scripts in content". They are installed as
   main-frame `WKUserScript`s in WebKit's isolated client world and guarded by
   `location.hostname`. There is no native bridge. See SECURITY_REVIEW I1/I2.
-- **View modes** use the same mechanism with constant styles, plus one `evaluateJavaScript` to
-  update already-loaded pages. Pages are black and white with images and video hidden by
-  default (`img`, `picture`, SVG `image`, `video`, embedded players of the common video sites,
+- **View modes** (`snorkle_core::viewmodes`): desaturate, hide media and headers. Each is on or
+  off app-wide; a long press on its button offers "Disable for this tab", which exempts that
+  tab (popups inherit their opener's exemptions, since they share its content controller). The
+  host compiles the injected scripts once for the app-wide modes and once per exempted tab. The
+  **headers** mode runs a constant extractor in the client world that reports the page's h1–h6
+  to a client-world message handler (C14); the chrome shows them, nested by level, in a panel
+  docked right of the page, and a click scrolls to the heading. The style modes use the same
+  mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
+  Pages are black and white with images and video hidden by default (`img`, `picture`, SVG `image`, `video`, embedded players of the common video sites,
   CSS background images); the palette button shows colour and the images button shows images
   and video. Both are session-only (`Shared::view_mode`, not persisted), so every launch starts
   that way. Hidden `<img>` and `<video>` elements may still download; CSS background images do

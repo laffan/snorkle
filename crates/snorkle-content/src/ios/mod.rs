@@ -113,8 +113,11 @@ pub struct ContentHost {
     private_store: Option<Retained<WKWebsiteDataStore>>,
     events: Rc<dyn ContentEvents>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+    /// Compiled scripts for tabs without view-mode overrides, and per tab
+    /// for the rest.
     scripts: injection::Scripts,
-    injections: Vec<Injection>,
+    tab_scripts: HashMap<TabId, injection::Scripts>,
+    injections: crate::Injections,
     /// Page console capture (channel C13); off unless the user turns it on.
     console: bool,
     /// Dims the content area under a popup sheet and swallows its touches.
@@ -172,7 +175,8 @@ impl ContentHost {
             events,
             observers,
             scripts: injection::Scripts::default(),
-            injections: Vec::new(),
+            tab_scripts: HashMap::new(),
+            injections: crate::Injections::default(),
             console: false,
         }
     }
@@ -255,18 +259,17 @@ impl ContentHost {
         self.sync_backdrop();
     }
 
-    /// Replaces the injected scripts (user scripts, black-and-white mode) in
-    /// every content view; they apply from the next load. `run_now`, if
-    /// given, is run once in every loaded page (used to toggle
-    /// black-and-white without reloading).
-    pub fn set_injections(&mut self, injections: &[Injection], run_now: Option<&str>) {
-        self.injections = injections.to_vec();
-        let console = self.console.then_some(&self.events);
-        self.scripts = injection::make_scripts(self.mtm, injections, console);
-        for v in self.views.values() {
-            injection::install(self.mtm, &v.controller, &self.scripts);
-            if let Some(js) = run_now {
-                injection::run_now(self.mtm, &v.web, js);
+    /// Replaces everything injected (user scripts, view modes with per-tab
+    /// overrides) in every content view; it applies from the next load.
+    /// With `run_now`, each loaded page is also brought in line with its
+    /// view modes immediately.
+    pub fn set_injections(&mut self, injections: crate::Injections, run_now: bool) {
+        self.injections = injections;
+        self.compile_scripts();
+        for (tab, v) in &self.views {
+            injection::install(self.mtm, &v.controller, self.scripts_for(*tab));
+            if run_now {
+                injection::run_now(self.mtm, &v.web, &self.injections.view_for(*tab).apply_js);
             }
         }
     }
@@ -275,8 +278,31 @@ impl ContentHost {
     /// effect from the next page load.
     pub fn set_console_capture(&mut self, on: bool) {
         self.console = on;
-        let injections = std::mem::take(&mut self.injections);
-        self.set_injections(&injections, None);
+        self.compile_scripts();
+        for (tab, v) in &self.views {
+            injection::install(self.mtm, &v.controller, self.scripts_for(*tab));
+        }
+    }
+
+    /// Scrolls `tab`'s page to one of its headings (headers view).
+    pub fn scroll_to_heading(&mut self, tab: TabId, index: u32) {
+        if let Some(v) = self.views.get(&tab) {
+            injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::scroll_to_heading_js(index));
+        }
+    }
+
+    fn compile_scripts(&mut self) {
+        let console = self.console.then_some(&self.events);
+        let build = |view: &crate::ViewInjections| {
+            let all: Vec<Injection> = self.injections.user.iter().chain(&view.sources).cloned().collect();
+            injection::make_scripts(self.mtm, &all, console, view.headings.then_some(&self.events))
+        };
+        self.scripts = build(&self.injections.view);
+        self.tab_scripts = self.injections.tabs.iter().map(|(t, v)| (*t, build(v))).collect();
+    }
+
+    fn scripts_for(&self, tab: TabId) -> &injection::Scripts {
+        self.tab_scripts.get(&tab).unwrap_or(&self.scripts)
     }
 
     /// Fetches a favicon for `host` in a sandboxed, throwaway web view (see
@@ -481,7 +507,7 @@ impl ContentHost {
 
         container.addSubview(&web);
         self.root.addSubview(&container);
-        injection::install(mtm, &controller, &self.scripts);
+        injection::install(mtm, &controller, self.scripts_for(tab));
         rules::register(tab, controller.clone());
         WEB_VIEW_TABS.with(|m| m.borrow_mut().insert(Retained::as_ptr(&web) as usize, tab));
 

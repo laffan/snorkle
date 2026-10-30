@@ -214,3 +214,9 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     popups share their opener's content controller); the clipboard copy works in the chrome
     webview. **[decide]** Release builds record nothing until the user turns Record on; pages can
     detect the hook while it is on.
+45. **[verify] View modes per tab and headers view.** Check: a popup shares its opener's content
+    controller, so installing per-tab scripts for one rewrites the other's (exemptions are copied
+    to popups to keep them consistent); the client-world handler is not visible to page scripts
+    (`window.webkit.messageHandlers.snorkleHeadings` undefined in the page world); the extractor
+    keeps up on single-page apps; heading indices can shift between report and click on pages
+    that change quickly.
