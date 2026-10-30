@@ -353,6 +353,35 @@
 
   // ---- pinned grid ----------------------------------------------------------
 
+  // Bundled icons (ui/icons, Simple Icons, CC0) for sites whose favicons
+  // the fetcher cannot get. First match wins: host, then optional path prefix.
+  const PREFAB_ICONS = [
+    ['mail.google.com', '', 'gmail'],
+    ['drive.google.com', '', 'googledrive'],
+    ['docs.google.com', '/spreadsheets', 'googlesheets'],
+    ['docs.google.com', '/presentation', 'googleslides'],
+    ['docs.google.com', '/forms', 'googleforms'],
+    ['docs.google.com', '', 'googledocs'],
+    ['sheets.google.com', '', 'googlesheets'],
+    ['slides.google.com', '', 'googleslides'],
+    ['calendar.google.com', '', 'googlecalendar'],
+    ['keep.google.com', '', 'googlekeep'],
+    ['meet.google.com', '', 'googlemeet'],
+    ['chat.google.com', '', 'googlechat'],
+    ['maps.google.com', '', 'googlemaps'],
+    ['www.google.com', '/maps', 'googlemaps'],
+    ['photos.google.com', '', 'googlephotos'],
+    ['www.youtube.com', '', 'youtube'],
+    ['youtube.com', '', 'youtube'],
+  ];
+
+  function prefabIcon(url) {
+    let u;
+    try { u = new URL(url); } catch (e) { return null; }
+    const hit = PREFAB_ICONS.find(([host, path]) => u.hostname === host && u.pathname.startsWith(path));
+    return hit ? `icons/${hit[2]}.svg` : null;
+  }
+
   function loadPins() {
     return T.core.invoke('list_pins').then((items) => { pins = items; renderPins(); }).catch(() => {});
   }
@@ -381,7 +410,13 @@
       node.title = p.title || p.display.registrable;
       const open = el('button', 'open');
       open.setAttribute('aria-label', `Open ${p.title || p.display.registrable}`);
-      if (p.icon && p.icon.startsWith('data:image/png;base64,')) {
+      const prefab = prefabIcon(p.url);
+      if (prefab) {
+        const img = el('img', 'prefab');
+        img.alt = '';
+        img.src = prefab;
+        open.appendChild(img);
+      } else if (p.icon && p.icon.startsWith('data:image/png;base64,')) {
         const img = el('img');
         img.alt = '';
         // Never show a broken image: fall back to the letter tile.
