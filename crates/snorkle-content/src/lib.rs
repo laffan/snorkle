@@ -147,6 +147,9 @@ pub trait ContentEvents: 'static {
     /// string, only while headers mode is on for the tab). `body` is
     /// derived from page content; `tab` comes from WebKit.
     fn headings(&self, tab: Option<TabId>, body: String);
+    /// The user ⌘-clicked a link to `url` in `opener` (WebKit's modifier
+    /// flags on a link activation); the link did not navigate `opener`.
+    fn background_tab_requested(&self, opener: TabId, url: Url);
     fn memory_warning(&self);
     fn did_enter_background(&self);
 }
@@ -230,6 +233,69 @@ pub type FaviconDone = Box<dyn FnOnce(Option<Vec<u8>>) + Send>;
 /// Completion of a rule-list install, with the number of lists installed.
 pub type RulesDone = Box<dyn FnOnce(Result<usize, String>) + Send>;
 
+/// Completion of a page-text read (AI chat): the script's string result,
+/// page-controlled and bounded to [`MAX_PAGE_TEXT_BYTES`], or `None`.
+pub type TextDone = Box<dyn FnOnce(Option<String>) + Send>;
+/// Largest page-text result read back from a page.
+pub const MAX_PAGE_TEXT_BYTES: usize = snorkle_core::ai::MAX_PAGE_REPORT;
+
+/// A region of the window where the chrome floats over the content area
+/// (the URL pill, its popups and toasts), in points, window coordinates.
+/// Content views are cut out there (not drawn, and touches pass through to
+/// the chrome below), so a page can never draw over or under it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hole {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// Corner radius.
+    pub r: f64,
+}
+
+impl Hole {
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
+    }
+
+    fn overlaps(&self, o: &Hole) -> bool {
+        self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
+    }
+}
+
+/// Most holes the chrome may cut at once.
+pub const MAX_HOLES: usize = 8;
+
+/// Validates holes reported by the chrome: finite, inside a `width` ×
+/// `height` window, non-empty, at most [`MAX_HOLES`], and merged where
+/// they overlap (the mask's even-odd fill would otherwise draw the overlap).
+pub fn sanitize_holes(raw: &[Hole], width: f64, height: f64) -> Vec<Hole> {
+    let mut out: Vec<Hole> = Vec::new();
+    for h in raw.iter().take(MAX_HOLES) {
+        if ![h.x, h.y, h.w, h.h, h.r].iter().all(|v| v.is_finite()) {
+            continue;
+        }
+        let x0 = h.x.clamp(0.0, width.max(0.0));
+        let y0 = h.y.clamp(0.0, height.max(0.0));
+        let x1 = (h.x + h.w).clamp(0.0, width.max(0.0));
+        let y1 = (h.y + h.h).clamp(0.0, height.max(0.0));
+        if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+            continue;
+        }
+        let mut hole = Hole { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: 0.0 };
+        hole.r = h.r.clamp(0.0, hole.w.min(hole.h) / 2.0);
+        // Merge with every hole it touches (repeat: a merge can grow into others).
+        while let Some(i) = out.iter().position(|o| o.overlaps(&hole)) {
+            let o = out.remove(i);
+            let (x0, y0) = (o.x.min(hole.x), o.y.min(hole.y));
+            let (x1, y1) = ((o.x + o.w).max(hole.x + hole.w), (o.y + o.h).max(hole.y + hole.h));
+            hole = Hole { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: o.r.min(hole.r) };
+        }
+        out.push(hole);
+    }
+    out
+}
+
 /// Largest accepted chrome inset (toolbar height, sidebar width) as a
 /// fraction of the window extent, so the chrome can never shrink the
 /// content area to nothing.
@@ -264,6 +330,24 @@ mod tests {
             ua,
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15"
         );
+    }
+
+    #[test]
+    fn holes_are_validated_and_merged() {
+        let h = |x, y, w, h, r| Hole { x, y, w, h, r };
+        let out = sanitize_holes(
+            &[h(10.0, 900.0, 400.0, 46.0, 23.0), h(f64::NAN, 0.0, 1.0, 1.0, 0.0), h(5.0, 5.0, 0.0, 10.0, 0.0)],
+            1000.0,
+            1000.0,
+        );
+        assert_eq!(out, vec![h(10.0, 900.0, 400.0, 46.0, 23.0)]);
+        let clipped = sanitize_holes(&[h(-50.0, 980.0, 100.0, 100.0, 99.0)], 1000.0, 1000.0);
+        assert_eq!(clipped, vec![h(0.0, 980.0, 50.0, 20.0, 10.0)], "clamped to the window, radius too");
+        let merged = sanitize_holes(&[h(0.0, 0.0, 10.0, 10.0, 4.0), h(5.0, 5.0, 10.0, 10.0, 2.0)], 100.0, 100.0);
+        assert_eq!(merged, vec![h(0.0, 0.0, 15.0, 15.0, 2.0)]);
+        let many: Vec<Hole> = (0..20).map(|i| h(i as f64 * 20.0, 0.0, 10.0, 10.0, 0.0)).collect();
+        assert_eq!(sanitize_holes(&many, 1000.0, 1000.0).len(), MAX_HOLES);
+        assert!(h(0.0, 0.0, 10.0, 10.0, 0.0).contains(5.0, 5.0) && !h(0.0, 0.0, 10.0, 10.0, 0.0).contains(10.0, 5.0));
     }
 
     #[test]

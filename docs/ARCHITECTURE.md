@@ -48,12 +48,12 @@ linked. Two copies would register duplicate Objective-C classes.
 
 | # | Boundary | Direction | Mechanism | Enforced by |
 |---|---|---|---|---|
-| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
+| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). Exception, only when the user sends a page-chat message: the result of one constant script (title, visible text, selection) is read back (§5g, C17). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
 | B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants every app command in `command_list.rs` and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
-| B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews inside the content area (between the status bar, the sidebar, the URL strip at the bottom and any docked panel), `clipsToBounds`. Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs`, `Browser::sync_visibility`, `browser_invariants.rs` |
+| B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews inside the content area (between the status bar, the sidebar and any docked panel; down to the bottom of the window), `clipsToBounds`. The URL pill, its popup and toasts float over the content area as **holes**: every container is masked there and does not take touches there, so the chrome below shows through and a page can never draw over or under them (§5f). Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Other chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs` (`apply_mask`), `ios/keys.rs` (`pointInside`), `snorkle_content::sanitize_holes`, `Browser::sync_visibility`, `browser_invariants.rs` |
 | B5 | App ↔ disk | native → storage | JSON files in the app container, written atomically off the main thread. Only http(s) URLs are stored, and only from non-private tabs. Data protection `NSFileProtectionComplete` (entitlement). | `storage.rs` tests, `browser_invariants.rs::private_tabs_never_reach_storage`, fuzz `browser_events` |
-| B6 | App ↔ network | content → internet | WebKit for pages. The app itself makes no telemetry or update requests; its own requests are favicon fetches for pins (sandboxed web view) and, only when the user has connected an AI account, HTTPS calls to `api.openai.com` / `api.anthropic.com` (`snorkle_core::ai::is_allowed_url`, ephemeral `NSURLSession`). ATS stays on for the app; `NSAllowsArbitraryLoadsInWebContent` is set only so HTTP can load after explicit user consent. TLS: system validation, `PerformDefaultHandling` for every auth challenge, deprecated TLS refused. | `delegates.rs`, `config_hardening.rs` |
+| B6 | App ↔ network | content → internet | WebKit for pages. The app itself makes no telemetry or update requests; its own requests are favicon fetches for pins (sandboxed web view) and, only when the user has connected an AI account, HTTPS calls to `api.openai.com` / `api.anthropic.com` (`snorkle_core::ai::is_allowed_url`, ephemeral `NSURLSession`): site-script drafts, Detect Headers, and page chat (which sends the page's text, §5g). ATS stays on for the app; `NSAllowsArbitraryLoadsInWebContent` is set only so HTTP can load after explicit user consent. TLS: system validation, `PerformDefaultHandling` for every auth challenge, deprecated TLS refused. | `delegates.rs`, `config_hardening.rs` |
 | B7 | Profiles | site data | Default profile → `WKWebsiteDataStore(forIdentifier:)` with a fixed UUID. Private → one non-persistent store per private session, wiped and released when the last private tab closes. The chrome's own webview uses the default store, which is separate from both. | `ios/mod.rs::store_for`, `release_private_store` |
 
 ## 3. Threat model
@@ -93,6 +93,9 @@ filter lists (none shipped yet), extensions (non-goal), sync (non-goal).
 1. **Typed or bookmark:** `input::interpret` → `policy::decide(Main, Typed)`. Then: `Load`, `UpgradeToHttps`,
    `External` (prompt) or `Block` (notice). A blocked URL never reaches WebKit.
 2. **Every WebKit navigation action** (`decidePolicyForNavigationAction`) → `Browser::decide_navigation`.
+   Exception: a link activation with ⌘ held (WebKit's `modifierFlags`, iOS 18.4+) is cancelled and
+   opened in a background tab instead (`Browser::on_background_tab_request`: http/https only,
+   `policy::decide`, the opener's profile; it loads hidden within the live-view budget).
    Our own loads are recognised by URL and keep their original source. Anything else is
    classified from `WKNavigationType`; `.other` (redirects, script) gets the most restrictive
    page source.
@@ -155,13 +158,19 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   tab (popups inherit their opener's exemptions, since they share its content controller). The
   host compiles the injected scripts once for the app-wide modes and once per exempted tab. The
   **headers** mode runs a constant extractor in the client world that reports the page's h1–h6
-  to a client-world message handler (C14); the chrome shows them, nested by level, in a panel
-  docked right of the page, and a click scrolls to the heading. The style modes use the same
+  (or the site's detected rules) to a client-world message handler (C14); the chrome shows them,
+  nested by level, in a panel docked right of the page, and a click scrolls to the heading and
+  briefly highlights it on the page. When the outline has several top-level entries with
+  headings under them (what Detect Headers produces: section labels at level 1, stories at 2),
+  the panel shows them as foldable sections. Detect Headers sends each candidate's enclosing
+  section element and whether it is uppercase, and asks the model for section labels first. The style modes use the same
   mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
   Pages are black and white with media hidden by default: images, video, canvas, embedded
-  objects and video-player iframes keep their boxes but are drawn as gray rectangles (hover
-  shows them in black and white), CSS background images are dropped, and videos are paused when
-  they start unless hovered. The hide-media style runs in every frame and re-attaches itself if
+  objects and video-player iframes keep their boxes but are drawn as gray rectangles; pointing
+  at one fades it in (0.3 s) in black and white. Media under an overlay (video players, images
+  behind links) never get `:hover`, so a pointer tracker marks whatever media are under the
+  pointer (`elementsFromPoint`, plus video boxes by geometry). CSS background images are
+  dropped, and videos are paused when they start unless pointed at. The hide-media style runs in every frame and re-attaches itself if
   a page removes it. The palette button shows colour and the images button shows images and
   video. Both are session-only (`Shared::view_modes`, not persisted), so every launch starts
   that way. Hidden `<img>` and `<video>` sources still download (hover needs them); CSS
@@ -177,20 +186,47 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 
 ## 5f. URL bar
 
-The address bar is a pill in a strip along the bottom of the window: sidebar, back, forward and
-reload on its left; the address (about 400 pt wide; full width in narrow windows); then a ⋯ toggle
-that opens the page actions (ad blocking, bookmark, site scripts) inside the pill, and the
-per-tab headers-view button. The strip is reserved (the page ends above it), because page views
-are drawn above the chrome; it is not overlaid on the page. Toasts and banners appear above the
-pill. With a pointer device the pill and the sidebar sit at 50% opacity until hovered.
+The address bar is a pill floating over the bottom of the page (pages run the full height of
+the window): sidebar, back, forward and reload on its left; the address (about 400 pt wide; full
+width in narrow windows); then a ⋯ button that opens a popup with the page actions (ad blocking,
+bookmark, site scripts), the per-tab headers-view button and the chat button. Toasts and banners
+appear above the pill. With a pointer device the pill and the sidebar sit at 50% opacity until
+hovered.
+
+Page views are drawn above the chrome's web view, so the chrome cannot simply draw over a page.
+Instead it reports the rectangles of the pill, the open actions popup and any toast or banner as
+holes (`set_chrome_layout`, window coordinates with a corner radius). The host masks every
+content container (and the sheet backdrop) with those holes cut out (`CAShapeLayer`, even-odd)
+and the containers report points inside a hole as outside themselves, so touches and pointer
+hover there reach the chrome. The strip around the pill is transparent and takes no input: the
+page shows and is used there. While the console is open the page ends above it as before. The
+pill centres over the page, between the sidebar and any docked panel. ⌘-click on a link opens it
+in a new tab after the current one without switching to it (§4).
 
 ## 5e. Docked panels
 
-Native page views sit above the chrome's webview, so the chrome can never draw over a page.
-Panels that should leave the page visible dock beside it instead: the chrome reports `right`
-and `bottom` insets and the host shrinks the content area. The site-scripts panel docks on the
-right (in narrow windows it overlays and hides the page); the console docks at the bottom. A
-ring around the `{ }` button marks pages an enabled site script applies to.
+Native page views sit above the chrome's webview, so the chrome cannot draw over a page except
+in holes (§5f). Panels that should leave the page visible dock beside it instead: the chrome
+reports `right` and `bottom` insets and the host shrinks the content area. Site scripts, the
+page chat and the headers outline dock on the right, full height, one at a time in that order of
+precedence (in narrow windows site scripts and chat overlay and hide the page); the console docks
+at the bottom. A ring around the `{ }` row (and the ⋯ button while its popup is closed) marks
+pages an enabled site script applies to. When the content area grows (a panel closes), the
+host checks after 0.35 s whether WebKit left the page drawn narrower than the view (a zoom scale
+kept from the narrower layout) and zooms it to fill the width.
+
+## 5g. Page chat
+
+The chat button beside the headers button opens a panel docked right of the page: a model menu
+(the models of every connected provider, as listed by Settings → AI → Test), the conversation,
+and an estimate of what it has cost so far (provider-reported tokens × published prices,
+`ai::estimate_cost_micros`; "≥" when a model has no known price). Each message is sent with the
+whole conversation (at most 40 messages, each ≤ 8,000 chars). At that moment the host runs a
+constant script in the page's client world that returns the title, visible text (`innerText`,
+≤ 48,000 chars) and selection (C17); Rust adds the tab's committed URL from the core and sends it
+all as data in the system prompt (`ai::chat_request`). Conversations are kept in the chrome's
+memory only, one per tab, and restart when the tab's page changes. Usage is recorded like other
+AI requests (Settings → AI → Usage).
 
 ## 5d. In-app console
 
@@ -222,9 +258,10 @@ insets are clamped in Rust to at most half the window.
 The only credentials the app stores are the user's own AI API keys (Settings → AI): iOS Keychain
 generic passwords, service `app.snorkle.ai-keys`, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
 (`snorkle-content/src/ios/keychain.rs`). They are read only to send a request to the provider and
-are never returned to the chrome. Requests carry the site's domain, its site script and the
-user's prompt, never page content; the model's CSS/JS lands in the editor and runs only if the
-user saves it. The app stores no passwords, tokens or cookies otherwise. Cookies live in WebKit's data stores.
+are never returned to the chrome. Site-script requests carry the site's domain, its site script
+and the user's prompt; Detect Headers sends short snippets of headline-like text; page chat sends
+the page's URL, title, visible text and selection with the conversation (§5g). The model's
+CSS/JS lands in the editor and runs only if the user saves it; chat replies are only displayed. The app stores no passwords, tokens or cookies otherwise. Cookies live in WebKit's data stores.
 Password AutoFill in WKWebView uses the system (iCloud Keychain / Passwords app). Any future
 credential feature must use the iOS Keychain (`kSecClassGenericPassword` /
 `kSecClassInternetPassword`, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`) and needs a

@@ -84,7 +84,15 @@ fuzz_target!(|data: &[u8]| {
             11 => pick(&tabs).map(|(id, _)| b.on_process_terminated(id, now)).unwrap_or_default(),
             12 => pick(&tabs)
                 .map(|(id, p)| {
-                    let e = b.on_new_window_request(id, &url_for(p, c), now);
+                    let e = if c & 0x20 == 0 {
+                        b.on_new_window_request(id, &url_for(p, c), now)
+                    } else {
+                        // ⌘-click: a background tab never takes focus.
+                        let before = b.active();
+                        let (_, e) = b.on_background_tab_request(id, &url_for(p, c), now);
+                        assert_eq!(b.active(), before, "background tab took focus");
+                        e
+                    };
                     for t in b.view().tabs {
                         if !tabs.iter().any(|x| x.0 == t.id) {
                             tabs.push((t.id, if t.private { Profile::Private } else { Profile::Default }));

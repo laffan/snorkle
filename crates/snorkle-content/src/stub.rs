@@ -41,7 +41,7 @@ impl ContentHost {
         self.applied.push(effect.clone());
     }
 
-    pub fn set_insets(&mut self, top: f64, left: f64, _right: f64, _bottom: f64) {
+    pub fn set_insets(&mut self, top: f64, left: f64, _right: f64, _bottom: f64, _holes: Vec<crate::Hole>) {
         self.top = crate::clamp_inset(top, 1024.0);
         self.left = crate::clamp_inset(left, 1366.0);
     }
@@ -57,6 +57,11 @@ impl ContentHost {
     pub fn scroll_to_heading(&mut self, _tab: snorkle_core::tabs::TabId, _index: u32) {}
 
     pub fn sample_headings(&mut self, _tab: snorkle_core::tabs::TabId) {}
+
+    /// No pages render off iOS.
+    pub fn read_page_text(&mut self, _tab: snorkle_core::tabs::TabId, done: crate::TextDone) {
+        done(None);
+    }
 
     pub fn clear_data(&mut self, _kind: crate::DataKind) {}
 

@@ -46,13 +46,20 @@ fn args(cmd: &str) -> serde_json::Value {
     match cmd {
         "navigate" => json!({ "tab": 1, "input": "https://example.com/" }),
         "new_tab" => json!({ "private": false }),
-        "set_chrome_layout" => json!({ "top": 80.0, "left": 264.0, "right": 0.0, "bottom": 0.0, "overlay": false }),
+        "set_chrome_layout" => {
+            json!({ "top": 80.0, "left": 264.0, "right": 0.0, "bottom": 0.0, "overlay": false, "holes": [{ "x": 300.0, "y": 900.0, "w": 500.0, "h": 46.0, "r": 23.0 }] })
+        }
+        "ai_chat" => {
+            json!({ "tab": 1, "provider": "anthropic", "model": "claude-opus-5-5", "messages": [{ "role": "user", "text": "Hi" }] })
+        }
         "set_console_capture" => json!({ "on": false }),
         "clear_website_data" => json!({ "kind": "cache" }),
         "ai_set_key" => json!({ "provider": "openai", "key": "sk-test" }),
         "ai_delete_key" | "ai_test" => json!({ "provider": "anthropic" }),
         "detect_headings" => json!({ "tab": 1, "provider": "anthropic", "model": "claude-opus-5-5" }),
-        "ai_write_script" => json!({ "provider": "anthropic", "model": "claude-opus-5-5", "domain": "example.com", "css": "", "js": "", "prompt": "x" }),
+        "ai_write_script" => {
+            json!({ "provider": "anthropic", "model": "claude-opus-5-5", "domain": "example.com", "css": "", "js": "", "prompt": "x" })
+        }
         "open_launcher" => json!({ "url": "https://example.com/" }),
         "remove_bookmark" => json!({ "url": "https://example.com/" }),
         "list_history" => json!({ "limit": 10 }),
@@ -65,7 +72,8 @@ fn args(cmd: &str) -> serde_json::Value {
         "set_tab_headers" => json!({ "tab": 1, "on": true }),
         "delete_user_script" => json!({ "domain": "example.com" }),
         "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),
-        "get_view_mode" | "get_console" | "clear_console" | "ai_status" | "ai_usage" | "ai_reset_usage" | "list_user_scripts" | "list_pins" => json!({}),
+        "get_view_mode" | "get_console" | "clear_console" | "ai_status" | "ai_usage" | "ai_reset_usage"
+        | "list_user_scripts" | "list_pins" => json!({}),
         "pin_tab" => json!({ "tab": 1, "index": 0 }),
         "pin_bookmark" | "move_pin" => json!({ "url": "https://example.com/", "index": 0 }),
         "unpin" => json!({ "url": "https://example.com/", "bookmarkIndex": null }),

@@ -25,7 +25,7 @@ use objc2_foundation::{
     NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
     NSURLSessionAuthChallengeDisposition, NSURL,
 };
-use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate};
+use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate, UIKeyModifierFlags};
 use objc2_web_kit::{
     WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
     WKNavigationResponse, WKNavigationResponsePolicy, WKNavigationType, WKPermissionDecision, WKSecurityOrigin,
@@ -215,6 +215,16 @@ impl NavDelegate {
         let Some(url) = action.request().URL().as_deref().and_then(to_url) else {
             return WKNavigationActionPolicy::Cancel;
         };
+        // ⌘-click on a link (main frame, or a link that targets a new
+        // window): open it in a background tab instead. The modifier flags
+        // and navigation type come from WebKit (iOS 18.4+); a page cannot
+        // set them.
+        let main_or_new = action.targetFrame().is_none_or(|f| f.isMainFrame());
+        if main_or_new && action.navigationType() == WKNavigationType::LinkActivated && command_held(action) {
+            let i = self.ivars();
+            i.events.background_tab_requested(i.tab, url);
+            return WKNavigationActionPolicy::Cancel;
+        }
         let frame = match action.targetFrame() {
             // No target frame: a new-window request. WebKit follows up with
             // `createWebViewWithConfiguration`, which runs the policy itself
@@ -229,6 +239,16 @@ impl NavDelegate {
             Verdict::Cancel => WKNavigationActionPolicy::Cancel,
         }
     }
+}
+
+/// Whether ⌘ was held for this navigation action (`modifierFlags`, a
+/// `UIKeyModifierFlags` on iOS 18.4+; absent before, then never).
+unsafe fn command_held(action: &WKNavigationAction) -> bool {
+    if !action.respondsToSelector(sel!(modifierFlags)) {
+        return false;
+    }
+    let flags: UIKeyModifierFlags = msg_send![action, modifierFlags];
+    flags.contains(UIKeyModifierFlags::Command)
 }
 
 define_class!(

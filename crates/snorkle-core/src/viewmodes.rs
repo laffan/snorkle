@@ -94,20 +94,29 @@ const MEDIA_SELECTOR: &str = concat!(
 );
 /// Fixed style for hide media: each media element keeps its box but is
 /// drawn as a solid gray rectangle (a gray background, then a filter that
-/// turns every opaque pixel the same gray); hovering one shows it in black
-/// and white. CSS background images are dropped (WebKit then does not
-/// fetch them); `<img>` sources are still fetched so hover can show them.
+/// flattens every pixel to the same gray); pointing at one fades it in, in
+/// black and white. The hidden and shown filters use the same functions in
+/// the same order, so the change is interpolated (contrast 0 → 1 brings the
+/// picture out of the flat gray). Media under an overlay (video players,
+/// images behind transparent links) never get `:hover`, so the pointer
+/// tracker in [`style_js`] also marks the media under the pointer with
+/// [`REVEAL_ATTR`]. CSS background images are dropped (WebKit then does not
+/// fetch them); `<img>` sources are still fetched so pointing can show them.
 pub const NO_MEDIA_CSS: &str = concat!(
     "img,input[type=image],svg image,video,canvas,object,embed,",
     "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
     "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
     "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"],",
     "iframe[src*=\"/embed/\"],iframe[src*=\"player\"],iframe[src*=\"video\"]",
-    "{background-color:#c8c8c8!important;filter:brightness(0) invert(.78)!important}",
-    "img:hover,input[type=image]:hover,svg image:hover,video:hover,canvas:hover,object:hover,embed:hover,iframe:hover",
-    "{background-color:transparent!important;filter:grayscale(1)!important}",
+    "{background-color:#c8c8c8!important;filter:grayscale(1) contrast(0) brightness(1.57)!important;",
+    "transition:filter .3s ease-out,background-color .3s ease-out!important}",
+    "img:hover,input[type=image]:hover,svg image:hover,video:hover,canvas:hover,object:hover,embed:hover,iframe:hover,",
+    ":root [data-snorkle-reveal][data-snorkle-reveal]",
+    "{background-color:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
     "*,*::before,*::after{background-image:none!important}"
 );
+/// Attribute the pointer tracker puts on the media under the pointer.
+pub const REVEAL_ATTR: &str = "data-snorkle-reveal";
 
 /// Name of the headings message handler (client world only).
 pub const HEADINGS_HANDLER_NAME: &str = "snorkleHeadings";
@@ -192,14 +201,20 @@ pub const MAX_SAMPLE_REPORT: usize = 96 * 1024;
 
 /// Collects a compact sample of the page's heading-like elements for
 /// "Detect Headers" and posts `{"sample": [...]}`: for each candidate (in
-/// document order) its tag, id, first classes, font size and weight, the
-/// parent's tag and classes, and the start of its text. Constant code; run
+/// document order) its tag, id, first classes, font size and weight,
+/// whether it is uppercase (section labels often are), the parent's tag and
+/// classes, its enclosing section element (`section`, `article`, `aside`,
+/// … with classes and `aria-label`), and the start of its text. Constant code; run
 /// only when the user presses the button.
 pub fn headings_sample_js() -> String {
     format!(
         r#"(function(){{
 var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.{HEADINGS_HANDLER_NAME};if(!h)return;
 function cls(e){{return (e.className&&e.className.baseVal===undefined?String(e.className):'').split(/\s+/).filter(Boolean).slice(0,4).map(function(c){{return c.slice(0,40);}});}}
+function sec(e){{var a=e.parentElement;while(a&&a!==document.body){{var t=a.tagName.toLowerCase();
+if(/^(section|article|aside|nav|main|header|footer)$/.test(t)||a.getAttribute('role')==='region'){{
+var l=(a.getAttribute('aria-label')||'').replace(/\s+/g,' ').trim().slice(0,30);return t+(cls(a).length?'.'+cls(a).join('.'):'')+(l?' ['+l+']':'');}}
+a=a.parentElement;}}return '';}}
 var ps=[].slice.call(document.querySelectorAll('p')).slice(0,40).map(function(p){{return parseFloat(getComputedStyle(p).fontSize)||16;}}).sort(function(a,b){{return a-b;}});
 var base=ps.length?ps[ps.length>>1]:16,out=[],els=document.body?document.body.getElementsByTagName('*'):[];
 for(var i=0;i<els.length&&i<8000&&out.length<{MAX_SAMPLE};i++){{var e=els[i],tag=e.tagName.toLowerCase();
@@ -209,9 +224,10 @@ var text=own.length>=3?own:'';if(!text&&e.children.length===1&&!e.children[0].ch
 if(text.length<3||text.length>160)continue;if(!e.getClientRects().length)continue;
 var cs=getComputedStyle(e),fs=parseFloat(cs.fontSize)||0,fw=parseInt(cs.fontWeight,10)||400;
 var isH=/^h[1-6]$/.test(tag)||e.getAttribute('role')==='heading';
-if(!isH&&fs<base*1.15&&!(fw>=600&&fs>=base*1.05))continue;
+var label=cs.textTransform==='uppercase'&&fw>=500&&text.length<=40;
+if(!isH&&!label&&fs<base*1.15&&!(fw>=600&&fs>=base*1.05))continue;
 var p=e.parentElement;
-out.push({{tag:tag,id:(e.id||'').slice(0,40),cls:cls(e),fs:Math.round(fs),fw:fw,parent:p?p.tagName.toLowerCase():'',pcls:p?cls(p):[],text:text.slice(0,80)}});}}
+out.push({{tag:tag,id:(e.id||'').slice(0,40),cls:cls(e),fs:Math.round(fs),fw:fw,up:cs.textTransform==='uppercase',parent:p?p.tagName.toLowerCase():'',pcls:p?cls(p):[],sec:sec(e),text:text.slice(0,80)}});}}
 h.postMessage(JSON.stringify({{sample:out,base:Math.round(base)}}));
 }})();"#
     )
@@ -254,7 +270,9 @@ pub fn parse_report(body: &str) -> Option<HeadingsReport> {
             serde_json::json!({
                 "tag": s(&e["tag"], 16), "id": s(&e["id"], 40), "cls": list(&e["cls"]),
                 "fs": e["fs"].as_u64().unwrap_or(0).min(400), "fw": e["fw"].as_u64().unwrap_or(400).min(1000),
-                "parent": s(&e["parent"], 16), "pcls": list(&e["pcls"]), "text": s(&e["text"], 80),
+                "up": e["up"].as_bool().unwrap_or(false),
+                "parent": s(&e["parent"], 16), "pcls": list(&e["pcls"]), "sec": s(&e["sec"], 80),
+                "text": s(&e["text"], 80),
             })
         })
         .collect();
@@ -301,11 +319,16 @@ pub fn apply_js(modes: ViewModes, rules: &HeadingRules) -> String {
 }
 
 /// Scrolls the page to the heading at `index` among the elements matching
-/// the extractor's heading selector. The only input is an integer.
+/// the extractor's heading selector, then highlights it briefly (an
+/// outline and a gray wash that fade out; Web Animations, so the page's own
+/// styles are untouched). The only input is an integer.
 pub fn scroll_to_heading_js(index: u32) -> String {
     format!(
         "(function(){{var s=window.__snorkleHeadings,sel=s?s.sel:{};var e=document.querySelectorAll(sel)[{index}];\
-         if(e)e.scrollIntoView({{block:'start',behavior:'smooth'}});}})();",
+         if(!e)return;e.scrollIntoView({{block:'start',behavior:'smooth'}});if(!e.animate)return;\
+         var k=function(a,o){{return {{outlineStyle:'solid',outlineWidth:'3px',outlineOffset:'4px',\
+         outlineColor:'rgba(110,110,110,'+a+')',backgroundColor:'rgba(128,128,128,'+(a*.22)+')',offset:o}};}};\
+         e.animate([k(0,0),k(1,.15),k(1,.65),k(0,1)],{{duration:2200,delay:300,easing:'ease-in-out'}});}})();",
         json_str(HEADING_SELECTOR)
     )
 }
@@ -318,17 +341,42 @@ pub fn scroll_to_heading_js(index: u32) -> String {
 fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
     let key = json_str(&format!("{id}_state"));
     let id = json_str(id);
+    let attr = json_str(REVEAL_ATTR);
     if !on {
         return format!(
             "(function(){{var s=window[{key}];if(!s)return;s.obs.disconnect();s.st.remove();\
-             if(s.onPlay)document.removeEventListener('play',s.onPlay,true);delete window[{key}];}})();"
+             if(s.onPlay)document.removeEventListener('play',s.onPlay,true);\
+             if(s.onMove){{document.removeEventListener('pointermove',s.onMove,true);\
+             document.removeEventListener('scroll',s.onScroll,true);document.removeEventListener('mouseout',s.onOut,true);\
+             if(s.raf)cancelAnimationFrame(s.raf);s.rev.forEach(function(e){{e.removeAttribute({attr});}});}}\
+             delete window[{key}];}})();"
         );
     }
+    // Pointer tracker: marks every media element under the pointer (also
+    // under overlays, which `:hover` misses), at most once per frame. Video
+    // boxes are also checked by geometry, since players often put a layer
+    // with `pointer-events:none` or their controls over the video.
     let pause = if pause_media {
         format!(
-            "s.onPlay=function(e){{var t=e.target;if(t&&t.matches&&t.matches({sel})&&!t.matches(':hover')&&t.pause)t.pause();}};\
+            "var sel={sel};s.rev=[];s.raf=0;s.x=null;\
+             s.mark=function(){{s.raf=0;var on=[];if(s.x!==null){{\
+             var els=document.elementsFromPoint?document.elementsFromPoint(s.x,s.y):[];\
+             for(var i=0;i<els.length;i++){{var e=els[i];if(e.matches&&e.matches(sel))on.push(e);}}\
+             document.querySelectorAll('video').forEach(function(v){{if(on.indexOf(v)>=0)return;var r=v.getBoundingClientRect();\
+             if(s.x>=r.left&&s.x<=r.right&&s.y>=r.top&&s.y<=r.bottom)on.push(v);}});}}\
+             s.rev.forEach(function(e){{if(on.indexOf(e)<0)e.removeAttribute({attr});}});\
+             on.forEach(function(e){{if(!e.hasAttribute({attr}))e.setAttribute({attr},'');}});s.rev=on;}};\
+             s.queue=function(){{if(!s.raf)s.raf=requestAnimationFrame(s.mark);}};\
+             s.onMove=function(e){{if(e.pointerType==='touch')return;s.x=e.clientX;s.y=e.clientY;s.queue();}};\
+             s.onScroll=function(){{if(s.x!==null)s.queue();}};\
+             s.onOut=function(e){{if(!e.relatedTarget){{s.x=null;s.queue();}}}};\
+             document.addEventListener('pointermove',s.onMove,{{passive:true,capture:true}});\
+             document.addEventListener('scroll',s.onScroll,{{passive:true,capture:true}});\
+             document.addEventListener('mouseout',s.onOut,true);\
+             s.shown=function(t){{return t.matches(':hover')||t.hasAttribute({attr});}};\
+             s.onPlay=function(e){{var t=e.target;if(t&&t.matches&&t.matches(sel)&&!s.shown(t)&&t.pause)t.pause();}};\
              document.addEventListener('play',s.onPlay,true);\
-             document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!v.matches(':hover'))v.pause();}});",
+             document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!s.shown(v))v.pause();}});",
             sel = json_str(MEDIA_SELECTOR)
         )
     } else {
@@ -468,5 +516,32 @@ mod tests {
         let js = scroll_to_heading_js(12);
         assert!(js.contains("[12]"));
         assert!(js.contains("scrollIntoView"));
+        assert!(js.contains("e.animate("), "the heading is highlighted after scrolling");
+    }
+
+    #[test]
+    fn hidden_media_fades_in_and_is_revealed_under_overlays() {
+        // Same filter functions in the same order, so the change animates.
+        let hidden = "filter:grayscale(1) contrast(0) brightness(1.57)";
+        let shown = "filter:grayscale(1) contrast(1) brightness(1)";
+        assert!(NO_MEDIA_CSS.contains(hidden) && NO_MEDIA_CSS.contains(shown));
+        assert!(NO_MEDIA_CSS.contains("transition:filter"));
+        assert!(NO_MEDIA_CSS.contains(&format!("[{REVEAL_ATTR}]")));
+        let on = style_js("__snorkle_no_images", NO_MEDIA_CSS, true, true);
+        assert!(on.contains("elementsFromPoint") && on.contains("addEventListener('pointermove'"));
+        assert!(on.contains("hasAttribute(\"data-snorkle-reveal\")"), "revealed video may play");
+        let off = style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true);
+        assert!(off.contains("removeEventListener('pointermove'") && off.contains("removeAttribute("));
+        assert!(!style_js("__snorkle_grayscale", GRAYSCALE_CSS, true, false).contains("pointermove"));
+    }
+
+    #[test]
+    fn sample_reports_sections() {
+        let sample = r#"{"sample":[{"tag":"span","cls":[],"fs":13,"fw":700,"up":true,"parent":"div","pcls":[],"sec":"section.opinion [Opinion]","text":"Opinion"}],"base":16}"#;
+        let Some(HeadingsReport::Sample(clean)) = parse_report(sample) else { panic!("sample") };
+        let v: serde_json::Value = serde_json::from_str(&clean).unwrap();
+        assert_eq!(v["candidates"][0]["sec"], "section.opinion [Opinion]");
+        assert_eq!(v["candidates"][0]["up"], true);
+        assert!(headings_sample_js().contains("function sec(e)"));
     }
 }

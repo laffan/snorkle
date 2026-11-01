@@ -4,10 +4,13 @@
 //! Security assumptions:
 //! - Content views are added as subviews of the Tauri window's root view,
 //!   *after* (above) the chrome's webview, inside a container that clips to
-//!   the content area the chrome reports (outside its toolbar strip, sidebar
-//!   and docked panels). A page therefore cannot draw over
-//!   the address bar; the chrome hides content views (via `HideView`)
-//!   whenever it shows anything that overlaps the content area.
+//!   the content area the chrome reports (outside its sidebar and docked
+//!   panels). The URL pill floats over the content area: the chrome reports
+//!   its rectangle (and those of its popups and toasts) as holes, and every
+//!   container and the sheet backdrop are masked there and do not take
+//!   touches there (`keys.rs`), so the chrome underneath shows through and
+//!   a page cannot draw over the address bar. Anything else the chrome
+//!   shows over the content area hides content views (via `HideView`).
 //! - Configurations are built only from `CONTENT_VIEW_SPEC`; no URL scheme
 //!   handlers are installed. User scripts and the console handler (only
 //!   while console capture is on) are installed by `injection.rs`.
@@ -42,13 +45,14 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSDate, NSDictionary, NSSet, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
-    NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSString, NSURLRequest,
-    NSURL, NSUUID,
+    NSDate, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
+    NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSSet, NSString,
+    NSURLRequest, NSURL, NSUUID,
 };
+use objc2_quartz_core::{kCAFillRuleEvenOdd, CAShapeLayer};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDidEnterBackgroundNotification, UIApplicationDidReceiveMemoryWarningNotification,
-    UIColor, UIControlEvents, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
+    UIBezierPath, UIColor, UIControlEvents, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
 };
 use objc2_web_kit::{
     WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController, WKWebViewConfiguration, WKWebsiteDataStore,
@@ -58,15 +62,15 @@ use objc2_web_kit::{
     WKWebsiteDataTypeServiceWorkerRegistrations, WKWebsiteDataTypeSessionStorage, WKWebsiteDataTypeWebSQLDatabases,
 };
 use snorkle_core::browser::{AfterCreate, Effect, Pane};
-use snorkle_core::userscripts::Injection;
 use snorkle_core::os::OsVersion;
 use snorkle_core::policy::INTERNAL_SCHEMES;
 use snorkle_core::tabs::{Profile, TabId};
+use snorkle_core::userscripts::Injection;
 use url::Url;
 
 use self::bindings::WKWebView;
 use self::delegates::{NavDelegate, Observer, RefreshTarget, TabIvars, TapFocus, UiDelegate, KVO_KEYS};
-use crate::{clamp_inset, ContentEvents, DataKind, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
+use crate::{clamp_inset, ContentEvents, DataKind, Hole, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
 
 // Adding any page-to-native channel requires writing installation code
 // here, which this assertion forces to be a deliberate, reviewed change.
@@ -127,6 +131,8 @@ pub struct ContentHost {
     console: bool,
     /// Dims the content area under a popup sheet and swallows its touches.
     backdrop: Retained<UIView>,
+    /// Where the chrome floats over the content area (window coordinates).
+    holes: keys::Holes,
 }
 
 impl ContentHost {
@@ -161,7 +167,9 @@ impl ContentHost {
         ));
 
         menu::install(mtm, events.clone());
-        let backdrop = UIView::new(mtm);
+        let holes = keys::Holes::default();
+        // A container too, so it also leaves the holes (and their touches) out.
+        let backdrop = keys::KeyContainer::new_view(mtm, CGRect::ZERO, events.clone(), holes.clone());
         backdrop.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(0.0, 0.45)));
         backdrop.setHidden(true);
         root.addSubview(&backdrop);
@@ -169,6 +177,7 @@ impl ContentHost {
         ContentHost {
             mtm,
             backdrop,
+            holes,
             root,
             top: Cell::new(0.0),
             left: Cell::new(0.0),
@@ -239,7 +248,7 @@ impl ContentHost {
         let sheet = self.views.values().find(|v| v.pane.get() == Pane::Sheet && !v.container.isHidden());
         match sheet {
             Some(v) => {
-                self.backdrop.setFrame(self.content_frame());
+                self.place(&self.backdrop, self.content_frame());
                 self.root.bringSubviewToFront(&self.backdrop);
                 self.root.bringSubviewToFront(&v.container);
                 self.backdrop.setHidden(false);
@@ -253,16 +262,37 @@ impl ContentHost {
     /// edge of the docked tab sidebar (0 when collapsed), `right` the width
     /// of a docked right panel (site scripts, headers), `bottom` the height
     /// of the docked console (0 when closed). Content containers never
-    /// extend over any of them.
-    pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64) {
+    /// extend over any of them. `holes` are where the chrome floats over
+    /// the content area (see the module docs).
+    pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64, holes: Vec<Hole>) {
+        let before = self.content_frame().size.width;
         self.top.set(top);
         self.left.set(left);
         self.right.set(right);
         self.bottom.set(bottom);
+        let b = self.root.bounds();
+        *self.holes.borrow_mut() = crate::sanitize_holes(&holes, b.size.width, b.size.height);
+        let grew = self.content_frame().size.width > before + 0.5;
         for v in self.views.values() {
-            v.container.setFrame(self.pane_frame(v.pane.get()));
+            self.place(&v.container, self.pane_frame(v.pane.get()));
+            if grew {
+                // WebKit re-lays out the page asynchronously; check once it has.
+                unsafe {
+                    let _: () = msg_send![&*v.container, performSelector: sel!(snorkleFitWidth), withObject: Option::<&AnyObject>::None, afterDelay: 0.35f64];
+                }
+            }
         }
         self.sync_backdrop();
+    }
+
+    /// Sets a container's frame (and its web view's, which normally follows
+    /// by autoresizing) and cuts the holes out of it.
+    fn place(&self, view: &UIView, frame: CGRect) {
+        view.setFrame(frame);
+        for sub in view.subviews().iter() {
+            sub.setFrame(view.bounds());
+        }
+        apply_mask(view, &self.holes.borrow());
     }
 
     /// Replaces everything injected (user scripts, view modes with per-tab
@@ -295,6 +325,15 @@ impl ContentHost {
     pub fn sample_headings(&mut self, tab: TabId) {
         if let Some(v) = self.views.get(&tab) {
             injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::headings_sample_js());
+        }
+    }
+
+    /// Reads `tab`'s page for the AI chat (title, visible text, selection;
+    /// `snorkle_core::ai::PAGE_TEXT_JS`). `done` runs on the main thread.
+    pub fn read_page_text(&mut self, tab: TabId, done: crate::TextDone) {
+        match self.views.get(&tab) {
+            Some(v) => injection::read_now(self.mtm, &v.web, snorkle_core::ai::PAGE_TEXT_JS, done),
+            None => done(None),
         }
     }
 
@@ -402,7 +441,7 @@ impl ContentHost {
                 Effect::ShowView { tab, pane } => {
                     if let Some(v) = self.views.get(tab) {
                         v.pane.set(*pane);
-                        v.container.setFrame(self.pane_frame(*pane));
+                        self.place(&v.container, self.pane_frame(*pane));
                         self.root.bringSubviewToFront(&v.container);
                         v.container.setHidden(false);
                         set_corner_radius(&v.container, if *pane == Pane::Sheet { 12.0 } else { 0.0 });
@@ -513,13 +552,14 @@ impl ContentHost {
         let WebViewParts { web, nav, ui, kvo } = parts;
         let controller = web.configuration().userContentController();
         let frame = self.content_frame();
-        let container = keys::KeyContainer::new_view(mtm, frame, self.events.clone());
+        let container = keys::KeyContainer::new_view(mtm, frame, self.events.clone(), self.holes.clone());
         container.setClipsToBounds(true);
         container.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight);
         container.setHidden(true);
         web.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), frame.size));
 
         container.addSubview(&web);
+        apply_mask(&container, &self.holes.borrow());
         self.root.addSubview(&container);
         injection::install(mtm, &controller, self.scripts_for(tab));
         rules::register(tab, controller.clone());
@@ -645,6 +685,40 @@ impl Drop for ContentHost {
         for o in &self.observers {
             unsafe { center.removeObserver(AsRef::<AnyObject>::as_ref(&**o)) };
         }
+    }
+}
+
+/// Masks `view` (a direct subview of the root view) so the holes that
+/// intersect it are not drawn; no mask when none does. Holes never overlap
+/// (`sanitize_holes` merges them), as the even-odd fill requires.
+fn apply_mask(view: &UIView, holes: &[Hole]) {
+    let f = view.frame();
+    let b = view.bounds();
+    let local: Vec<(CGRect, f64)> = holes
+        .iter()
+        .map(|h| (CGRect::new(CGPoint::new(h.x - f.origin.x, h.y - f.origin.y), CGSize::new(h.w, h.h)), h.r))
+        .filter(|(r, _)| {
+            r.origin.x < b.size.width
+                && r.origin.y < b.size.height
+                && r.origin.x + r.size.width > 0.0
+                && r.origin.y + r.size.height > 0.0
+        })
+        .collect();
+    let layer = view.layer();
+    if local.is_empty() {
+        unsafe { layer.setMask(None) };
+        return;
+    }
+    let path = UIBezierPath::bezierPathWithRect(b);
+    for (rect, radius) in &local {
+        path.appendPath(&UIBezierPath::bezierPathWithRoundedRect_cornerRadius(*rect, *radius));
+    }
+    let mask = CAShapeLayer::layer();
+    mask.setFrame(b);
+    mask.setPath(Some(&path.CGPath()));
+    unsafe {
+        mask.setFillRule(kCAFillRuleEvenOdd);
+        layer.setMask(Some(&mask));
     }
 }
 

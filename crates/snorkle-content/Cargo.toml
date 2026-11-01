@@ -24,8 +24,11 @@ objc2-foundation = { version = "=0.3.2", features = [
   "NSObject", "NSOperation", "NSProcessInfo", "NSSet", "NSString", "NSURL", "NSURLRequest",
   "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLSession", "NSURLRequest", "NSURLResponse", "NSUUID", "NSValue", "NSData",
 ] }
+# Cutting the floating URL pill out of content views (layer mask).
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "CALayer", "CAShapeLayer"] }
+objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["std", "CGPath"] }
 objc2-ui-kit = { version = "=0.3.2", features = [
-  "std", "objc2-core-foundation", "UIApplication", "UIResponder", "UIView", "UIScrollView",
+  "std", "objc2-core-foundation", "objc2-quartz-core", "objc2-core-graphics", "UIBezierPath", "UIApplication", "UIResponder", "UIView", "UIScrollView",
   "UIGestureRecognizer", "UITapGestureRecognizer", "UIKeyCommand", "UICommand", "UIMenuElement", "UIMenu",
   "UIMenuBuilder", "UIMenuSystem", "UIControl", "UIRefreshControl",
   "UIImage", "UIColor", "UIGraphicsRenderer", "UIGraphicsImageRenderer",

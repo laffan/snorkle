@@ -13,7 +13,11 @@
 //! - User scripts and view modes run in WebKit's isolated default client
 //!   world, main frame only, so pages cannot see or call them, and cannot
 //!   send anything back. `evaluateJavaScript` is called without a
-//!   completion handler, so no page-influenced value is ever read back.
+//!   completion handler, so no page-influenced value is read back, with one
+//!   exception (channel C17, owner request 2026-11-01): [`read_now`] runs
+//!   the constant `snorkle_core::ai::PAGE_TEXT_JS` when the user sends an
+//!   AI chat message and reads back its string result only, truncated to
+//!   `MAX_PAGE_TEXT_BYTES`; `snorkle_core::ai::parse_page_text` parses it.
 //! - Exception, only while console capture is on: the console hook runs in
 //!   the page world of every frame and posts to one message handler, which
 //!   pages can also call directly. The handler accepts string bodies only
@@ -40,8 +44,8 @@ use objc2_web_kit::{
     WKUserScriptInjectionTime,
 };
 use snorkle_core::console::{PAGE_HANDLER_NAME, PAGE_HOOK_JS};
-use snorkle_core::viewmodes::HEADINGS_HANDLER_NAME;
 use snorkle_core::userscripts::{InjectAt, Injection};
+use snorkle_core::viewmodes::HEADINGS_HANDLER_NAME;
 
 use super::bindings::WKWebView;
 use crate::ContentEvents;
@@ -203,11 +207,47 @@ pub fn install(mtm: MainThreadMarker, controller: &WKUserContentController, scri
             controller.addUserScript(&c.hook);
         }
         if let Some(h) = &scripts.2 {
-            controller.addScriptMessageHandler_contentWorld_name(ProtocolObject::from_ref(&**h), &client, &headings_name);
+            controller.addScriptMessageHandler_contentWorld_name(
+                ProtocolObject::from_ref(&**h),
+                &client,
+                &headings_name,
+            );
         }
         for s in &scripts.0 {
             controller.addUserScript(s);
         }
+    }
+}
+
+/// Runs constant code in the main frame, client world, and hands its
+/// result to `done` if it is a string (page-controlled, truncated to
+/// `MAX_PAGE_TEXT_BYTES` at a character boundary); otherwise `None`.
+/// WebKit calls the completion once, on the main thread.
+pub fn read_now(mtm: MainThreadMarker, web: &WKWebView, source: &str, done: crate::TextDone) {
+    let done = std::cell::Cell::new(Some(done));
+    let block = block2::RcBlock::new(move |result: *mut AnyObject, _error: *mut NSError| {
+        let Some(done) = done.take() else { return };
+        let text = unsafe { result.as_ref() }.and_then(|r| r.downcast_ref::<NSString>()).map(|s| {
+            let mut t = s.to_string();
+            if t.len() > crate::MAX_PAGE_TEXT_BYTES {
+                let mut end = crate::MAX_PAGE_TEXT_BYTES;
+                while !t.is_char_boundary(end) {
+                    end -= 1;
+                }
+                t.truncate(end);
+            }
+            t
+        });
+        done(text);
+    });
+    unsafe {
+        let world = WKContentWorld::defaultClientWorld(mtm);
+        web.evaluateJavaScript_inFrame_inContentWorld_completionHandler(
+            &NSString::from_str(source),
+            None,
+            &world,
+            Some(&*block),
+        );
     }
 }
 
@@ -216,6 +256,11 @@ pub fn install(mtm: MainThreadMarker, controller: &WKUserContentController, scri
 pub fn run_now(mtm: MainThreadMarker, web: &WKWebView, source: &str) {
     unsafe {
         let world = WKContentWorld::defaultClientWorld(mtm);
-        web.evaluateJavaScript_inFrame_inContentWorld_completionHandler(&NSString::from_str(source), None, &world, None);
+        web.evaluateJavaScript_inFrame_inContentWorld_completionHandler(
+            &NSString::from_str(source),
+            None,
+            &world,
+            None,
+        );
     }
 }

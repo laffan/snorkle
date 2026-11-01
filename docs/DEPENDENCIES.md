@@ -28,6 +28,7 @@ Policy:
 | objc2 / block2 | =0.6.5 / =0.6.2 | content (iOS) | ObjC runtime, blocks (same versions as wry) |
 | objc2-foundation / -ui-kit / -web-kit / -core-foundation | =0.3.2 | content (iOS) | Framework bindings (same versions as wry) |
 | objc2-security | =0.3.2 (features `SecBase`, `SecItem`) | content (iOS) | Keychain items for AI API keys (2026-10-30). Already in wry's graph at this version; no new crate. |
+| objc2-quartz-core / objc2-core-graphics | =0.3.2 (features `CALayer`, `CAShapeLayer` / `CGPath`); plus `objc2-ui-kit` feature `UIBezierPath` | content (iOS) | Layer mask that cuts the floating URL pill (and its popup and toasts) out of content views (2026-11-01). Already in wry's graph at this version; no new crate. |
 | libfuzzer-sys | =0.4.13 | fuzz (separate workspace) | cargo-fuzz harness |
 
 Graph size (normal edges): `snorkle-core` 60 crates; the iOS app 244 crates, almost all from

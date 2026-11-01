@@ -38,6 +38,7 @@
     "allow-set-tab-view-exempt",
     "allow-set-tab-headers",
     "allow-get-headings",
+    "allow-ai-chat",
     "allow-scroll-to-heading",
     "allow-clear-website-data",
     "allow-ai-status",

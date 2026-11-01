@@ -11,8 +11,8 @@
 //! - Disk writes happen on a dedicated storage thread.
 
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -246,9 +246,11 @@ impl Shared {
                 | Effect::DestroyView { tab, .. }
                 | Effect::ShowView { tab, .. }
                 | Effect::Load { tab, .. } => Some(*tab),
-                Effect::HideView(t) | Effect::GoBack(t) | Effect::GoForward(t) | Effect::Reload(t) | Effect::Stop(t) => {
-                    Some(*t)
-                }
+                Effect::HideView(t)
+                | Effect::GoBack(t)
+                | Effect::GoForward(t)
+                | Effect::Reload(t)
+                | Effect::Stop(t) => Some(*t),
                 _ => None,
             };
             if cfg!(debug_assertions) {
@@ -343,6 +345,12 @@ impl ContentEvents for Events {
     }
     fn new_window_request(&self, opener: TabId, url: Url) {
         self.apply(|b| b.on_new_window_request(opener, &url, now_ms()));
+    }
+    fn background_tab_requested(&self, opener: TabId, url: Url) {
+        let (tab, effects) = self.shared.browser().on_background_tab_request(opener, &url, now_ms());
+        let result = tab.map_or("refused".to_string(), |t| format!("tab {}", t.0));
+        self.shared.log(console::Level::Info, Some(opener), &format!("background tab {url} -> {result}"));
+        self.shared.run(effects);
     }
     fn popup_requested(&self, opener: TabId, url: Option<Url>, style: PopupStyle) -> Option<TabId> {
         let (tab, effects) = self.shared.browser().open_popup(opener, url.as_ref(), style, now_ms());

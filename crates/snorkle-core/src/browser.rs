@@ -55,7 +55,10 @@ pub enum Effect {
         keep_state: bool,
     },
     /// Show the tab's web view in the given part of the content area.
-    ShowView { tab: TabId, pane: Pane },
+    ShowView {
+        tab: TabId,
+        pane: Pane,
+    },
     HideView(TabId),
     Load {
         tab: TabId,
@@ -422,7 +425,12 @@ impl Browser {
             None => return,
         };
         if let Some(url) = restore {
-            self.ensure_live(id, AfterCreate::Restore { fallback: Some(url.clone()) }, Some((url, Source::History)), out);
+            self.ensure_live(
+                id,
+                AfterCreate::Restore { fallback: Some(url.clone()) },
+                Some((url, Source::History)),
+                out,
+            );
         }
     }
 
@@ -502,8 +510,7 @@ impl Browser {
     /// already shows it, so opening it always goes back to its own page.
     /// `key` is the pin's or bookmark's stored URL.
     pub fn open_launcher(&mut self, key: &str, url: Url, now: u64) -> (TabId, Vec<Effect>) {
-        let existing =
-            self.tabs.iter().find(|t| t.launcher.as_deref() == Some(key) && !t.is_private()).map(|t| t.id);
+        let existing = self.tabs.iter().find(|t| t.launcher.as_deref() == Some(key) && !t.is_private()).map(|t| t.id);
         if let Some(id) = existing {
             let mut out = self.activate(id, now);
             let shown = self.tab(id).and_then(|t| t.committed_url.clone());
@@ -796,8 +803,12 @@ impl Browser {
         let profile = op.profile;
         let initiator = op.committed_url.clone();
         if let Some(url) = url {
-            let req =
-                Request { url, frame: Frame::Main, source: Source::Page { user_gesture: true }, initiator: initiator.as_ref() };
+            let req = Request {
+                url,
+                frame: Frame::Main,
+                source: Source::Page { user_gesture: true },
+                initiator: initiator.as_ref(),
+            };
             match policy::decide(&req, self.exceptions(profile)) {
                 // http is upgraded by the popup's own navigation policy.
                 Decision::Allow | Decision::UpgradeToHttps(_) => {}
@@ -830,6 +841,45 @@ impl Browser {
             Some(t) if t.opener.is_some() => self.close(id, now),
             _ => Vec::new(),
         }
+    }
+
+    /// ⌘-click on a link: opens `url` in a new tab right after `opener`, in
+    /// the opener's profile, without switching to it. Only http(s) URLs;
+    /// they go through the navigation policy as a page link with a user
+    /// gesture (blocked links open nothing; http is upgraded). The new tab
+    /// loads in the background, within the live-view budget.
+    pub fn on_background_tab_request(&mut self, opener: TabId, url: &Url, now: u64) -> (Option<TabId>, Vec<Effect>) {
+        let mut out = Vec::new();
+        let Some(op) = self.tab(opener) else { return (None, out) };
+        // Only web pages: `javascript:` and friends run in the page that
+        // asked, never in a new tab.
+        if !self.os.allows_browsing() || !matches!(url.scheme(), "http" | "https") {
+            return (None, out);
+        }
+        let profile = op.profile;
+        let initiator = op.committed_url.clone();
+        let source = Source::Page { user_gesture: true };
+        let req = Request { url, frame: Frame::Main, source, initiator: initiator.as_ref() };
+        let (target, upgraded) = match policy::decide(&req, self.exceptions(profile)) {
+            Decision::Allow => (url.clone(), false),
+            Decision::UpgradeToHttps(u) => (u, true),
+            Decision::External(_) | Decision::Block(_) => return (None, out),
+        };
+        let id = self.alloc_id();
+        let insert_at = self.tabs.iter().position(|t| t.id == opener).map(|i| i + 1).unwrap_or(self.tabs.len());
+        // `last_active_ms = now`: most recently used after the shown tabs,
+        // so the budget keeps it live (it discards older background tabs).
+        let mut tab = Tab::new(id, profile, now);
+        if upgraded {
+            tab.https.http_url = Some(url.clone());
+            tab.https.upgrades = 1;
+        }
+        self.tabs.insert(insert_at, tab);
+        self.load(id, target, source, &mut out);
+        self.enforce_budget(now, &mut out);
+        self.sync_visibility(&mut out);
+        out.push(Effect::NotifyChrome);
+        (Some(id), out)
     }
 
     pub fn on_new_window_request(&mut self, opener: TabId, url: &Url, now: u64) -> Vec<Effect> {
@@ -1063,8 +1113,7 @@ impl Browser {
             .map(|t| (t.last_active_ms, t.id))
             .collect();
         background.sort_by_key(|b| std::cmp::Reverse(b.0)); // most recently used first
-        let protected =
-            self.tabs.iter().filter(|t| t.life == Life::Live && self.is_protected(t.id)).count().max(1);
+        let protected = self.tabs.iter().filter(|t| t.life == Life::Live && self.is_protected(t.id)).count().max(1);
         let allowed = self.budget.max_live.saturating_sub(protected);
         for (i, (last, id)) in background.into_iter().enumerate() {
             if i >= allowed || now.saturating_sub(last) > self.budget.background_ttl_ms {
@@ -1111,7 +1160,10 @@ impl Browser {
             if self.tab(sheet).is_some_and(|t| t.notice.is_some()) {
                 return Vec::new();
             }
-            return [(opener, Pane::Full), (sheet, Pane::Sheet)].into_iter().filter(|(t, _)| self.showable(*t)).collect();
+            return [(opener, Pane::Full), (sheet, Pane::Sheet)]
+                .into_iter()
+                .filter(|(t, _)| self.showable(*t))
+                .collect();
         }
         let wanted = match (self.split_view(), self.active) {
             (Some(s), _) => vec![(s.left, Pane::Left), (s.right, Pane::Right)],

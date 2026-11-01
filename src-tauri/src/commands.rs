@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use snorkle_core::browser::ChromeState;
 use snorkle_core::input::InputError;
 use snorkle_core::tabs::{Profile, TabId};
@@ -102,13 +102,32 @@ pub fn dismiss_notice(s: S<'_>, tab: u64) {
     with_browser(&s, |b| b.dismiss_notice(TabId(tab)));
 }
 
-/// `top`: bottom edge of the toolbar, `left`: right edge of the docked tab
-/// sidebar (0 when collapsed), both in CSS px (= points). `overlay`: the
-/// chrome is showing UI over the content area (menus, the sidebar in narrow
-/// windows), so content must be hidden.
+/// A rectangle where the chrome floats over the content area (CSS px =
+/// points, window coordinates) and its corner radius.
+#[derive(Deserialize)]
+pub struct HoleArg {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    r: f64,
+}
+
+/// `top`: bottom of the status bar, `left`: right edge of the docked tab
+/// sidebar (0 when collapsed), `right`: width of a docked right panel,
+/// `bottom`: height of the docked console, all in CSS px (= points).
+/// `overlay`: the chrome is showing UI over the content area (menus, the
+/// sidebar in narrow windows), so content must be hidden. `holes`: where
+/// the URL pill, its popups and toasts float over the content area; pages
+/// are cut out there (validated and bounded by the content host).
 #[tauri::command]
-pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, right: f64, bottom: f64, overlay: bool) {
-    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, right, bottom)));
+pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, right: f64, bottom: f64, overlay: bool, holes: Vec<HoleArg>) {
+    let holes: Vec<snorkle_content::Hole> = holes
+        .into_iter()
+        .take(snorkle_content::MAX_HOLES)
+        .map(|h| snorkle_content::Hole { x: h.x, y: h.y, w: h.w, h: h.h, r: h.r })
+        .collect();
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, right, bottom, holes)));
     with_browser(&s, |b| b.set_chrome_overlay(overlay));
 }
 
@@ -281,7 +300,8 @@ pub struct ViewModesState {
 }
 
 fn view_modes_state(s: &S<'_>) -> ViewModesState {
-    let exempt = s.exempt().iter().filter(|(_, k)| !k.is_empty()).map(|(t, k)| (t.0, k.iter().copied().collect())).collect();
+    let exempt =
+        s.exempt().iter().filter(|(_, k)| !k.is_empty()).map(|(t, k)| (t.0, k.iter().copied().collect())).collect();
     let headers_tabs = s.headers_tabs().iter().map(|t| t.0).collect();
     ViewModesState { modes: s.view_modes(), exempt, headers_tabs }
 }

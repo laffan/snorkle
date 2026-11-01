@@ -34,8 +34,8 @@
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="spacer"></span>
-      <button id="color" class="icon" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
-      <button id="images" class="icon" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/></svg></button>
+      <button id="color" class="icon mode" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
+      <button id="images" class="icon mode" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/></svg></button>
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
       <button id="menu-new-tab" role="menuitem">New Tab <span class="kbd">⌘T</span></button>
@@ -53,9 +53,11 @@
     <div id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
   </aside>
 
-  <!-- URL bar: a pill in a strip along the bottom of the window. Pages are
-       native views drawn above the chrome, so the strip is reserved
-       (the page ends above it); nothing here overlaps a page. -->
+  <!-- URL bar: a pill floating over the bottom of the page. Pages are
+       native views drawn above the chrome, so the pill, its popup and the
+       toasts are reported as holes (reportLayout): the page is cut out
+       there and the chrome shows through. The strip itself is transparent
+       and takes no input; the page shows (and is used) around the pill. -->
   <header id="chrome">
     <div id="os-banner" class="banner" hidden></div>
     <div id="toast" class="toast" role="status" hidden></div>
@@ -77,14 +79,17 @@
                enterkeyhint="go" placeholder="Search or enter address" aria-label="Search or enter address" hidden>
       </div>
       <div id="actions" class="page-actions">
-        <button id="actions-toggle" class="icon" aria-expanded="false" aria-controls="actions-items" aria-label="Page actions" title="Ads, bookmark, site scripts"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
-        <span id="actions-items" class="actions-items" hidden>
-          <button id="shield" class="pillbtn" aria-label="Ad blocking for this site"></button>
-          <button id="bookmark" class="icon" aria-label="Bookmark this page">&#x2606;</button>
-          <button id="scripts-btn" class="icon text" aria-label="Site scripts and styles" aria-haspopup="dialog">{ }</button>
-        </span>
+        <button id="actions-toggle" class="icon" aria-expanded="false" aria-controls="actions-pop" aria-haspopup="menu" aria-label="Page actions" title="Ads, bookmark, site scripts"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+        <!-- Floats over the page (a hole, like the pill). -->
+        <div id="actions-pop" class="popup actions-pop" role="menu" aria-label="Page actions" hidden>
+          <button id="shield" role="menuitem"><span class="label"></span><span class="state"></span></button>
+          <button id="bookmark" role="menuitem"><span class="label">Bookmark</span><span class="state">&#x2606;</span></button>
+          <div class="menu-sep" role="separator"></div>
+          <button id="scripts-btn" role="menuitem" aria-haspopup="dialog"><span class="label">Site Scripts</span><span class="state">{ }</span></button>
+        </div>
       </div>
-      <button id="headers" class="icon" aria-label="Headers view for this tab" title="Headers view (this tab)" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M8 12h12M12 18h8"/></svg></button>
+      <button id="headers" class="icon mode" aria-label="Headers view for this tab" title="Headers view (this tab)" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M8 12h12M12 18h8"/></svg></button>
+      <button id="chat-btn" class="icon mode" aria-label="Chat about this page" title="AI chat about this page" aria-pressed="false" aria-controls="chat"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-11.1 6.6L4 19.5l1.4-4.4A7.5 7.5 0 1 1 20 11.5z"/></svg></button>
       <button id="unsplit" class="pillbtn" hidden title="Close split view">Unsplit</button>
       <button id="sheet-close" class="pillbtn" hidden title="Close this pop-up window and return to the page">Close Pop-up</button>
       <div id="progress"><div id="progress-bar"></div></div>
@@ -145,11 +150,11 @@
         <section data-panel="general">
           <div class="option"><div>
             <div class="option-title">View modes</div>
-            <div class="muted small">Black and white, and hiding images and video, are on at every launch. Tap a mode button in the sidebar to change it for all tabs; long-press it to turn it off for the current tab only. The headers view lists the page's headings beside it.</div>
+            <div class="muted small">Black and white, and hiding images and video, are on at every launch. Tap a mode button in the sidebar to change it for all tabs; long-press it to turn it off for the current tab only. A dot under a button means the mode is on (a ring: off for this tab). The headers view lists the page's headings beside it; the chat button beside it opens an AI chat about the page.</div>
           </div></div>
           <div class="option"><div>
             <div class="option-title">Keyboard</div>
-            <div class="muted small">⌘T new tab (search open tabs and bookmarks) · ⌘S show or hide the sidebar · ⌘1–⌘5 the first pins, bookmarks and tabs.</div>
+            <div class="muted small">⌘T new tab (search open tabs and bookmarks) · ⌘S show or hide the sidebar · ⌘1–⌘5 the first pins, bookmarks and tabs · ⌘-click a link to open it in a background tab.</div>
           </div></div>
           <div class="option"><div>
             <div class="option-title">Ad and tracker blocking</div>
@@ -157,7 +162,7 @@
           </div></div>
         </section>
         <section data-panel="ai" hidden>
-          <p class="muted small">Connect your own API account to let AI help write site scripts. Keys are kept in the iOS Keychain on this device only and are never shown again. Requests go directly to the provider and contain the site's domain, its site script and what you type, never the page itself.</p>
+          <p class="muted small">Connect your own API account to use AI for site scripts, Detect Headers and page chat. Keys are kept in the iOS Keychain on this device only and are never shown again. Requests go directly to the provider. Site scripts send the site's domain, its script and what you type; Detect Headers sends short snippets of the page's headline-like text; each chat message sends the page's address, title, visible text and selection.</p>
         <div class="ai-provider" data-provider="anthropic">
           <div class="ai-head"><span class="option-title">Anthropic</span><span class="ai-state muted small"></span></div>
           <div class="ai-row">
@@ -309,6 +314,26 @@
     </div>
     <p id="outline-msg" class="muted small" role="status" hidden></p>
     <ol id="outline-list" class="outline-list"></ol>
+  </aside>
+
+  <!-- AI chat about the current page, docked right of the page. Replies
+       are model output: textContent only. -->
+  <aside id="chat" class="sheet chat" aria-labelledby="chat-title" hidden>
+    <div class="modal-head">
+      <h1 id="chat-title">Chat</h1>
+      <button id="chat-new" class="pillbtn" title="Start a new conversation about this page">New</button>
+      <button id="chat-close" class="icon" aria-label="Close chat">&#x00D7;</button>
+    </div>
+    <div class="chat-meta">
+      <select id="chat-model" aria-label="Model"></select>
+      <span id="chat-cost" class="muted small" title="Estimated from published prices; your provider's billing page is authoritative"></span>
+    </div>
+    <p id="chat-note" class="muted small"></p>
+    <ol id="chat-log" class="chat-log" aria-live="polite"></ol>
+    <form id="chat-form" class="chat-form">
+      <textarea id="chat-input" rows="2" placeholder="Ask about this page" aria-label="Message" autocapitalize="sentences"></textarea>
+      <button id="chat-send" class="button primary" type="submit">Send</button>
+    </form>
   </aside>
 
   <div id="drop-line" hidden></div>

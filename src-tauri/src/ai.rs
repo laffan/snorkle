@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use snorkle_core::ai::{self, Model, Provider, ScriptDraft};
+use snorkle_core::ai::{self, ChatMessage, Model, Provider, ScriptDraft};
 use snorkle_core::console::Level;
 use snorkle_core::storage::AiUsageEvent;
 
@@ -153,6 +153,61 @@ pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: Stri
     }
     crate::scripts::apply(&s, true);
     Ok(rules.len())
+}
+
+/// A page-chat answer, with what the request used.
+#[derive(Serialize)]
+pub struct ChatReply {
+    text: String,
+    input: u64,
+    output: u64,
+    /// Estimated cost in millionths of a dollar; `None` for a model without
+    /// a known price.
+    cost_micros: Option<u64>,
+}
+
+/// AI chat about the tab's page: reads the page's title, visible text and
+/// selection (channel C17) when the user sends a message, and sends them
+/// with the conversation to the provider. The URL comes from the core.
+#[tauri::command]
+pub async fn ai_chat(
+    s: S<'_>,
+    tab: u64,
+    provider: Provider,
+    model: String,
+    messages: Vec<ChatMessage>,
+) -> Result<ChatReply, String> {
+    let tab = snorkle_core::tabs::TabId(tab);
+    let url = s
+        .browser()
+        .tab(tab)
+        .and_then(|t| t.committed_url.clone())
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or("Open a web page first.")?;
+    let key = key(provider)?;
+    let (tx, rx) = mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        crate::state::with_host(|h| h.read_page_text(tab, Box::new(move |t| drop(tx.send(t)))))
+    });
+    let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
+        .await
+        .map_err(|_| "Request failed.".to_string())?;
+    let page = text
+        .ok()
+        .flatten()
+        .and_then(|t| ai::parse_page_text(&t, url.as_str()))
+        .ok_or("The page didn't answer. Wait for it to load and try again.")?;
+    let host = url.host_str().unwrap_or("").to_string();
+    let req = ai::chat_request(provider, &key, &model, &page, &messages)?;
+    let (status, body) = send(&s, provider, Some(&model), &format!("chat about {host} ({model})"), req).await?;
+    let text = ai::parse_chat_reply(provider, status, &body)?;
+    let usage = ai::parse_usage(provider, &body).unwrap_or(ai::Usage { input: 0, output: 0 });
+    Ok(ChatReply {
+        text,
+        input: usage.input,
+        output: usage.output,
+        cost_micros: ai::estimate_cost_micros(provider, &model, usage),
+    })
 }
 
 /// Drafts or revises a site script. The draft is shown in the editor; it

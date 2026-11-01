@@ -239,3 +239,42 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     registrable domain and apply to its subdomains; a site whose layouts differ by section may
     need re-detecting. **[decide]** Pressing the button sends up to 200 short text snippets from
     the page to the AI provider.
+48. **[verify] Floating URL pill** (2026-11-01). Pages now run the full window height and the pill,
+    its ⋯ popup and toasts are cut out of them (layer mask + `pointInside:withEvent:` on the
+    containers, `ios/keys.rs`). Check on device: the pill, popup and toasts are tappable and the
+    page receives taps right next to them; scrolling a page under the pill feels normal (WebKit
+    does not know about the hole, so the page's last lines sit under the pill unless scrolled);
+    the mask follows the sidebar while it is dragged; text selection handles and the keyboard
+    accessory near the bottom edge. With a pointer, the pill is translucent until hovered, so the
+    chrome's background (not the page) shows through it. **[decide]** Whether pages should get a
+    bottom inset (`scrollView.contentInset`) so their end can scroll clear of the pill.
+49. **[verify] ⌘-click** relies on `WKNavigationAction.modifierFlags` (iOS 18.4+, `UIKeyModifierFlags`),
+    read with `msg_send` after `respondsToSelector:`. Check that WebKit sets it for trackpad and
+    mouse clicks with ⌘ held, that links with `target=_blank` arrive with no target frame as
+    assumed, and whether a hidden background view loads before it is shown
+    (`inactiveSchedulingPolicy = .suspend` may defer it until the tab is opened). New background
+    tabs are inserted right after the current tab, so several open in reverse order. ⌘-click on
+    pins, bookmarks and history entries in the chrome is not handled.
+50. **[verify] Content not reflowing after a panel closes.** Reported on device: with the headers
+    view turned off the page kept its narrower width. The chrome reports the new inset correctly
+    (checked in a desktop browser with a mocked bridge), so the cause is assumed to be WebKit
+    keeping the zoom scale it used while the area was narrower (desktop content mode). The host
+    now sets the web view's frame explicitly and, 0.35 s after the area widens, zooms any page
+    whose content is narrower than the view to fill it. Unverified on device; if it persists,
+    log `scrollView.zoomScale`, `minimumZoomScale` and `contentSize` before and after.
+51. **[decide] Page chat** (2026-11-01) sends the page's visible text (≤ 48,000 chars), title, URL and
+    selection to the chosen provider with every message, also in private tabs and on any site
+    (including signed-in pages such as mail). The panel says so; nothing is sent until the user
+    sends a message. Pages can attempt prompt injection through their text; the model is told the
+    page is data, and replies are only displayed, but a reply could still be misleading.
+    Anthropic prompt caching is not used, so long pages cost their full input price each turn,
+    and the estimate equals list price × reported tokens.
+52. **[verify] Hide media on hover** (2026-11-01). The fade animates `filter` between
+    `grayscale(1) contrast(0) brightness(1.57)` and `grayscale(1) contrast(1) brightness(1)` with
+    `transition: … !important`, which overrides the page's own transitions on media elements.
+    The pointer tracker uses `pointermove` (not touch) and `elementsFromPoint`; check its cost on
+    image-heavy pages and that iPad trackpad hover produces pointer events in WKWebView.
+53. **[verify] Detect Headers sections.** The prompt asks for section labels at level 1 and
+    stories at 2–3; the panel groups whenever there are at least two top-level entries with
+    deeper ones under them, which also applies to ordinary pages with several h1s. Rules stored
+    before this change keep their old levels until Detect Headers is pressed again.

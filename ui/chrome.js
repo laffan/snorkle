@@ -24,6 +24,7 @@
   let modalOpen = false;
   let scriptsOpen = false;
   let menuOpen = false;
+  let chatOpen = false;
   let bookmarks = [];
   let pins = [];
   const MAX_PINS = 4;
@@ -85,6 +86,7 @@
     renderViewMode();
     renderToolbar(tab);
     renderSurface(tab);
+    renderChat();
     reportLayout();
   }
 
@@ -239,6 +241,9 @@
     reload.textContent = tab && tab.loading ? '×' : '↻';
     reload.setAttribute('aria-label', tab && tab.loading ? 'Stop' : 'Reload');
     $('bookmark').disabled = !(tab && tab.url && !tab.private);
+    const marked = !!(tab && tab.url && bookmarks.some((b) => b.url === tab.url.full));
+    $('bookmark').querySelector('.label').textContent = marked ? 'Remove Bookmark' : 'Bookmark';
+    $('bookmark').querySelector('.state').textContent = marked ? '\u2605' : '\u2606';
     $('unsplit').hidden = !state.split;
     $('sheet-close').hidden = !state.sheet;
     $('sheet-pill').hidden = !state.sheet;
@@ -528,7 +533,7 @@
       node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'bookmark', url: b.url, index }));
       list.appendChild(node);
     });
-    if (state) renderLauncherSelection();
+    if (state) { renderLauncherSelection(); renderToolbar(activeTab()); }
   }
 
   // ---- drag and drop ------------------------------------------------------
@@ -808,7 +813,7 @@
   function closeMenu() { menuOpen = false; $('menu-pop').hidden = true; syncMenuOpen(); }
   // Keeps the chrome fully opaque while any of its menus is open.
   function syncMenuOpen() {
-    const open = menuOpen || !$('vm-pop').hidden || !!document.querySelector('.drawer-open');
+    const open = menuOpen || !$('vm-pop').hidden || !$('actions-pop').hidden;
     document.body.classList.toggle('menu-open', open);
   }
 
@@ -1010,9 +1015,10 @@
     const has = !!host && scripts.some((s) => s.enabled && (host === s.domain || host.endsWith('.' + s.domain)));
     const b = $('scripts-btn');
     b.classList.toggle('has-script', has);
+    b.querySelector('.state').textContent = has ? 'Active { }' : '{ }';
     b.title = has ? 'Site scripts (active on this site)' : 'Site scripts';
-    // While the drawer is closed, the ring shows on its toggle instead.
-    $('actions-toggle').classList.toggle('has-script', has && $('actions-items').hidden);
+    // While the popup is closed, the ring shows on its toggle instead.
+    $('actions-toggle').classList.toggle('has-script', has && $('actions-pop').hidden);
   }
 
   function loadScripts() {
@@ -1135,28 +1141,33 @@
     // Use the sidebar's layout width (unaffected by the slide transform) so
     // the content area moves once, to its final position.
     const left = sidebarOpen && !narrow ? Math.ceil($('sidebar').offsetWidth) : 0;
-    $('chrome').style.left = left + 'px';
-    // Pages start below the status bar; the URL strip runs along the bottom.
+    // Pages start below the status bar and run to the bottom of the window;
+    // the URL pill floats over them.
     const top = Math.ceil($('safe-top').getBoundingClientRect().height);
-    const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
-    // Native page views are drawn above the chrome, so nothing here can
-    // float over a page: panels either dock beside it (shrinking the
-    // content area) or set `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (narrow && sidebarOpen);
-    // A docked right panel (site scripts) takes the right of the content area.
+    // Native page views are drawn above the chrome. Panels either dock
+    // beside the page (shrinking the content area), float over it as a
+    // hole (the pill, its popup, toasts: the page is cut out there), or set
+    // `overlay`, which hides the page.
+    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (chatOpen && narrow) || (narrow && sidebarOpen);
+    // A docked right panel (site scripts, chat, headers) takes the right of
+    // the content area, full height.
     const dock = rightPanel();
     const right = dock ? Math.min(420, Math.floor((window.innerWidth - left) * 0.45)) : 0;
+    $('chrome').style.left = left + 'px';
+    $('chrome').style.right = right + 'px';
+    const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
     if (dock) {
       dock.style.top = top + 'px';
-      dock.style.bottom = strip + 'px';
+      dock.style.bottom = '0px';
       dock.style.width = right + 'px';
     }
-    // The docked console sits above the URL strip.
+    // The docked console sits above the URL strip; while it is open the
+    // page ends above it (the pill then floats over chrome, not the page).
     const con = $('console');
     con.style.left = left + 'px';
     con.style.right = right + 'px';
     con.style.bottom = strip + 'px';
-    const bottom = strip + (consoleOpen ? Math.ceil(con.getBoundingClientRect().height) : 0);
+    const bottom = consoleOpen ? strip + Math.ceil(con.getBoundingClientRect().height) : 0;
     // The chrome surface (start page, notices) covers the focused pane: in
     // split view that is one half of the content area (matching the native
     // pane frames: 2 pt divider, halves floored).
@@ -1173,16 +1184,36 @@
     s.style.left = sLeft + 'px';
     s.style.right = sRight + 'px';
     s.style.bottom = bottom + 'px';
-    const key = [top, left, right, bottom, overlay].join(':');
+    const holes = overlay ? [] : floatingHoles();
+    const key = JSON.stringify([top, left, right, bottom, overlay, holes]);
     if (key === lastLayout) return;
     lastLayout = key;
-    invoke('set_chrome_layout', { top, left, right, bottom, overlay });
+    invoke('set_chrome_layout', { top, left, right, bottom, overlay, holes });
+  }
+
+  // Chrome that floats over the page: the pill, its popup, toasts and
+  // banners. Each is cut out of the page (window coordinates, rounded to
+  // whole points, 1 pt larger than the element).
+  function floatingHoles() {
+    const out = [];
+    for (const id of ['toolbar', 'actions-pop', 'toast', 'os-banner']) {
+      const e = $(id);
+      if (!e || e.hidden) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      const radius = parseFloat(getComputedStyle(e).borderTopLeftRadius) || 0;
+      const x = Math.floor(r.left) - 1;
+      const y = Math.floor(r.top) - 1;
+      out.push({ x, y, w: Math.ceil(r.right) + 1 - x, h: Math.ceil(r.bottom) + 1 - y, r: radius + 1 });
+    }
+    return out;
   }
 
   // The panel docked on the right of the content area, if any: site
-  // scripts while open, else the headers outline.
+  // scripts while open, else the chat while open, else the headers outline.
   function rightPanel() {
     if (scriptsOpen && !narrow) return $('scripts-pop');
+    if (chatOpen && !narrow) return $('chat');
     if (outlineShown()) return $('outline');
     return null;
   }
@@ -1194,9 +1225,12 @@
     const b = $('shield');
     const a = tab && tab.adblock;
     const status = state.adblock;
-    b.className = 'pillbtn';
+    const label = b.querySelector('.label');
+    const st = b.querySelector('.state');
+    b.className = '';
+    st.textContent = '';
     if (status.state === 'failed') {
-      b.textContent = 'Blocker failed';
+      label.textContent = 'Ad blocker failed';
       b.classList.add('off');
       b.disabled = true;
       if (status.message !== lastAdblockFailure) {
@@ -1206,13 +1240,14 @@
       return;
     }
     if (status.state === 'compiling') {
-      b.textContent = 'Blocker…';
+      label.textContent = 'Ad blocker starting…';
       b.disabled = true;
       return;
     }
     b.hidden = !a;
     if (!a) return;
-    b.textContent = a.blocking ? 'Ads: Blocked' : 'Ads: Allowed';
+    label.textContent = 'Ad Blocking';
+    st.textContent = a.blocking ? 'On' : 'Off for this site';
     b.classList.add(a.blocking ? 'on' : 'off');
     b.disabled = !a.can_toggle;
     b.title = a.can_toggle
@@ -1261,21 +1296,28 @@
     const on = headersOn(tab);
     h.classList.toggle('on', on);
     h.setAttribute('aria-pressed', String(on));
+    $('chat-btn').classList.toggle('on', chatOpen);
+    $('chat-btn').setAttribute('aria-pressed', String(chatOpen));
     renderOutline();
   }
 
-  $('headers').addEventListener('click', withTab((t) =>
-    applyViewModes(T.core.invoke('set_tab_headers', { tab: t.id, on: !headersOn(t.id) }))));
+  $('headers').addEventListener('click', withTab((t) => {
+    const on = !headersOn(t.id);
+    if (on && chatOpen) setChat(false); // the outline takes the docked panel
+    applyViewModes(T.core.invoke('set_tab_headers', { tab: t.id, on }));
+  }));
 
-  // Page actions drawer: opens inside the pill, beside the address.
-  function setDrawer(open) {
-    $('actions').classList.toggle('drawer-open', open);
-    $('actions-items').hidden = !open;
+  // Page actions: a popup above the ⋯ button, floating over the page (a
+  // hole, like the pill).
+  function setActions(open) {
+    $('actions').classList.toggle('open', open);
+    $('actions-pop').hidden = !open;
     $('actions-toggle').setAttribute('aria-expanded', String(open));
     syncMenuOpen();
     renderScriptsMark(activeTab());
+    reportLayout();
   }
-  $('actions-toggle').addEventListener('click', () => setDrawer($('actions-items').hidden));
+  $('actions-toggle').addEventListener('click', () => setActions($('actions-pop').hidden));
 
   function applyViewModes(p) {
     p.then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch((e) => toast(String(e)));
@@ -1337,7 +1379,19 @@
 
   function markCurrentHeading(tab) {
     const cur = currentHeading.get(tab);
-    document.querySelectorAll('#outline-list li[data-index]').forEach((li) => li.classList.toggle('current', Number(li.dataset.index) === cur));
+    let shown = null;
+    document.querySelectorAll('#outline-list li[data-index]').forEach((li) => {
+      const on = Number(li.dataset.index) === cur;
+      li.classList.toggle('current', on);
+      if (on) shown = li;
+    });
+    document.querySelectorAll('#outline-list li.section').forEach((sec) =>
+      sec.classList.toggle('has-current', !!shown && sec.contains(shown)));
+    // Keep the current entry in view in the panel (its group's label when folded).
+    if (shown) {
+      const folded = shown.closest('li.section.collapsed');
+      (folded ? folded.querySelector('.sec-row') : shown).scrollIntoView({ block: 'nearest' });
+    }
   }
 
   function outlineMsg(text) {
@@ -1356,14 +1410,17 @@
     btn.disabled = true;
     outlineMsg(`Asking ${AI_LABEL[p]} which elements are headings…`);
     T.core.invoke('detect_headings', { tab, provider: p, model })
-      .then((n) => outlineMsg(`Using ${n} heading rule${n === 1 ? '' : 's'} for this site.`))
+      .then((n) => outlineMsg(`Using ${n} rule${n === 1 ? '' : 's'} for this site: section labels group the headings under them.`))
       .catch((e) => outlineMsg(String(e)))
       .finally(() => { btn.disabled = false; });
   });
 
   function outlineShown() {
-    return !!state && !narrow && !scriptsOpen && headersOn(state.active);
+    return !!state && !narrow && !scriptsOpen && !chatOpen && headersOn(state.active);
   }
+
+  // Folded sections, per tab and section index (session only).
+  const foldedSections = new Set();
 
   function renderOutline() {
     const show = outlineShown();
@@ -1383,17 +1440,213 @@
       return;
     }
     const min = Math.min(...items.map((h) => h.level));
-    for (const h of items) {
+    const entry = (h, base) => {
       const li = el('li');
       li.dataset.index = String(h.index);
       if (currentHeading.get(tab) === h.index) li.classList.add('current');
       const b = el('button', 'l' + (h.level - min + 1), h.text);
-      b.style.paddingLeft = 8 + (h.level - min) * 14 + 'px';
+      b.style.paddingLeft = 8 + Math.max(0, h.level - base) * 14 + 'px';
       b.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
       li.appendChild(b);
-      list.appendChild(li);
+      return li;
+    };
+    // Sections: several top-level entries with headings under them (what
+    // Detect Headers produces for front pages). Otherwise a nested list.
+    const tops = items.filter((h) => h.level === min).length;
+    const sectioned = tops >= 2 && items.some((h) => h.level > min);
+    if (!sectioned) {
+      for (const h of items) list.appendChild(entry(h, min));
+      markCurrentHeading(tab);
+      return;
     }
+    let group = null;
+    for (const h of items) {
+      if (h.level === min || !group) {
+        const key = `${tab}:${h.index}`;
+        const li = el('li', 'section' + (foldedSections.has(key) ? ' collapsed' : ''));
+        li.dataset.index = String(h.index);
+        const row = el('div', 'sec-row');
+        const toggle = el('button', 'sec-toggle', '\u25BE');
+        toggle.setAttribute('aria-label', `Fold or unfold ${h.text}`);
+        toggle.setAttribute('aria-expanded', String(!foldedSections.has(key)));
+        toggle.addEventListener('click', () => {
+          if (foldedSections.has(key)) foldedSections.delete(key); else foldedSections.add(key);
+          renderOutline();
+        });
+        const title = el('button', 'sec-title', h.text);
+        title.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
+        const count = el('span', 'sec-count');
+        row.append(toggle, title, count);
+        const sub = el('ol');
+        li.append(row, sub);
+        list.appendChild(li);
+        group = { sub, count, n: 0 };
+        if (h.level === min) continue;
+      }
+      group.sub.appendChild(entry(h, min + 1));
+      group.n += 1;
+      group.count.textContent = String(group.n);
+    }
+    markCurrentHeading(tab);
   }
+
+  // ---- AI chat about the page ---------------------------------------------
+  //
+  // One conversation per tab, restarted when the tab's page changes. Each
+  // message is sent with the whole conversation; Rust reads the page's
+  // title, visible text and selection at that moment. Replies are model
+  // output and are shown with textContent only.
+
+  const chats = new Map(); // tab id -> { url, messages: [{role, text}], input, output, cost, unpriced, busy }
+
+  function chatFor(t) {
+    const url = t && t.url ? t.url.full : '';
+    let c = chats.get(t.id);
+    if (!c || c.url !== url) {
+      const restarted = !!(c && c.messages.length);
+      c = { url, messages: [], log: restarted ? [{ role: 'info', text: 'New page: started a new conversation.' }] : [], input: 0, output: 0, cost: 0, unpriced: false, busy: false };
+      chats.set(t.id, c);
+    }
+    return c;
+  }
+
+  // Models from every connected provider (the lists Settings → AI → Test
+  // fetched), as "provider|model".
+  function chatModels() {
+    const out = [];
+    for (const p of ['anthropic', 'openai']) {
+      if (!aiConfigured[p]) continue;
+      const models = aiModels(p);
+      if (!models.length && aiModel(p)) out.push({ p, id: aiModel(p), name: aiModel(p) });
+      for (const m of models) out.push({ p, id: m.id, name: m.name || m.id });
+    }
+    return out;
+  }
+
+  function chatChoice() {
+    const models = chatModels();
+    const saved = pref('chatModel');
+    const hit = models.find((m) => `${m.p}|${m.id}` === saved);
+    if (hit) return hit;
+    const p = aiProvider();
+    return models.find((m) => m.p === p && m.id === aiModel(p)) || models[0] || null;
+  }
+
+  function renderChatModels() {
+    const sel = $('chat-model');
+    const models = chatModels();
+    sel.replaceChildren();
+    if (!models.length) {
+      sel.appendChild(el('option', null, 'Connect a provider in Settings → AI'));
+      sel.disabled = true;
+      return;
+    }
+    for (const m of models) {
+      const o = el('option', null, `${m.name} · ${AI_LABEL[m.p]}`);
+      o.value = `${m.p}|${m.id}`;
+      sel.appendChild(o);
+    }
+    sel.disabled = false;
+    const c = chatChoice();
+    if (c) sel.value = `${c.p}|${c.id}`;
+  }
+
+  let chatKey = '';
+  function renderChat() {
+    if (!chatOpen) { chatKey = ''; return; }
+    const t = activeTab();
+    // State updates arrive often (load progress); rebuild only on change,
+    // so a selection in the log survives.
+    const cur = t ? chats.get(t.id) : null;
+    const pick = chatChoice();
+    const key = JSON.stringify([t && t.id, t && t.url && t.url.full, cur && cur.log.length, cur && cur.busy, pick && pick.p + pick.id]);
+    if (key === chatKey) return;
+    chatKey = key;
+    const log = $('chat-log');
+    const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+    log.replaceChildren();
+    const usable = !!(t && t.url);
+    const choice = chatChoice();
+    $('chat-note').textContent = !choice
+      ? 'Connect an AI provider in Settings → AI to chat about pages.'
+      : `Each message sends this page's address, title, visible text and any selected text to ${AI_LABEL[choice.p]}.`;
+    if (!usable) {
+      log.appendChild(el('li', 'info', 'Open a web page to chat about it.'));
+      $('chat-cost').textContent = '';
+      $('chat-send').disabled = true;
+      return;
+    }
+    const c = chatFor(t);
+    if (!c.log.length) log.appendChild(el('li', 'info', 'Ask a question about this page, for example “Summarise this” or “What does it say about prices?”'));
+    for (const m of c.log) {
+      const li = el('li', m.role, m.text);
+      if (m.meta) li.appendChild(el('span', 'meta', m.meta));
+      log.appendChild(li);
+    }
+    if (c.busy) log.appendChild(el('li', 'assistant pending', 'Reading the page…'));
+    const tokens = c.input + c.output;
+    $('chat-cost').textContent = tokens ? `${c.unpriced ? '≥ ' : '≈ '}${money(c.cost)} · ${tokens.toLocaleString()} tokens` : '';
+    $('chat-send').disabled = c.busy || !choice;
+    if (atEnd || c.busy) log.scrollTop = log.scrollHeight;
+  }
+
+  function setChat(open) {
+    chatOpen = open;
+    $('chat').hidden = !open;
+    $('chat').classList.toggle('dock', open && !narrow);
+    if (open) {
+      loadAi().then(() => { renderChatModels(); chatKey = ''; renderChat(); });
+      setTimeout(() => $('chat-input').focus(), 0);
+    }
+    renderViewMode();
+    reportLayout();
+  }
+
+  function sendChat() {
+    const t = activeTab();
+    const input = $('chat-input');
+    const text = input.value.trim();
+    const choice = chatChoice();
+    if (!t || !t.url || !text || !choice) return;
+    const c = chatFor(t);
+    if (c.busy) return;
+    input.value = '';
+    c.messages.push({ role: 'user', text });
+    c.log.push({ role: 'user', text });
+    c.busy = true;
+    renderChat();
+    T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, messages: c.messages })
+      .then((r) => {
+        c.messages.push({ role: 'assistant', text: r.text });
+        c.input += r.input;
+        c.output += r.output;
+        if (r.cost_micros === null || r.cost_micros === undefined) c.unpriced = true; else c.cost += r.cost_micros;
+        const cost = r.cost_micros === null || r.cost_micros === undefined ? 'price unknown' : '≈ ' + money(r.cost_micros);
+        c.log.push({ role: 'assistant', text: r.text, meta: `${choice.name} · ${(r.input + r.output).toLocaleString()} tokens · ${cost}` });
+        loadUsage();
+      })
+      .catch((e) => {
+        // Not part of the conversation: the next message is sent without it.
+        c.messages.pop();
+        c.log.push({ role: 'error', text: String(e) });
+      })
+      .finally(() => { c.busy = false; renderChat(); });
+  }
+
+  $('chat-btn').addEventListener('click', () => setChat(!chatOpen));
+  $('chat-close').addEventListener('click', () => setChat(false));
+  $('chat-new').addEventListener('click', () => {
+    const t = activeTab();
+    if (t) chats.delete(t.id);
+    chatKey = '';
+    renderChat();
+  });
+  $('chat-model').addEventListener('change', (ev) => { setPref('chatModel', ev.target.value); renderChat(); });
+  $('chat-form').addEventListener('submit', (ev) => { ev.preventDefault(); sendChat(); });
+  $('chat-input').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); sendChat(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); setChat(false); }
+  });
 
   // ---- console -----------------------------------------------------------
   //
@@ -1745,7 +1998,7 @@
     b.textContent = 'Delete';
     invoke('clear_website_data', { kind: b.dataset.kind }).then(() => toast(DATA_DONE[b.dataset.kind]));
   }));
-  $('scripts-btn').addEventListener('click', () => setScripts(!scriptsOpen));
+  $('scripts-btn').addEventListener('click', () => { setActions(false); setScripts(!scriptsOpen); });
   $('scripts-close').addEventListener('click', () => setScripts(false));
   $('scripts-new').addEventListener('click', () => {
     const existing = scripts.find((s) => s.domain === currentSite());
@@ -1759,7 +2012,7 @@
   document.addEventListener('pointerdown', (ev) => {
     if (menuOpen && !$('menu-pop').contains(ev.target) && ev.target !== $('menu')) closeMenu();
     if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
-    if (!$('actions-items').hidden && !$('actions').contains(ev.target)) setDrawer(false);
+    if (!$('actions-pop').hidden && !$('actions').contains(ev.target)) setActions(false);
     if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('sidebar-toggle')) {
       setSidebar(false);
     }
@@ -1767,22 +2020,28 @@
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
     if (paletteOpen) closePalette();
+    else if (!$('actions-pop').hidden) setActions(false);
     else if (menuOpen) closeMenu();
     else if (modalOpen) setModal(false);
     else if (scriptsOpen) setScripts(false);
+    else if (chatOpen) setChat(false);
     else if (panel) closePanel();
   });
   $('shield').addEventListener('click', withTab((t) => {
+    setActions(false);
     const a = t.adblock;
     if (!a || !a.can_toggle) return;
     T.core.invoke('toggle_site_adblock', { tab: t.id })
       .then((blocking) => toast(blocking ? `Blocking ads on ${a.site} again. Reloading…` : `Ads allowed on ${a.site}. Reloading…`))
       .catch((e) => toast(String(e)));
   }));
-  $('bookmark').addEventListener('click', withTab((t) =>
+  $('bookmark').addEventListener('click', withTab((t) => {
+    setActions(false);
     T.core.invoke('toggle_bookmark', { tab: t.id })
       .then((on) => { toast(on ? 'Bookmarked' : 'Bookmark removed'); return loadBookmarks(); })
-      .catch((e) => toast(String(e)))));
+      .then(render)
+      .catch((e) => toast(String(e)));
+  }));
   $('panel-close').addEventListener('click', closePanel);
   $('panel-clear').addEventListener('click', () => {
     if (!clearArmed) { clearArmed = true; $('panel-clear').textContent = 'Tap again to clear'; return; }
@@ -1811,6 +2070,8 @@
       sidebarOpen = nowNarrow ? false : loadSidebarPref();
     }
     setSidebarWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 264);
+    $('chat').classList.toggle('dock', chatOpen && !narrow);
+    $('scripts-pop').classList.toggle('dock', scriptsOpen && !narrow);
     applySidebar();
   });
   const savedWidth = parseFloat(pref('sidebarWidth') || '');

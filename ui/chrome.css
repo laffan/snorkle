@@ -47,14 +47,18 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 button:disabled { opacity: .35; cursor: default; }
 input, textarea { font: inherit; color: var(--fg); -webkit-user-select: text; user-select: text; }
 
-/* The bottom strip holding the URL pill (and toasts above it). `left` is
-   set from JS to the docked sidebar's width (or 0). */
+/* The strip along the bottom holding the floating URL pill (and toasts
+   above it). Transparent and click-through: the page is drawn around the
+   pill and under the strip; only the pill, its popup and toasts (reported
+   as holes) take input. `left`/`right` are set from JS to the docked
+   sidebar and right panel, so the pill centres over the page. */
 #chrome {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 6px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) 12px;
-  background: var(--bg);
+  padding: 6px max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) 12px;
+  background: transparent; pointer-events: none;
 }
+#chrome > * { pointer-events: auto; }
 body.sidebar-closed #chrome, body.narrow #chrome { padding-left: max(12px, env(safe-area-inset-left)); }
 #safe-top { position: fixed; top: 0; left: 0; width: 0; height: env(safe-area-inset-top); pointer-events: none; }
 
@@ -153,16 +157,32 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
   display: flex; justify-content: space-between; align-items: center;
   padding: 6px 10px; border-top: 1px solid var(--line); background: var(--side);
 }
-#color.on, #images.on { background: var(--fg); color: var(--side); }
-/* This tab is exempt from the mode ("Disable for this tab"). */
-#side-bottom .icon.exempt { box-shadow: 0 0 0 1.5px var(--fg) inset; background: none; color: var(--fg); }
-#side-bottom .icon.exempt::after { content: ""; }
+/* View-mode buttons: a dot underneath marks a mode that is on; a ring dot
+   marks one that is on app-wide but off for this tab. */
+.icon.mode { position: relative; }
+.icon.mode.on::after, .icon.mode.exempt::after {
+  content: ""; position: absolute; left: 50%; bottom: 2px; width: 5px; height: 5px; margin-left: -2.5px;
+  border-radius: 50%; background: currentColor;
+}
+.icon.mode.exempt::after { background: none; box-shadow: 0 0 0 1.2px currentColor inset; }
 .vm-pop { left: auto; right: 10px; min-width: 220px; }
 .vm-title { font-size: 12px; color: var(--muted); padding: 6px 12px 4px; }
 .outline-list { list-style: none; margin: 0; padding: 0; }
 .outline-list button { display: block; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px; font-size: 14px; line-height: 1.3; }
 .outline-list button:active { background: var(--field); }
 .outline-list .l1 { font-weight: 700; }
+/* Sections (when the page's outline has several top-level entries with
+   headings under them): a label row with a fold toggle, items indented. */
+.outline-list li.section { margin-top: 10px; }
+.outline-list li.section:first-child { margin-top: 0; }
+.outline-list .sec-row { display: flex; align-items: center; gap: 2px; }
+.outline-list .sec-row > button.sec-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.outline-list .sec-toggle { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 6px; padding: 0; text-align: center; font-size: 12px; color: var(--muted); transition: transform .15s; }
+.outline-list li.section.collapsed .sec-toggle { transform: rotate(-90deg); }
+.outline-list .sec-count { flex: 0 0 auto; font-size: 11px; color: var(--muted); padding-right: 6px; }
+.outline-list ol { list-style: none; margin: 0; padding: 0; }
+.outline-list li.section.collapsed > ol { display: none; }
+.outline-list li.section.has-current > .sec-row .sec-title { color: var(--fg); }
 .outline-list .l2 { font-weight: 600; }
 .outline-list li.muted { padding: 6px 8px; font-size: 13px; }
 #outline .modal-head h1 { flex: 1; }
@@ -191,6 +211,12 @@ body.narrow #sidebar-resize { display: none; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 6px; display: flex; flex-direction: column;
 }
 .popup button { text-align: left; padding: 10px 12px; border-radius: 8px; display: flex; justify-content: space-between; gap: 16px; }
+/* Page actions: opens above the pill's ⋯ button, over the page. */
+.popup.actions-pop { left: auto; right: -6px; bottom: calc(100% + 10px); min-width: 250px; z-index: 5; }
+.actions-pop .label { white-space: nowrap; }
+.actions-pop .state { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.actions-pop button.has-script .state { color: var(--fg); font-weight: 700; }
+.actions-pop button:disabled { opacity: .45; }
 .popup .kbd { color: var(--muted); font-size: 13px; }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .popup button:active { background: var(--field); }
@@ -216,7 +242,7 @@ body.narrow #sidebar-resize { display: none; }
 }
 
 /* The URL pill: navigation on the left, the address, then the page-actions
-   drawer and the headers button. */
+   popup button, the headers button and the chat button. */
 #toolbar.urlpill {
   position: relative; display: flex; align-items: center; gap: 2px; max-width: 100%;
   padding: 4px 6px; border-radius: 26px; background: var(--bar); border: 1px solid var(--line);
@@ -225,10 +251,9 @@ body.narrow #sidebar-resize { display: none; }
 #toolbar .icon { min-width: 38px; height: 38px; border-radius: 19px; }
 .icon { min-width: 40px; height: 40px; border-radius: 10px; font-size: 22px; line-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
 .page-actions { display: flex; align-items: center; gap: 2px; }
-.actions-items { display: flex; align-items: center; gap: 2px; padding-left: 2px; border-left: 1px solid var(--line); }
-#actions.drawer-open #actions-toggle { background: var(--fg); color: var(--bar); }
+#actions { position: relative; }
+#actions.open #actions-toggle { background: var(--field); }
 #actions-toggle.has-script { box-shadow: 0 0 0 2px var(--fg) inset; }
-#headers.on { background: var(--fg); color: var(--bar); }
 #toolbar .pillbtn { margin: 0 2px; }
 .icon.text { font-size: 15px; font-weight: 700; padding: 0 8px; }
 .icon:active { background: var(--field); }
@@ -262,9 +287,10 @@ body.narrow #omnibox { flex: 1 1 auto; width: auto; }
 
 #surface {
   /* `top`/`left`/`right` are set from JS to match the content area (or
-     the focused pane in split view). */
+     the focused pane in split view). The bottom padding keeps text clear
+     of the floating URL pill. */
   position: absolute; left: 0; right: 0; bottom: 0; top: 0; overflow: auto;
-  padding: 24px max(24px, env(safe-area-inset-right)) 24px max(24px, env(safe-area-inset-left));
+  padding: 24px max(24px, env(safe-area-inset-right)) calc(88px + env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
 }
 #surface > section { max-width: 760px; margin: 0 auto; }
 h1 { font-size: 26px; margin: 8px 0 12px; }
@@ -341,11 +367,38 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 }
 /* Docked beside the page (top and width set from JS). */
 .sheet.dock {
-  top: 0; right: 0; bottom: 0; max-height: none; border-radius: 0; box-shadow: none;
+  top: 0; right: 0; bottom: 0; max-height: none; height: auto; border-radius: 0; box-shadow: none;
   border: 0; border-left: 1px solid var(--line); z-index: 12;
   padding-right: max(20px, env(safe-area-inset-right));
 }
-#scripts-btn.has-script { box-shadow: 0 0 0 2px var(--fg) inset; border-radius: 20px; }
+/* ---- AI chat (docked right of the page) ---------------------------------- */
+.sheet.chat { display: flex; flex-direction: column; overflow: hidden; }
+.sheet.chat:not(.dock) { height: calc(100% - env(safe-area-inset-top) - 80px); }
+.chat .modal-head h1 { flex: 1; }
+.chat-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+#chat-model {
+  flex: 1 1 160px; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--field);
+  padding: 7px 8px; font-size: 14px; color: var(--fg);
+}
+#chat-cost { font-variant-numeric: tabular-nums; white-space: nowrap; }
+#chat-note { margin: 0 0 8px; }
+.chat-log {
+  flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0 -4px; padding: 4px;
+  display: flex; flex-direction: column; gap: 8px; -webkit-user-select: text; user-select: text;
+}
+.chat-log li { max-width: 92%; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.4; }
+.chat-log li.user { align-self: flex-end; background: var(--fg); color: var(--bar); border-bottom-right-radius: 4px; }
+.chat-log li.assistant { align-self: flex-start; background: var(--field); border-bottom-left-radius: 4px; }
+.chat-log li.error, .chat-log li.info { align-self: center; max-width: 100%; background: none; color: var(--muted); font-size: 12px; text-align: center; padding: 2px 8px; }
+.chat-log li.error { font-weight: 600; }
+.chat-log li.pending { color: var(--muted); }
+.chat-log li .meta { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.chat-form { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+#chat-input {
+  flex: 1; min-width: 0; resize: none; max-height: 30vh; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--field); padding: 8px 10px; font-size: 15px;
+}
+#chat-send { flex: 0 0 auto; }
 .option { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
 .option > div { flex: 1; }
 .option-title { font-weight: 600; }

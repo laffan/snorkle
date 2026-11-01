@@ -6,9 +6,9 @@
 mod adblock;
 mod ai;
 mod command_list;
+pub mod commands;
 mod pins;
 mod scripts;
-pub mod commands;
 pub mod state;
 
 use std::sync::Arc;
@@ -66,6 +66,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         ai::ai_test,
         ai::ai_write_script,
         ai::detect_headings,
+        ai::ai_chat,
         ai::ai_usage,
         ai::ai_reset_usage,
         commands::open_launcher,

@@ -2,7 +2,9 @@
 //! address bar shows committed URLs only, HTTPS-first never downgrades
 //! silently, private tabs never reach storage, and the memory budget holds.
 
-use snorkle_core::browser::{AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, PopupStyle, SplitView, Verdict};
+use snorkle_core::browser::{
+    AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, PopupStyle, SplitView, Verdict,
+};
 use snorkle_core::os::{OsSupport, OsVersion};
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, SessionTab};
@@ -266,6 +268,28 @@ fn new_window_fallback_inherits_profile() {
 }
 
 #[test]
+fn command_click_opens_a_background_tab() {
+    let mut b = browser(4);
+    let (p, _) = b.new_tab(Profile::Private, 0);
+    b.navigate_input(p, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, p, "https://a.example/");
+    let (t, out) = b.on_background_tab_request(p, &u("http://b.example/x"), 5);
+    let t = t.expect("a tab is opened");
+    assert_eq!(b.active(), Some(p), "the current tab stays in front");
+    assert!(out.iter().any(|e| matches!(e, Effect::CreateView { tab, profile: Profile::Private, .. } if *tab == t)));
+    assert!(!out.iter().any(|e| matches!(e, Effect::ShowView { tab, .. } if *tab == t)), "loaded hidden");
+    assert!(
+        out.iter()
+            .any(|e| matches!(e, Effect::CreateView { then: AfterCreate::Load(url), .. } if url.scheme() == "https")),
+        "http upgraded"
+    );
+    // Blocked and other-app links open nothing.
+    assert!(b.on_background_tab_request(p, &u("javascript:alert(1)"), 6).0.is_none());
+    assert!(b.on_background_tab_request(p, &u("tel:123"), 6).0.is_none());
+    assert!(b.on_background_tab_request(TabId(999), &u("https://c.example/"), 6).0.is_none());
+}
+
+#[test]
 fn normal_tabs_are_recorded() {
     let mut b = browser(4);
     let (t, _) = b.new_tab(Profile::Default, 0);
@@ -349,7 +373,9 @@ fn new_tab_creates_no_web_view_until_navigation() {
 fn session_restore_is_lazy() {
     let mut b = browser(4);
     let s = Session {
-        tabs: (0..10).map(|i| SessionTab { url: format!("https://s{i}.example/"), title: String::new(), launcher: None }).collect(),
+        tabs: (0..10)
+            .map(|i| SessionTab { url: format!("https://s{i}.example/"), title: String::new(), launcher: None })
+            .collect(),
         active: Some(3),
     };
     let out = b.restore_session(&s, 0);
@@ -556,7 +582,9 @@ fn links_from_other_apps_open_in_a_new_tab() {
     assert_ne!(id, t);
     assert_eq!(b.active(), Some(id));
     assert!(out.iter().any(|e| matches!(e, Effect::Load { tab, .. } | Effect::CreateView { tab, .. } if *tab == id)));
-    for bad in ["javascript:alert(1)", "file:///etc/hosts", "https://user:pw@bank.example/", "data:text/html,x", "tel:123"] {
+    for bad in
+        ["javascript:alert(1)", "file:///etc/hosts", "https://user:pw@bank.example/", "data:text/html,x", "tel:123"]
+    {
         assert!(b.open_from_other_app(u(bad), 2).0.is_none(), "{bad}");
     }
     // http is still upgraded by the normal policy.
@@ -581,7 +609,10 @@ fn launcher_reuses_its_tab_and_survives_restart() {
     b.activate(t, 2);
     let (again, out) = b.open_launcher(key, u(key), 3);
     assert_eq!(again, p, "no new tab");
-    assert!(out.iter().any(|e| matches!(e, Effect::Load { tab, url } if *tab == p && url.as_str() == key)), "back to the pinned page");
+    assert!(
+        out.iter().any(|e| matches!(e, Effect::Load { tab, url } if *tab == p && url.as_str() == key)),
+        "back to the pinned page"
+    );
     webkit_load(&mut b, p, key);
     let (_, out) = b.open_launcher(key, u(key), 4);
     assert!(!out.iter().any(|e| matches!(e, Effect::Load { .. })), "already there: no reload");
@@ -644,7 +675,13 @@ fn popup_sheet_shows_over_its_running_opener() {
     assert_eq!(b.view().sheet, None);
     let out = b.activate(op, 3);
     assert_eq!(b.active(), Some(sheet));
-    let shown: Vec<_> = out.iter().filter_map(|e| match e { Effect::ShowView { tab, pane } => Some((*tab, *pane)), _ => None }).collect();
+    let shown: Vec<_> = out
+        .iter()
+        .filter_map(|e| match e {
+            Effect::ShowView { tab, pane } => Some((*tab, *pane)),
+            _ => None,
+        })
+        .collect();
     assert_eq!(shown, vec![(op, Pane::Full), (sheet, Pane::Sheet)], "the sheet is shown last, on top");
     assert!(out.contains(&Effect::HideView(other)));
     // window.close() returns to the opener, full width.
@@ -665,7 +702,13 @@ fn sheet_stays_on_top_when_the_opener_is_shown_again() {
     let (_, out) = b.decide_navigation(op, &u("tel:+15555550100"), Frame::Main, NavKind::LinkActivated, 2);
     assert!(out.contains(&Effect::HideView(op)));
     let out = b.dismiss_notice(op);
-    let shown: Vec<_> = out.iter().filter_map(|e| match e { Effect::ShowView { tab, pane } => Some((*tab, *pane)), _ => None }).collect();
+    let shown: Vec<_> = out
+        .iter()
+        .filter_map(|e| match e {
+            Effect::ShowView { tab, pane } => Some((*tab, *pane)),
+            _ => None,
+        })
+        .collect();
     assert_eq!(shown, vec![(op, Pane::Full), (sheet, Pane::Sheet)]);
 }
 
