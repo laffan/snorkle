@@ -152,6 +152,22 @@ impl Shortcut {
     }
 }
 
+/// Property list of the menu command for `SHORTCUTS[index]`. UIKit throws
+/// (terminating the app) if two commands in the menu system share an action
+/// and property list, and every command has the same action, so the list
+/// is unique per entry: `"<index>:<name>"` (⌘S and ⌘\ both toggle the
+/// sidebar).
+pub fn shortcut_plist(index: usize) -> String {
+    format!("{index}:{}", SHORTCUTS[index].4.name())
+}
+
+/// The shortcut a command's property list stands for.
+pub fn shortcut_from_plist(plist: &str) -> Option<Shortcut> {
+    let (index, name) = plist.split_once(':')?;
+    let s = SHORTCUTS.get(index.parse::<usize>().ok()?)?.4;
+    (s.name() == name).then_some(s)
+}
+
 /// Callbacks from content web views into the browser core.
 ///
 /// Called on the main thread from inside WebKit delegate methods.
@@ -423,6 +439,15 @@ mod tests {
         let keys: Vec<_> = SHORTCUTS.iter().map(|s| (s.2, s.3)).collect();
         let unique: std::collections::BTreeSet<_> = keys.iter().collect();
         assert_eq!(unique.len(), keys.len(), "no key is bound twice");
+        // UIKit terminates the app on two menu commands with the same
+        // action and property list (all share one action).
+        let plists: std::collections::BTreeSet<String> = (0..SHORTCUTS.len()).map(shortcut_plist).collect();
+        assert_eq!(plists.len(), SHORTCUTS.len(), "property lists are unique");
+        for i in 0..SHORTCUTS.len() {
+            assert_eq!(shortcut_from_plist(&shortcut_plist(i)), Some(SHORTCUTS[i].4));
+        }
+        assert!(shortcut_from_plist("toggle_sidebar").is_none() && shortcut_from_plist("99:new_tab").is_none());
+        assert!(shortcut_from_plist("1:new_tab").is_none(), "index and name must agree");
     }
 
     #[test]

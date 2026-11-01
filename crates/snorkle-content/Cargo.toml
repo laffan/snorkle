@@ -14,7 +14,9 @@ url.workspace = true
 # Versions pinned to exactly what wry 0.57.1 (via tauri-runtime-wry 2.12.3)
 # resolves, so a single copy of each objc2 crate is linked.
 [target.'cfg(target_os = "ios")'.dependencies]
-objc2 = "=0.6.5"
+# `exception`: already enabled by wry; used to keep a menu-building
+# exception from terminating the app (ios/menu.rs).
+objc2 = { version = "=0.6.5", features = ["exception"] }
 block2 = "=0.6.2"
 objc2-core-foundation = { version = "=0.3.2", features = ["std", "CFCGTypes", "CFDictionary", "CFData", "CFString", "CFNumber"] }
 objc2-security = { version = "=0.3.2", default-features = false, features = ["std", "SecBase", "SecItem"] }

@@ -24,11 +24,11 @@ use objc2::runtime::{AnyClass, AnyObject, Imp, ProtocolObject, Sel};
 use objc2::{sel, MainThreadMarker};
 use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
-    UIApplication, UIKeyCommand, UIKeyModifierFlags, UIMenu, UIMenuBuilder, UIMenuClose, UIMenuElement, UIMenuFile,
-    UIMenuFind, UIMenuOptions, UIMenuSystem, UIMenuView,
+    UIApplication, UICommand, UIKeyCommand, UIKeyModifierFlags, UIMenu, UIMenuBuilder, UIMenuClose, UIMenuElement,
+    UIMenuFile, UIMenuFind, UIMenuIdentifier, UIMenuOptions, UIMenuSystem, UIMenuView,
 };
 
-use crate::{ContentEvents, Shortcut, ShortcutMenu, SHORTCUTS};
+use crate::{shortcut_from_plist, shortcut_plist, ContentEvents, Shortcut, ShortcutMenu, SHORTCUTS};
 
 thread_local! {
     static EVENTS: RefCell<Option<Rc<dyn ContentEvents>>> = const { RefCell::new(None) };
@@ -36,24 +36,26 @@ thread_local! {
 }
 
 /// Whether the main menu carries the shortcuts (then the content
-/// containers offer none, so no key is bound twice).
+/// containers offer none, so no key is bound twice). Set when a menu build
+/// succeeds; cleared if one throws.
 pub fn installed() -> bool {
     INSTALLED.with(Cell::get)
 }
 
-/// A key command for one shortcut; its property list is the shortcut's name.
-pub fn key_command(mtm: MainThreadMarker, title: &str, key: &str, shift: bool, s: Shortcut) -> Retained<UIKeyCommand> {
-    let flags =
-        if shift { UIKeyModifierFlags::Command | UIKeyModifierFlags::Shift } else { UIKeyModifierFlags::Command };
+/// The key command for `SHORTCUTS[index]`. Its property list identifies
+/// the entry; it must be unique (`crate::shortcut_plist`), or UIKit throws.
+pub fn key_command(mtm: MainThreadMarker, index: usize) -> Retained<UIKeyCommand> {
+    let (_, title, key, shift, _) = SHORTCUTS[index];
+    let flags = if shift { UIKeyModifierFlags::Command | UIKeyModifierFlags::Shift } else { UIKeyModifierFlags::Command };
     unsafe {
-        let name = NSString::from_str(&s.name());
+        let plist = NSString::from_str(&shortcut_plist(index));
         let c = UIKeyCommand::commandWithTitle_image_action_input_modifierFlags_propertyList(
             &NSString::from_str(title),
             None,
             sel!(snorkleShortcut:),
             &NSString::from_str(key),
             flags,
-            Some(&name),
+            Some(&plist),
             mtm,
         );
         if c.respondsToSelector(sel!(setWantsPriorityOverSystemBehavior:)) {
@@ -63,20 +65,17 @@ pub fn key_command(mtm: MainThreadMarker, title: &str, key: &str, shift: bool, s
     }
 }
 
-/// The shortcut a key command stands for (its property list).
-pub fn shortcut_of(command: &UIKeyCommand) -> Option<Shortcut> {
+/// The shortcut a command stands for (its property list).
+pub fn shortcut_of(command: &UICommand) -> Option<Shortcut> {
     let plist = command.propertyList()?;
-    let name = plist.downcast_ref::<NSString>()?.to_string();
-    Shortcut::from_name(&name)
+    let text = plist.downcast_ref::<NSString>()?.to_string();
+    shortcut_from_plist(&text)
 }
 
 fn inline_menu(mtm: MainThreadMarker, id: &str, title: &str, which: ShortcutMenu) -> Retained<UIMenu> {
-    let items: Vec<Retained<UIMenuElement>> = SHORTCUTS
-        .iter()
-        .filter(|s| s.0 == which)
-        .map(|(_, title, key, shift, s)| {
-            Retained::into_super(Retained::into_super(key_command(mtm, title, key, *shift, *s)))
-        })
+    let items: Vec<Retained<UIMenuElement>> = (0..SHORTCUTS.len())
+        .filter(|i| SHORTCUTS[*i].0 == which)
+        .map(|i| Retained::into_super(Retained::into_super(key_command(mtm, i))))
         .collect();
     let children: Retained<NSArray<UIMenuElement>> = NSArray::from_retained_slice(&items);
     let options = if title.is_empty() { UIMenuOptions::DisplayInline } else { UIMenuOptions::empty() };
@@ -93,23 +92,46 @@ fn inline_menu(mtm: MainThreadMarker, id: &str, title: &str, which: ShortcutMenu
 unsafe extern "C-unwind" fn build_menu(_this: *mut AnyObject, _cmd: Sel, builder: *mut AnyObject) {
     let Some(mtm) = MainThreadMarker::new() else { return };
     let Some(builder) = (unsafe { (builder as *const ProtocolObject<dyn UIMenuBuilder>).as_ref() }) else { return };
+    // An Objective-C exception escaping here (UIKit validates the menu as
+    // it is edited) would terminate the app at launch. Catch it, keep what
+    // UIKit built, and fall back to the content containers' key commands.
+    let built = objc2::exception::catch(std::panic::AssertUnwindSafe(|| build(mtm, builder)));
+    INSTALLED.with(|i| i.set(built.is_ok()));
+    if let Err(e) = built {
+        let reason = e.map(|e| format!("{e:?}")).unwrap_or_default();
+        eprintln!("[snorkle] menu: shortcuts not added to the menu bar: {reason}");
+    }
+}
+
+/// Edits the menu. Each target menu is looked up first: menus differ
+/// between iPadOS versions, and a missing one is skipped.
+fn build(mtm: MainThreadMarker, builder: &ProtocolObject<dyn UIMenuBuilder>) {
+    let has = |id: &UIMenuIdentifier| builder.menuForIdentifier(id).is_some();
     unsafe {
-        let file = inline_menu(mtm, "app.snorkle.file", "", ShortcutMenu::File);
-        builder.insertChildMenu_atStartOfMenuForIdentifier(&file, UIMenuFile);
-        let close = inline_menu(mtm, "app.snorkle.close-tab", "", ShortcutMenu::Close);
-        builder.replaceMenuForIdentifier_withMenu(UIMenuClose, &close);
-        let find = inline_menu(mtm, "app.snorkle.find", "", ShortcutMenu::Find);
-        builder.replaceMenuForIdentifier_withMenu(UIMenuFind, &find);
-        let view = inline_menu(mtm, "app.snorkle.view", "", ShortcutMenu::View);
-        builder.insertChildMenu_atStartOfMenuForIdentifier(&view, UIMenuView);
-        let tabs = inline_menu(mtm, "app.snorkle.tabs", "Tabs", ShortcutMenu::Tabs);
-        builder.insertSiblingMenu_afterMenuForIdentifier(&tabs, UIMenuView);
+        if has(UIMenuFile) {
+            let file = inline_menu(mtm, "app.snorkle.file", "", ShortcutMenu::File);
+            builder.insertChildMenu_atStartOfMenuForIdentifier(&file, UIMenuFile);
+        }
+        if has(UIMenuClose) {
+            let close = inline_menu(mtm, "app.snorkle.close-tab", "", ShortcutMenu::Close);
+            builder.replaceMenuForIdentifier_withMenu(UIMenuClose, &close);
+        }
+        if has(UIMenuFind) {
+            let find = inline_menu(mtm, "app.snorkle.find", "", ShortcutMenu::Find);
+            builder.replaceMenuForIdentifier_withMenu(UIMenuFind, &find);
+        }
+        if has(UIMenuView) {
+            let view = inline_menu(mtm, "app.snorkle.view", "", ShortcutMenu::View);
+            builder.insertChildMenu_atStartOfMenuForIdentifier(&view, UIMenuView);
+            let tabs = inline_menu(mtm, "app.snorkle.tabs", "Tabs", ShortcutMenu::Tabs);
+            builder.insertSiblingMenu_afterMenuForIdentifier(&tabs, UIMenuView);
+        }
     }
 }
 
 unsafe extern "C-unwind" fn perform(_this: *mut AnyObject, _cmd: Sel, sender: *mut AnyObject) {
     let Some(sender) = (unsafe { sender.as_ref() }) else { return };
-    let Some(command) = sender.downcast_ref::<UIKeyCommand>() else { return };
+    let Some(command) = sender.downcast_ref::<UICommand>() else { return };
     let Some(s) = shortcut_of(command) else { return };
     EVENTS.with(|e| {
         if let Some(events) = e.borrow().as_ref() {
@@ -138,7 +160,6 @@ pub fn install(mtm: MainThreadMarker, events: Rc<dyn ContentEvents>) {
         let added_build = class_addMethod(cls, sel!(buildMenuWithBuilder:), build, V_AT_AT.as_ptr()).as_bool();
         let added_action = class_addMethod(cls, sel!(snorkleShortcut:), action, V_AT_AT.as_ptr()).as_bool();
         if added_build && added_action {
-            INSTALLED.with(|i| i.set(true));
             UIMenuSystem::mainSystem(mtm).setNeedsRebuild();
         }
     }

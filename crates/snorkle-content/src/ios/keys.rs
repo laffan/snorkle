@@ -46,23 +46,21 @@ define_class!(
         /// (`menu::installed`): the same commands, while a page has focus.
         #[unsafe(method_id(keyCommands))]
         fn key_commands(&self) -> Option<Retained<NSArray<UIKeyCommand>>> {
+            // Decided on every call: the menu may be built after the first.
             let mtm = self.mtm();
-            Some(
+            let list = if super::menu::installed() {
+                NSArray::new()
+            } else {
                 self.ivars()
                     .commands
                     .get_or_init(|| {
-                        let cmds: Vec<Retained<UIKeyCommand>> = if super::menu::installed() {
-                            Vec::new()
-                        } else {
-                            SHORTCUTS
-                                .iter()
-                                .map(|(_, title, key, shift, s)| super::menu::key_command(mtm, title, key, *shift, *s))
-                                .collect()
-                        };
+                        let cmds: Vec<Retained<UIKeyCommand>> =
+                            (0..SHORTCUTS.len()).map(|i| super::menu::key_command(mtm, i)).collect();
                         NSArray::from_retained_slice(&cmds)
                     })
-                    .clone(),
-            )
+                    .clone()
+            };
+            Some(list)
         }
 
         /// Outside the holes only (see the module docs). Containers are

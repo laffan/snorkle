@@ -287,6 +287,12 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     the chrome's keydown and the menu do not both act (de-duplicated within 60 ms); system
     shortcuts are not shadowed. **[decide]** "Shift+D" was implemented as ⌘⇧D, since a bare Shift+D
     would fire while typing a capital D.
+    2026-11-01: crashed on launch on iPad. Probable cause (not confirmed with a crash log): two
+    menu commands (⌘S and ⌘\) with the same action and property list, which UIKit rejects with an
+    exception while building the menu. Property lists are now unique per entry (tested), each
+    target menu is looked up before it is edited, and the build runs inside
+    `objc2::exception::catch`: on an exception the menu bar keeps the system's menus, the shortcuts
+    fall back to the content containers' key commands, and `[snorkle] menu: …` is logged.
 55. **[verify] Find in page.** `findString:withConfiguration:` on iOS: whether it highlights the
     match visibly (it selects it), whether it moves focus out of the find field (the chrome
     refocuses it after each step), and that the count (visible text, case-insensitive, collapsed
