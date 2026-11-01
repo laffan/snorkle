@@ -35,7 +35,6 @@
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="spacer"></span>
       <button id="color" class="icon" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
-      <button id="headers" class="icon" aria-label="Headers view" title="Headers view" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M8 12h12M12 18h8"/></svg></button>
       <button id="images" class="icon" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/></svg></button>
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
@@ -54,9 +53,13 @@
     <div id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
   </aside>
 
+  <!-- URL bar: a pill in a strip along the bottom of the window. Pages are
+       native views drawn above the chrome, so the strip is reserved
+       (the page ends above it); nothing here overlaps a page. -->
   <header id="chrome">
     <div id="os-banner" class="banner" hidden></div>
-    <div id="toolbar">
+    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="toolbar" class="urlpill">
       <button id="sidebar-toggle" class="icon" aria-label="Show or hide sidebar" aria-controls="sidebar">&#x25E7;</button>
       <button id="back" class="icon" aria-label="Back">&#x2039;</button>
       <button id="forward" class="icon" aria-label="Forward">&#x203A;</button>
@@ -73,15 +76,21 @@
         <input id="url-input" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
                enterkeyhint="go" placeholder="Search or enter address" aria-label="Search or enter address" hidden>
       </div>
+      <div id="actions" class="page-actions">
+        <button id="actions-toggle" class="icon" aria-expanded="false" aria-controls="actions-items" aria-label="Page actions" title="Ads, bookmark, site scripts"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+        <span id="actions-items" class="actions-items" hidden>
+          <button id="shield" class="pillbtn" aria-label="Ad blocking for this site"></button>
+          <button id="bookmark" class="icon" aria-label="Bookmark this page">&#x2606;</button>
+          <button id="scripts-btn" class="icon text" aria-label="Site scripts and styles" aria-haspopup="dialog">{ }</button>
+        </span>
+      </div>
+      <button id="headers" class="icon" aria-label="Headers view for this tab" title="Headers view (this tab)" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M8 12h12M12 18h8"/></svg></button>
       <button id="unsplit" class="pillbtn" hidden title="Close split view">Unsplit</button>
       <button id="sheet-close" class="pillbtn" hidden title="Close this pop-up window and return to the page">Close Pop-up</button>
-      <button id="shield" class="pillbtn" aria-label="Ad blocking for this site"></button>
-      <button id="bookmark" class="icon" aria-label="Bookmark this page">&#x2606;</button>
-      <button id="scripts-btn" class="icon text" aria-label="Site scripts and styles" aria-haspopup="dialog">{ }</button>
+      <div id="progress"><div id="progress-bar"></div></div>
     </div>
-    <div id="toast" class="toast" role="status" hidden></div>
-    <div id="progress"><div id="progress-bar"></div></div>
   </header>
+  <div id="safe-top" aria-hidden="true"></div>
 
   <!-- Shown only where no content view covers it (start page, notices,
        history). -->

@@ -56,6 +56,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::get_view_mode,
         commands::set_view_mode,
         commands::set_tab_view_exempt,
+        commands::set_tab_headers,
         commands::get_headings,
         commands::scroll_to_heading,
         commands::clear_website_data,

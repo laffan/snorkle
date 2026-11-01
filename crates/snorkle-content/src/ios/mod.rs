@@ -4,7 +4,8 @@
 //! Security assumptions:
 //! - Content views are added as subviews of the Tauri window's root view,
 //!   *after* (above) the chrome's webview, inside a container that clips to
-//!   the area below the chrome toolbar. A page therefore cannot draw over
+//!   the content area the chrome reports (outside its toolbar strip, sidebar
+//!   and docked panels). A page therefore cannot draw over
 //!   the address bar; the chrome hides content views (via `HideView`)
 //!   whenever it shows anything that overlaps the content area.
 //! - Configurations are built only from `CONTENT_VIEW_SPEC`; no URL scheme

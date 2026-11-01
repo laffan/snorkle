@@ -276,24 +276,21 @@ pub struct ViewModesState {
     modes: ViewModes,
     /// Tab id → modes that tab is exempted from.
     exempt: std::collections::HashMap<u64, Vec<viewmodes::Kind>>,
+    /// Tabs with the headers view on.
+    headers_tabs: Vec<u64>,
 }
 
 fn view_modes_state(s: &S<'_>) -> ViewModesState {
     let exempt = s.exempt().iter().filter(|(_, k)| !k.is_empty()).map(|(t, k)| (t.0, k.iter().copied().collect())).collect();
-    ViewModesState { modes: s.view_modes(), exempt }
+    let headers_tabs = s.headers_tabs().iter().map(|t| t.0).collect();
+    ViewModesState { modes: s.view_modes(), exempt, headers_tabs }
 }
 
 /// Applies view-mode changes to every page at once, and drops outlines of
 /// tabs whose headers view is now off.
 fn apply_view_modes(s: &S<'_>) {
-    let modes = s.view_modes();
-    let exempt = s.exempt().clone();
-    let cleared: Vec<TabId> = s
-        .headings_of()
-        .keys()
-        .copied()
-        .filter(|t| !modes.for_tab(&exempt.get(t).cloned().unwrap_or_default()).headers)
-        .collect();
+    let tabs: Vec<TabId> = s.headings_of().keys().copied().collect();
+    let cleared: Vec<TabId> = tabs.into_iter().filter(|t| !s.modes_for(*t).headers).collect();
     for t in cleared {
         s.headings_of().remove(&t);
         (s.emit)(crate::state::ChromeEvent::Headings(t, &[]));
@@ -326,6 +323,21 @@ pub fn set_tab_view_exempt(s: S<'_>, tab: u64, mode: viewmodes::Kind, exempt: bo
             set.insert(mode);
         } else {
             set.remove(&mode);
+        }
+    }
+    apply_view_modes(&s);
+    view_modes_state(&s)
+}
+
+/// Turns the headers view on or off for one tab.
+#[tauri::command]
+pub fn set_tab_headers(s: S<'_>, tab: u64, on: bool) -> ViewModesState {
+    let tab = TabId(tab);
+    if s.browser().tab(tab).is_some() {
+        if on {
+            s.headers_tabs().insert(tab);
+        } else {
+            s.headers_tabs().remove(&tab);
         }
     }
     apply_view_modes(&s);

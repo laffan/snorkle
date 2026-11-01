@@ -29,6 +29,7 @@ pub const COMMANDS: &[&str] = &[
     "get_view_mode",
     "set_view_mode",
     "set_tab_view_exempt",
+    "set_tab_headers",
     "get_headings",
     "scroll_to_heading",
     "clear_website_data",

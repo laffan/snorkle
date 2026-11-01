@@ -25,12 +25,16 @@ fn view(modes: ViewModes) -> ViewInjections {
 pub fn apply(shared: &Arc<Shared>, run_now: bool) {
     let scripts = shared.store.as_ref().map(|s| s.user_scripts()).unwrap_or_default();
     let modes = shared.view_modes();
-    let tabs = {
-        let live: Vec<_> = shared.browser().view().tabs.iter().map(|t| t.id).collect();
-        let mut exempt = shared.exempt();
-        exempt.retain(|t, set| live.contains(t) && !set.is_empty());
-        exempt.iter().map(|(t, set)| (*t, view(modes.for_tab(set)))).collect()
-    };
+    let live: Vec<_> = shared.browser().view().tabs.iter().map(|t| t.id).collect();
+    shared.exempt().retain(|t, set| live.contains(t) && !set.is_empty());
+    shared.headers_tabs().retain(|t| live.contains(t));
+    // Tabs whose modes differ from the app-wide ones get their own scripts.
+    let tabs = live
+        .iter()
+        .map(|t| (*t, shared.modes_for(*t)))
+        .filter(|(_, m)| *m != modes)
+        .map(|(t, m)| (t, view(m)))
+        .collect();
     let injections = Injections { user: userscripts::injections(&scripts), view: view(modes), tabs };
     snorkle_content::dispatch_main(move || with_host(|h| h.set_injections(injections, run_now)));
 }

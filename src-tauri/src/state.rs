@@ -73,6 +73,8 @@ pub struct Shared {
     pub view_exempt: Mutex<HashMap<TabId, BTreeSet<viewmodes::Kind>>>,
     /// Latest outline per tab (headers view).
     pub headings: Mutex<HashMap<TabId, Vec<Heading>>>,
+    /// Tabs with the headers view on (it is a per-tab mode).
+    pub headers_tabs: Mutex<HashSet<TabId>>,
     /// In-app console (in memory only).
     pub console: Mutex<ConsoleLog>,
     /// Whether the console records (and pages get the console hook). On by
@@ -92,6 +94,7 @@ impl Shared {
             view_modes: Mutex::default(),
             view_exempt: Mutex::default(),
             headings: Mutex::default(),
+            headers_tabs: Mutex::default(),
             console: Mutex::default(),
             console_capture: AtomicBool::new(cfg!(debug_assertions)),
         })
@@ -107,6 +110,19 @@ impl Shared {
 
     pub fn exempt(&self) -> MutexGuard<'_, HashMap<TabId, BTreeSet<viewmodes::Kind>>> {
         self.view_exempt.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn headers_tabs(&self) -> MutexGuard<'_, HashSet<TabId>> {
+        self.headers_tabs.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The view modes in effect for `tab`: the app-wide ones minus the
+    /// tab's exemptions, plus the headers view where the tab has it on.
+    pub fn modes_for(&self, tab: TabId) -> ViewModes {
+        let exempt = self.exempt().get(&tab).cloned().unwrap_or_default();
+        let mut m = self.view_modes().for_tab(&exempt);
+        m.headers = self.headers_tabs().contains(&tab);
+        m
     }
 
     pub fn headings_of(&self) -> MutexGuard<'_, HashMap<TabId, Vec<Heading>>> {

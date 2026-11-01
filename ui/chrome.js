@@ -966,6 +966,8 @@
     const b = $('scripts-btn');
     b.classList.toggle('has-script', has);
     b.title = has ? 'Site scripts (active on this site)' : 'Site scripts';
+    // While the drawer is closed, the ring shows on its toggle instead.
+    $('actions-toggle').classList.toggle('has-script', has && $('actions-items').hidden);
   }
 
   function loadScripts() {
@@ -1089,7 +1091,9 @@
     // the content area moves once, to its final position.
     const left = sidebarOpen && !narrow ? Math.ceil($('sidebar').offsetWidth) : 0;
     $('chrome').style.left = left + 'px';
-    const top = Math.ceil($('chrome').getBoundingClientRect().bottom);
+    // Pages start below the status bar; the URL strip runs along the bottom.
+    const top = Math.ceil($('safe-top').getBoundingClientRect().height);
+    const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
     // Native page views are drawn above the chrome, so nothing here can
     // float over a page: panels either dock beside it (shrinking the
     // content area) or set `overlay`, which hides the page.
@@ -1099,13 +1103,15 @@
     const right = dock ? Math.min(420, Math.floor((window.innerWidth - left) * 0.45)) : 0;
     if (dock) {
       dock.style.top = top + 'px';
+      dock.style.bottom = strip + 'px';
       dock.style.width = right + 'px';
     }
-    // The docked console takes the bottom of the content area.
+    // The docked console sits above the URL strip.
     const con = $('console');
     con.style.left = left + 'px';
     con.style.right = right + 'px';
-    const bottom = consoleOpen ? Math.ceil(con.getBoundingClientRect().height) : 0;
+    con.style.bottom = strip + 'px';
+    const bottom = strip + (consoleOpen ? Math.ceil(con.getBoundingClientRect().height) : 0);
     // The chrome surface (start page, notices) covers the focused pane: in
     // split view that is one half of the content area (matching the native
     // pane frames: 2 pt divider, halves floored).
@@ -1178,8 +1184,12 @@
   const VIEW_BUTTONS = [
     { id: 'color', mode: 'desaturate', pressedWhenOff: true, name: 'Black and white' },
     { id: 'images', mode: 'hide_media', pressedWhenOff: true, name: 'Hide images and video' },
-    { id: 'headers', mode: 'headers', pressedWhenOff: false, name: 'Headers view' },
   ];
+
+  // The headers view is per tab (its button is in the URL bar).
+  function headersOn(tabId) {
+    return tabId !== null && tabId !== undefined && (viewModes.headers_tabs || []).includes(tabId);
+  }
 
   function exemptFor(tabId, mode) {
     return tabId !== null && tabId !== undefined && (viewModes.exempt[tabId] || []).includes(mode);
@@ -1202,8 +1212,25 @@
       btn.setAttribute('aria-pressed', String(pressed));
       btn.title = exempt ? `${b.name}: off for this tab (long-press to change)` : `${b.name} (long-press for this tab)`;
     }
+    const h = $('headers');
+    const on = headersOn(tab);
+    h.classList.toggle('on', on);
+    h.setAttribute('aria-pressed', String(on));
     renderOutline();
   }
+
+  $('headers').addEventListener('click', withTab((t) =>
+    applyViewModes(T.core.invoke('set_tab_headers', { tab: t.id, on: !headersOn(t.id) }))));
+
+  // Page actions drawer: opens inside the pill, beside the address.
+  function setDrawer(open) {
+    $('actions').classList.toggle('drawer-open', open);
+    $('actions-items').hidden = !open;
+    $('actions-toggle').setAttribute('aria-expanded', String(open));
+    syncMenuOpen();
+    renderScriptsMark(activeTab());
+  }
+  $('actions-toggle').addEventListener('click', () => setDrawer($('actions-items').hidden));
 
   function applyViewModes(p) {
     p.then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch((e) => toast(String(e)));
@@ -1261,7 +1288,7 @@
   // ---- headers view (outline) ---------------------------------------------
 
   function outlineShown() {
-    return !!state && !narrow && !scriptsOpen && modeOn('headers', state.active);
+    return !!state && !narrow && !scriptsOpen && headersOn(state.active);
   }
 
   function renderOutline() {
@@ -1651,6 +1678,7 @@
   document.addEventListener('pointerdown', (ev) => {
     if (menuOpen && !$('menu-pop').contains(ev.target) && ev.target !== $('menu')) closeMenu();
     if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
+    if (!$('actions-items').hidden && !$('actions').contains(ev.target)) setDrawer(false);
     if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('sidebar-toggle')) {
       setSidebar(false);
     }
