@@ -129,6 +129,17 @@ body.dragging #side-scroll { overflow-y: hidden; }
 }
 body.dragging .tab .close { opacity: 0; pointer-events: none; }
 
+/* Same-site tabs: the first is the group's main row, the rest indented
+   under it; a count on the main row folds them. */
+.site-group { display: flex; flex-direction: column; gap: 2px; }
+.site-group > .tab.child { margin-left: 18px; }
+.site-group.collapsed > .tab.child:not(.active) { display: none; }
+.site-toggle {
+  flex: 0 0 auto; min-width: 26px; height: 22px; margin-left: 6px; padding: 0 6px; border-radius: 11px;
+  font-size: 12px; font-weight: 700; border: 1px solid var(--fg);
+}
+.site-group.collapsed .site-toggle { background: var(--fg); color: var(--bar); }
+
 /* Two tabs shown side by side: one sidebar row with a half per tab. */
 .tab-group { display: flex; gap: 2px; padding: 2px; border-radius: 12px; background: var(--tab); }
 .tab-group > .tab { flex: 1 1 0; min-width: 0; }

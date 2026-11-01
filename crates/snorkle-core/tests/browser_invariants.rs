@@ -559,8 +559,12 @@ fn launcher_reuses_its_tab_and_survives_restart() {
     // Navigating inside the pin's tab keeps it bound.
     webkit_load(&mut b, p, "https://pin.example/page");
     b.activate(t, 2);
-    let (again, _) = b.open_launcher(key, u(key), 3);
+    let (again, out) = b.open_launcher(key, u(key), 3);
     assert_eq!(again, p, "no new tab");
+    assert!(out.iter().any(|e| matches!(e, Effect::Load { tab, url } if *tab == p && url.as_str() == key)), "back to the pinned page");
+    webkit_load(&mut b, p, key);
+    let (_, out) = b.open_launcher(key, u(key), 4);
+    assert!(!out.iter().any(|e| matches!(e, Effect::Load { .. })), "already there: no reload");
     assert_eq!(b.active(), Some(p));
     assert_eq!(b.view().tabs.len(), 2);
     assert_eq!(b.view().tabs.iter().find(|x| x.id == p).unwrap().launcher.as_deref(), Some(key));

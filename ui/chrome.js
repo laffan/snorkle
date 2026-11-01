@@ -105,6 +105,18 @@
     }
   }
 
+  // Sites whose tab group is folded (session only).
+  const collapsedSites = new Set();
+
+  function siteOf(t) {
+    return t.url ? t.url.registrable : '';
+  }
+
+  // Tabs that can join a same-site group: listed, and not in a split pair.
+  function groupable(t) {
+    return t.sheet_over === null && t.launcher === null && !pairOf(t.id);
+  }
+
   // The split pair holding a tab, if any.
   function pairOf(id) {
     return (state.splits || []).find((p) => p.left === id || p.right === id) || null;
@@ -143,8 +155,42 @@
         }
         list.appendChild(group);
       } else {
-        list.appendChild(tabNode(t, null));
-        placed.add(t.id);
+        // Same-site tabs (not paired, not bound to a pin or bookmark) are
+        // collected under the first one.
+        const site = siteOf(t);
+        const members = site ? state.tabs.filter((o) => groupable(o) && o.private === t.private && siteOf(o) === site) : [t];
+        if (members.length < 2) {
+          list.appendChild(tabNode(t, null));
+          placed.add(t.id);
+          continue;
+        }
+        const key = (t.private ? 'p:' : 'n:') + site;
+        if (members.some((m) => m.id === shownTab())) collapsedSites.delete(key);
+        const collapsed = collapsedSites.has(key);
+        const box = el('div', 'site-group' + (collapsed ? ' collapsed' : ''));
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', `${members.length} tabs on ${site}`);
+        members.forEach((m, i) => {
+          const node = tabNode(m, null);
+          if (i === 0) {
+            const toggle = el('button', 'site-toggle', String(members.length));
+            toggle.setAttribute('aria-expanded', String(!collapsed));
+            toggle.setAttribute('aria-label', `${collapsed ? 'Show' : 'Hide'} ${members.length - 1} more ${site} tabs`);
+            toggle.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              if (collapsedSites.has(key)) collapsedSites.delete(key);
+              else collapsedSites.add(key);
+              tabsKey = '';
+              renderTabs();
+            });
+            node.insertBefore(toggle, node.firstChild);
+          } else {
+            node.classList.add('child');
+          }
+          box.appendChild(node);
+          placed.add(m.id);
+        });
+        list.appendChild(box);
       }
     }
     $('private-head').hidden = !priv.childElementCount;

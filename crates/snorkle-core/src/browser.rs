@@ -480,13 +480,20 @@ impl Browser {
     }
 
     /// Opens a pin or bookmark: returns to the tab that belongs to it, or
-    /// creates one (default profile) and loads `url` there. `key` is the
-    /// pin's or bookmark's stored URL.
+    /// creates one (default profile), and loads `url` there unless the tab
+    /// already shows it, so opening it always goes back to its own page.
+    /// `key` is the pin's or bookmark's stored URL.
     pub fn open_launcher(&mut self, key: &str, url: Url, now: u64) -> (TabId, Vec<Effect>) {
         let existing =
             self.tabs.iter().find(|t| t.launcher.as_deref() == Some(key) && !t.is_private()).map(|t| t.id);
         if let Some(id) = existing {
-            return (id, self.activate(id, now));
+            let mut out = self.activate(id, now);
+            let shown = self.tab(id).and_then(|t| t.committed_url.clone());
+            if shown.as_ref() != Some(&url) {
+                out.extend(self.navigate_trusted(id, url, now));
+                out.push(Effect::NotifyChrome);
+            }
+            return (id, out);
         }
         let mut out = Vec::new();
         let id = self.new_tab_into(Profile::Default, now, &mut out);
