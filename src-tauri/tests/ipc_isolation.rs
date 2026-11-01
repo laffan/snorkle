@@ -51,6 +51,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "clear_website_data" => json!({ "kind": "cache" }),
         "ai_set_key" => json!({ "provider": "openai", "key": "sk-test" }),
         "ai_delete_key" | "ai_test" => json!({ "provider": "anthropic" }),
+        "detect_headings" => json!({ "tab": 1, "provider": "anthropic", "model": "claude-opus-5-5" }),
         "ai_write_script" => json!({ "provider": "anthropic", "model": "claude-opus-5-5", "domain": "example.com", "css": "", "js": "", "prompt": "x" }),
         "open_launcher" => json!({ "url": "https://example.com/" }),
         "remove_bookmark" => json!({ "url": "https://example.com/" }),

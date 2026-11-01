@@ -17,7 +17,7 @@
 //!   accepts a bounded JSON list, checks every field and sanitises the
 //!   text, and the chrome renders it with `textContent`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -119,36 +119,151 @@ pub const MAX_HEADINGS_REPORT: usize = 96 * 1024;
 
 const HEADING_SELECTOR: &str = "h1,h2,h3,h4,h5,h6";
 
+/// A site-specific heading rule (from "Detect Headers"): elements matching
+/// `selector` are headings of `level`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadingRule {
+    pub selector: String,
+    pub level: u8,
+}
+
+/// Heading rules per site (registrable domain; also applies to subdomains).
+pub type HeadingRules = BTreeMap<String, Vec<HeadingRule>>;
+
+pub const MAX_RULES_PER_SITE: usize = 12;
+pub const MAX_SELECTOR_CHARS: usize = 200;
+
+/// Accepts a CSS selector list for `querySelectorAll` only: bounded, one
+/// line, and none of the characters that could end a rule or start markup
+/// (`{ } ; < \ @` and quotes are refused; attribute values must be
+/// unquoted; `>` is the child combinator). An invalid selector only makes the extractor fall back.
+pub fn validate_rule(selector: &str, level: u8) -> Option<HeadingRule> {
+    let sel = selector.trim();
+    let ok_chars =
+        sel.chars().all(|c| c.is_ascii_graphic() || c == ' ') && !sel.chars().any(|c| "{};<\\@\"'`".contains(c));
+    (ok_chars && !sel.is_empty() && sel.len() <= MAX_SELECTOR_CHARS && (1..=6).contains(&level))
+        .then(|| HeadingRule { selector: sel.to_string(), level })
+}
+
 /// Starts the headings extractor (idempotent). It reports `[[level, text,
 /// index], …]` as a JSON string on load and whenever the DOM changes
-/// (debounced), only when the list changed. `index` is the heading's
-/// position among all h1–h6 elements, used to scroll back to it.
-fn headings_start_js() -> String {
+/// (debounced), only when the list changed, and `{"c": index}` for the
+/// heading the reader has scrolled to. `index` is the heading's position
+/// among the elements matching the page's heading selector (h1–h6, or the
+/// site's detected rules), used to scroll back to it.
+fn headings_start_js(rules: &HeadingRules) -> String {
+    let rules_json = json_str(&serde_json::to_string(rules).unwrap_or_else(|_| "{}".into()));
     format!(
         r#"(function(){{
 var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.{HEADINGS_HANDLER_NAME};
 if(!h||window.__snorkleHeadings)return;
-var last='',timer=0;
-function collect(){{timer=0;var out=[],els=document.querySelectorAll({sel});
+var all=JSON.parse({rules_json}),host=location.hostname.toLowerCase(),rules=null;
+for(var d in all){{if(host===d||host.endsWith('.'+d)){{rules=all[d];break;}}}}
+var sel={default_sel};
+if(rules&&rules.length){{try{{var u=rules.map(function(r){{return r.selector;}}).join(',');document.querySelector(u);sel=u;}}catch(e){{rules=null;}}}}else{{rules=null;}}
+function level(e){{if(!rules)return +e.tagName.charAt(1)||1;for(var i=0;i<rules.length;i++){{try{{if(e.matches(rules[i].selector))return rules[i].level;}}catch(x){{}}}}return 1;}}
+var last='',timer=0,list=[],cur=-1,stimer=0;
+function collect(){{timer=0;var out=[],els=document.querySelectorAll(sel);list=[];
 for(var i=0;i<els.length&&out.length<{MAX_HEADINGS};i++){{var e=els[i];if(!e.getClientRects().length)continue;
 var t=(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim().slice(0,{MAX_HEADING_CHARS});if(!t)continue;
-out.push([+e.tagName.charAt(1),t,i]);}}
-var s=JSON.stringify(out);if(s!==last){{last=s;h.postMessage(s);}}}}
+out.push([level(e),t,i]);list.push([e,i]);}}
+var s=JSON.stringify(out);if(s!==last){{last=s;h.postMessage(s);cur=-1;}}position();}}
+function position(){{stimer=0;var c=-1;for(var k=0;k<list.length;k++){{if(list[k][0].getBoundingClientRect().top<=96)c=list[k][1];else break;}}
+if(c<0&&list.length)c=list[0][1];if(c!==cur){{cur=c;h.postMessage(JSON.stringify({{c:c}}));}}}}
 function schedule(){{if(!timer)timer=setTimeout(collect,400);}}
+function onScroll(){{if(!stimer)stimer=setTimeout(position,150);}}
 var obs=new MutationObserver(schedule);
 obs.observe(document.documentElement,{{childList:true,subtree:true,characterData:true}});
-window.__snorkleHeadings={{obs:obs,cancel:function(){{clearTimeout(timer);}}}};
+window.addEventListener('scroll',onScroll,{{passive:true,capture:true}});
+window.__snorkleHeadings={{obs:obs,sel:sel,cancel:function(){{clearTimeout(timer);clearTimeout(stimer);window.removeEventListener('scroll',onScroll,true);}}}};
 collect();
 }})();"#,
-        sel = json_str(HEADING_SELECTOR)
+        default_sel = json_str(HEADING_SELECTOR)
     )
 }
 
 const HEADINGS_STOP_JS: &str =
     "(function(){var s=window.__snorkleHeadings;if(!s)return;s.obs.disconnect();s.cancel();delete window.__snorkleHeadings;})();";
 
+/// Candidates sent to "Detect Headers".
+pub const MAX_SAMPLE: usize = 200;
+/// Largest sample accepted from a page, in bytes.
+pub const MAX_SAMPLE_REPORT: usize = 96 * 1024;
+
+/// Collects a compact sample of the page's heading-like elements for
+/// "Detect Headers" and posts `{"sample": [...]}`: for each candidate (in
+/// document order) its tag, id, first classes, font size and weight, the
+/// parent's tag and classes, and the start of its text. Constant code; run
+/// only when the user presses the button.
+pub fn headings_sample_js() -> String {
+    format!(
+        r#"(function(){{
+var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.{HEADINGS_HANDLER_NAME};if(!h)return;
+function cls(e){{return (e.className&&e.className.baseVal===undefined?String(e.className):'').split(/\s+/).filter(Boolean).slice(0,4).map(function(c){{return c.slice(0,40);}});}}
+var ps=[].slice.call(document.querySelectorAll('p')).slice(0,40).map(function(p){{return parseFloat(getComputedStyle(p).fontSize)||16;}}).sort(function(a,b){{return a-b;}});
+var base=ps.length?ps[ps.length>>1]:16,out=[],els=document.body?document.body.getElementsByTagName('*'):[];
+for(var i=0;i<els.length&&i<8000&&out.length<{MAX_SAMPLE};i++){{var e=els[i],tag=e.tagName.toLowerCase();
+if(/^(script|style|noscript|svg|path|img|video|canvas|iframe|button|input|select|textarea|option)$/.test(tag))continue;
+var own='';for(var n=e.firstChild;n;n=n.nextSibling)if(n.nodeType===3)own+=n.nodeValue;own=own.replace(/\s+/g,' ').trim();
+var text=own.length>=3?own:'';if(!text&&e.children.length===1&&!e.children[0].children.length)text=(e.textContent||'').replace(/\s+/g,' ').trim();
+if(text.length<3||text.length>160)continue;if(!e.getClientRects().length)continue;
+var cs=getComputedStyle(e),fs=parseFloat(cs.fontSize)||0,fw=parseInt(cs.fontWeight,10)||400;
+var isH=/^h[1-6]$/.test(tag)||e.getAttribute('role')==='heading';
+if(!isH&&fs<base*1.15&&!(fw>=600&&fs>=base*1.05))continue;
+var p=e.parentElement;
+out.push({{tag:tag,id:(e.id||'').slice(0,40),cls:cls(e),fs:Math.round(fs),fw:fw,parent:p?p.tagName.toLowerCase():'',pcls:p?cls(p):[],text:text.slice(0,80)}});}}
+h.postMessage(JSON.stringify({{sample:out,base:Math.round(base)}}));
+}})();"#
+    )
+}
+
+/// What the headings extractor reported.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HeadingsReport {
+    Outline(Vec<Heading>),
+    /// Index of the heading the reader has scrolled to.
+    Current(u32),
+    /// A "Detect Headers" sample (validated JSON, re-serialised).
+    Sample(String),
+}
+
+/// Parses any report from the extractor (see [`parse_headings`]).
+pub fn parse_report(body: &str) -> Option<HeadingsReport> {
+    if body.starts_with('[') {
+        return parse_headings(body).map(HeadingsReport::Outline);
+    }
+    if body.len() > MAX_SAMPLE_REPORT {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    if let Some(c) = v.get("c") {
+        return u32::try_from(c.as_u64()?).ok().map(HeadingsReport::Current);
+    }
+    let sample = v.get("sample")?.as_array()?;
+    if sample.len() > MAX_SAMPLE {
+        return None;
+    }
+    // Keep only the expected fields, sanitising every string.
+    let s = |x: &serde_json::Value, max: usize| sanitize_page_text(x.as_str().unwrap_or(""), max);
+    let list = |x: &serde_json::Value| -> Vec<String> {
+        x.as_array().map(|a| a.iter().take(4).map(|c| s(c, 40)).collect()).unwrap_or_default()
+    };
+    let clean: Vec<serde_json::Value> = sample
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "tag": s(&e["tag"], 16), "id": s(&e["id"], 40), "cls": list(&e["cls"]),
+                "fs": e["fs"].as_u64().unwrap_or(0).min(400), "fw": e["fw"].as_u64().unwrap_or(400).min(1000),
+                "parent": s(&e["parent"], 16), "pcls": list(&e["pcls"]), "text": s(&e["text"], 80),
+            })
+        })
+        .collect();
+    let base = v.get("base").and_then(|b| b.as_u64()).unwrap_or(16).min(200);
+    Some(HeadingsReport::Sample(serde_json::json!({ "base_font_px": base, "candidates": clean }).to_string()))
+}
+
 /// Injected sources for the modes in `modes` (constant code).
-pub fn injections(modes: ViewModes) -> Vec<Injection> {
+pub fn injections(modes: ViewModes, rules: &HeadingRules) -> Vec<Injection> {
     let mut out = Vec::new();
     if modes.desaturate {
         out.push(Injection {
@@ -166,25 +281,31 @@ pub fn injections(modes: ViewModes) -> Vec<Injection> {
         });
     }
     if modes.headers {
-        out.push(Injection { source: headings_start_js(), at: InjectAt::DocumentEnd, all_frames: false });
+        out.push(Injection { source: headings_start_js(rules), at: InjectAt::DocumentEnd, all_frames: false });
     }
     out
 }
 
 /// Brings an already-loaded page in line with `modes` (adds or removes the
 /// styles, starts or stops the headings extractor). Constant code.
-pub fn apply_js(modes: ViewModes) -> String {
-    let headers = if modes.headers { headings_start_js() } else { HEADINGS_STOP_JS.to_string() };
+/// The headings extractor restarts, so new heading rules take effect.
+pub fn apply_js(modes: ViewModes, rules: &HeadingRules) -> String {
+    let headers = if modes.headers {
+        HEADINGS_STOP_JS.to_string() + &headings_start_js(rules)
+    } else {
+        HEADINGS_STOP_JS.to_string()
+    };
     style_js("__snorkle_grayscale", GRAYSCALE_CSS, modes.desaturate, false)
         + &style_js("__snorkle_no_images", NO_MEDIA_CSS, modes.hide_media, true)
         + &headers
 }
 
-/// Scrolls the page to the heading at `index` among its h1–h6 elements.
-/// The only input is an integer.
+/// Scrolls the page to the heading at `index` among the elements matching
+/// the extractor's heading selector. The only input is an integer.
 pub fn scroll_to_heading_js(index: u32) -> String {
     format!(
-        "(function(){{var e=document.querySelectorAll({})[{index}];if(e)e.scrollIntoView({{block:'start',behavior:'smooth'}});}})();",
+        "(function(){{var s=window.__snorkleHeadings,sel=s?s.sel:{};var e=document.querySelectorAll(sel)[{index}];\
+         if(e)e.scrollIntoView({{block:'start',behavior:'smooth'}});}})();",
         json_str(HEADING_SELECTOR)
     )
 }
@@ -266,20 +387,21 @@ mod tests {
         let exempt: BTreeSet<Kind> = [Kind::Desaturate].into();
         let t = m.for_tab(&exempt);
         assert!(!t.desaturate && t.hide_media);
-        assert_eq!(injections(t).len(), 1);
+        assert_eq!(injections(t, &HeadingRules::new()).len(), 1);
     }
 
     #[test]
     fn injections_per_mode() {
         let all = ViewModes { desaturate: true, hide_media: true, headers: true };
-        let inj = injections(all);
+        let inj = injections(all, &HeadingRules::new());
         assert_eq!(inj.len(), 3);
         assert!(inj[0].source.contains("grayscale(1)"));
         assert!(inj[1].source.contains("video,"));
         assert!(inj[2].source.contains(&format!("messageHandlers.{HEADINGS_HANDLER_NAME}")));
         assert_eq!(inj[2].at, InjectAt::DocumentEnd);
-        assert!(injections(ViewModes { desaturate: false, hide_media: false, headers: false }).is_empty());
-        let off = apply_js(ViewModes { desaturate: false, hide_media: false, headers: false });
+        assert!(injections(ViewModes { desaturate: false, hide_media: false, headers: false }, &HeadingRules::new())
+            .is_empty());
+        let off = apply_js(ViewModes { desaturate: false, hide_media: false, headers: false }, &HeadingRules::new());
         assert!(off.contains("window[\"__snorkle_grayscale_state\"];if(!s)return;s.obs.disconnect();s.st.remove()"));
         assert!(inj[1].all_frames, "hide media also covers iframes");
         assert!(!inj[0].all_frames && !inj[2].all_frames);
@@ -305,6 +427,40 @@ mod tests {
         let many = format!("[{}]", vec![r#"[2,"x",1]"#; MAX_HEADINGS + 1].join(","));
         assert!(parse_headings(&many).is_none());
         assert_eq!(parse_headings("[]").unwrap(), vec![]);
+    }
+
+    #[test]
+    fn heading_rules_are_validated_and_embedded_safely() {
+        assert!(validate_rule("h2.story-heading", 2).is_some());
+        assert!(validate_rule("div[data-testid=headline] > span", 1).is_some());
+        for bad in ["h2{color:red}", "h2;x", "</script>", "h2[a='x']", "@import", "a\\62", "", "h2\nh3"] {
+            assert!(validate_rule(bad, 1).is_none(), "{bad}");
+        }
+        assert!(validate_rule("h2", 0).is_none() && validate_rule("h2", 7).is_none());
+        assert!(validate_rule(&"a".repeat(MAX_SELECTOR_CHARS + 1), 1).is_none());
+        let mut rules = HeadingRules::new();
+        rules.insert("nytimes.com".into(), vec![validate_rule("h2.story-heading", 1).unwrap()]);
+        let js = &injections(ViewModes { desaturate: false, hide_media: false, headers: true }, &rules)[0].source;
+        assert!(js.contains("story-heading"));
+        assert!(!js.contains("</"), "rules are embedded as an escaped JSON literal");
+        let apply = apply_js(ViewModes { desaturate: false, hide_media: false, headers: true }, &rules);
+        let stop = apply.find(HEADINGS_STOP_JS).expect("stops the running extractor");
+        assert!(apply[stop..].contains("story-heading"), "then restarts it with the new rules");
+    }
+
+    #[test]
+    fn reports() {
+        assert_eq!(parse_report("{\"c\":4}"), Some(HeadingsReport::Current(4)));
+        assert!(matches!(parse_report("[[2,\"A\",0]]"), Some(HeadingsReport::Outline(v)) if v.len() == 1));
+        let sample = r#"{"sample":[{"tag":"div","id":"x","cls":["headline","a","b","c","d"],"fs":28,"fw":700,"parent":"article","pcls":[],"text":"Big \u202e news","extra":"dropped"}],"base":17}"#;
+        let Some(HeadingsReport::Sample(clean)) = parse_report(sample) else { panic!("sample") };
+        let v: serde_json::Value = serde_json::from_str(&clean).unwrap();
+        assert_eq!(v["base_font_px"], 17);
+        assert_eq!(v["candidates"][0]["cls"].as_array().unwrap().len(), 4);
+        assert_eq!(v["candidates"][0]["text"], "Big news");
+        assert!(v["candidates"][0].get("extra").is_none());
+        assert!(parse_report("{\"c\":-1}").is_none());
+        assert!(parse_report("{\"nope\":1}").is_none());
     }
 
     #[test]

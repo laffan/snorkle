@@ -65,6 +65,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         ai::ai_delete_key,
         ai::ai_test,
         ai::ai_write_script,
+        ai::detect_headings,
         commands::open_launcher,
         commands::get_console,
         commands::set_console_capture,
@@ -114,6 +115,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::PinsChanged => handle.emit_to(CHROME_LABEL, "pins", ()),
             ChromeEvent::Console(entry) => handle.emit_to(CHROME_LABEL, "console", entry),
             ChromeEvent::ConsoleReset => handle.emit_to(CHROME_LABEL, "console_reset", ()),
+            ChromeEvent::HeadingCurrent(tab, index) => {
+                handle.emit_to(CHROME_LABEL, "heading_current", serde_json::json!({ "tab": tab, "index": index }))
+            }
             ChromeEvent::Headings(tab, list) => {
                 handle.emit_to(CHROME_LABEL, "headings", serde_json::json!({ "tab": tab, "headings": list }))
             }

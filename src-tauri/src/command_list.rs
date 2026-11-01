@@ -38,6 +38,7 @@ pub const COMMANDS: &[&str] = &[
     "ai_delete_key",
     "ai_test",
     "ai_write_script",
+    "detect_headings",
     "open_launcher",
     "get_console",
     "set_console_capture",

@@ -56,6 +56,8 @@ impl ContentHost {
 
     pub fn scroll_to_heading(&mut self, _tab: snorkle_core::tabs::TabId, _index: u32) {}
 
+    pub fn sample_headings(&mut self, _tab: snorkle_core::tabs::TabId) {}
+
     pub fn clear_data(&mut self, _kind: crate::DataKind) {}
 
     pub fn set_console_capture(&mut self, _on: bool) {}

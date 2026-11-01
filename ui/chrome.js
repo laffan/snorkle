@@ -1287,6 +1287,35 @@
 
   // ---- headers view (outline) ---------------------------------------------
 
+  // Index of the heading each tab's reader has scrolled to.
+  const currentHeading = new Map();
+
+  function markCurrentHeading(tab) {
+    const cur = currentHeading.get(tab);
+    document.querySelectorAll('#outline-list li[data-index]').forEach((li) => li.classList.toggle('current', Number(li.dataset.index) === cur));
+  }
+
+  function outlineMsg(text) {
+    $('outline-msg').hidden = !text;
+    $('outline-msg').textContent = text || '';
+  }
+
+  // "Detect Headers": the AI picks this site's heading elements.
+  $('detect-headers').addEventListener('click', () => {
+    const tab = state && state.active;
+    const p = aiProvider();
+    if (!p) { outlineMsg('Connect an AI provider in Settings → AI to detect headers.'); return; }
+    const model = aiModel(p);
+    if (!model) { outlineMsg(`Choose an ${AI_LABEL[p]} model in Settings → AI.`); return; }
+    const btn = $('detect-headers');
+    btn.disabled = true;
+    outlineMsg(`Asking ${AI_LABEL[p]} which elements are headings…`);
+    T.core.invoke('detect_headings', { tab, provider: p, model })
+      .then((n) => outlineMsg(`Using ${n} heading rule${n === 1 ? '' : 's'} for this site.`))
+      .catch((e) => outlineMsg(String(e)))
+      .finally(() => { btn.disabled = false; });
+  });
+
   function outlineShown() {
     return !!state && !narrow && !scriptsOpen && headersOn(state.active);
   }
@@ -1311,6 +1340,8 @@
     const min = Math.min(...items.map((h) => h.level));
     for (const h of items) {
       const li = el('li');
+      li.dataset.index = String(h.index);
+      if (currentHeading.get(tab) === h.index) li.classList.add('current');
       const b = el('button', 'l' + (h.level - min + 1), h.text);
       b.style.paddingLeft = 8 + (h.level - min) * 14 + 'px';
       b.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
@@ -1755,6 +1786,10 @@
   loadScripts();
   loadAi();
   T.core.invoke('get_view_mode').then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch(() => {});
+  T.event.listen('heading_current', (e) => {
+    currentHeading.set(e.payload.tab, e.payload.index);
+    if (state && e.payload.tab === state.active) markCurrentHeading(e.payload.tab);
+  });
   T.event.listen('headings', (e) => {
     headingsByTab.set(e.payload.tab, e.payload.headings);
     if (state && e.payload.tab === state.active) renderOutline();

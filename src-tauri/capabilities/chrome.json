@@ -45,6 +45,7 @@
     "allow-ai-delete-key",
     "allow-ai-test",
     "allow-ai-write-script",
+    "allow-detect-headings",
     "allow-open-launcher",
     "allow-get-console",
     "allow-set-console-capture",

@@ -291,7 +291,11 @@
   <!-- Headers view: the page's outline, docked right of the page.
        Heading text is page-controlled: textContent only. -->
   <aside id="outline" class="sheet" aria-labelledby="outline-title" hidden>
-    <div class="modal-head"><h1 id="outline-title">Headers</h1></div>
+    <div class="modal-head">
+      <h1 id="outline-title">Headers</h1>
+      <button id="detect-headers" class="pillbtn" title="Ask your AI provider which elements are headings on this site (sends a short sample of the page's headline-like elements)">Detect Headers</button>
+    </div>
+    <p id="outline-msg" class="muted small" role="status" hidden></p>
     <ol id="outline-list" class="outline-list"></ol>
   </aside>
 

@@ -77,6 +77,42 @@ pub async fn ai_test(s: S<'_>, provider: Provider) -> Result<Vec<Model>, String>
     ai::parse_models(provider, status, &body)
 }
 
+/// "Detect Headers": samples the tab's heading-like elements (headers view
+/// on), asks the model which are headings on this site, stores the rules
+/// for the site and restarts the outline with them. Returns the number of
+/// rules. Sends the sample (tags, classes, styles, short texts) to the
+/// provider; runs only when the user presses the button.
+#[tauri::command]
+pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: String) -> Result<usize, String> {
+    let tab = snorkle_core::tabs::TabId(tab);
+    let site = s
+        .browser()
+        .view()
+        .tabs
+        .into_iter()
+        .find(|t| t.id == tab)
+        .and_then(|t| t.adblock)
+        .map(|a| a.site)
+        .ok_or("Open a web page first.")?;
+    let key = key(provider)?;
+    let (tx, rx) = mpsc::channel();
+    s.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).insert(tab, tx);
+    snorkle_content::dispatch_main(move || crate::state::with_host(|h| h.sample_headings(tab)));
+    let sample = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
+        .await
+        .map_err(|_| "Request failed.".to_string())?;
+    s.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).remove(&tab);
+    let sample = sample.map_err(|_| "The page didn't answer. Reload it with the headers view on and try again.")?;
+    let req = ai::headings_request(provider, &key, &model, &site, &sample)?;
+    let (status, body) = send(&s, provider, &format!("detect headings for {site} ({model})"), req).await?;
+    let rules = ai::parse_headings_reply(provider, status, &body)?;
+    if let Some(store) = s.store.clone() {
+        store.set_heading_rules(&site, &rules).map_err(|e| e.to_string())?;
+    }
+    crate::scripts::apply(&s, true);
+    Ok(rules.len())
+}
+
 /// Drafts or revises a site script. The draft is shown in the editor; it
 /// runs only if the user saves it.
 #[tauri::command]

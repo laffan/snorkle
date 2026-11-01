@@ -55,6 +55,8 @@ pub enum ChromeEvent<'a> {
     Console(&'a console::Entry),
     /// A tab's page outline changed (headers view).
     Headings(TabId, &'a [Heading]),
+    /// The heading a tab's reader has scrolled to (index into its outline).
+    HeadingCurrent(TabId, u32),
     /// Console entries were removed (cleared, or the private session ended).
     ConsoleReset,
 }
@@ -75,6 +77,8 @@ pub struct Shared {
     pub headings: Mutex<HashMap<TabId, Vec<Heading>>>,
     /// Tabs with the headers view on (it is a per-tab mode).
     pub headers_tabs: Mutex<HashSet<TabId>>,
+    /// "Detect Headers" requests waiting for their page's sample.
+    pub pending_samples: Mutex<HashMap<TabId, mpsc::Sender<String>>>,
     /// In-app console (in memory only).
     pub console: Mutex<ConsoleLog>,
     /// Whether the console records (and pages get the console hook). On by
@@ -95,6 +99,7 @@ impl Shared {
             view_exempt: Mutex::default(),
             headings: Mutex::default(),
             headers_tabs: Mutex::default(),
+            pending_samples: Mutex::default(),
             console: Mutex::default(),
             console_capture: AtomicBool::new(cfg!(debug_assertions)),
         })
@@ -413,9 +418,16 @@ impl ContentEvents for Events {
     }
     fn headings(&self, tab: Option<TabId>, body: String) {
         let Some(tab) = tab else { return };
-        match viewmodes::parse_headings(&body) {
-            Some(list) => self.shared.set_headings(tab, list),
-            None => self.shared.log(console::Level::Warn, Some(tab), "headers view: malformed outline ignored"),
+        match viewmodes::parse_report(&body) {
+            Some(viewmodes::HeadingsReport::Outline(list)) => self.shared.set_headings(tab, list),
+            Some(viewmodes::HeadingsReport::Current(i)) => (self.shared.emit)(ChromeEvent::HeadingCurrent(tab, i)),
+            Some(viewmodes::HeadingsReport::Sample(sample)) => {
+                let waiting = self.shared.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).remove(&tab);
+                if let Some(tx) = waiting {
+                    let _ = tx.send(sample);
+                }
+            }
+            None => self.shared.log(console::Level::Warn, Some(tab), "headers view: malformed report ignored"),
         }
     }
     fn reload_requested(&self, tab: TabId) {

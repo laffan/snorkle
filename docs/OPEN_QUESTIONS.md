@@ -234,3 +234,8 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     beta `server-side-fallback-2026-07-01`). **[decide]** Keys are device-only (no iCloud
     Keychain sync); the domain, script and prompt are sent to the provider under the user's own
     account terms.
+47. **[verify] Detect Headers.** The sample is collected in the client world (computed styles of
+    up to 8,000 elements, once per press); check the cost on very large pages. Rules are keyed by
+    registrable domain and apply to its subdomains; a site whose layouts differ by section may
+    need re-detecting. **[decide]** Pressing the button sends up to 200 short text snippets from
+    the page to the AI provider.

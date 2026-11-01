@@ -165,6 +165,14 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
 .outline-list .l1 { font-weight: 700; }
 .outline-list .l2 { font-weight: 600; }
 .outline-list li.muted { padding: 6px 8px; font-size: 13px; }
+#outline .modal-head h1 { flex: 1; }
+#outline-msg { margin: -4px 0 8px; }
+/* The heading the reader has scrolled to. */
+.outline-list button { position: relative; }
+.outline-list li.current > button::before {
+  content: ""; position: absolute; left: -2px; top: 50%; width: 6px; height: 6px; margin-top: -3px;
+  border-radius: 3px; background: var(--fg);
+}
 #sidebar-resize {
   position: absolute; top: 0; bottom: 0; right: -6px; width: 12px;
   cursor: col-resize; touch-action: none; z-index: 2;

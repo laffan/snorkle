@@ -290,6 +290,14 @@ impl ContentHost {
         }
     }
 
+    /// Runs the "Detect Headers" sampler in `tab`'s page (headers view on);
+    /// the sample arrives through `ContentEvents::headings`.
+    pub fn sample_headings(&mut self, tab: TabId) {
+        if let Some(v) = self.views.get(&tab) {
+            injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::headings_sample_js());
+        }
+    }
+
     /// Scrolls `tab`'s page to one of its headings (headers view).
     pub fn scroll_to_heading(&mut self, tab: TabId, index: u32) {
         if let Some(v) = self.views.get(&tab) {
