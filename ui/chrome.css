@@ -68,6 +68,15 @@ body.sidebar-closed #chrome, body.narrow #chrome { padding-left: env(safe-area-i
 }
 body.sidebar-closed #sidebar { transform: translateX(-100%); }
 body.narrow #sidebar { box-shadow: 0 0 24px rgba(0, 0, 0, .25); }
+/* With a pointer (trackpad, mouse), the sidebar and the URL bar recede to
+   half opacity until the pointer is over them, something in them has focus,
+   or one of their menus or a drag is in progress. Touch-only devices have
+   no hover, so there they stay fully visible. */
+@media (any-hover: hover) {
+  body:not(.narrow) #sidebar, #chrome { opacity: .5; transition: opacity .15s; }
+  body:not(.narrow) #sidebar:hover, body:not(.narrow) #sidebar:focus-within, #chrome:hover, #chrome:focus-within,
+  body.dragging #sidebar, body.resizing #sidebar, body.menu-open #sidebar, body.menu-open #chrome { opacity: 1; }
+}
 body.resizing #sidebar { transition: none; }
 #side-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px 12px; }
 body.dragging #side-scroll { overflow-y: hidden; }
@@ -85,6 +94,9 @@ body.dragging #side-scroll { overflow-y: hidden; }
 .hint { font-size: 13px; color: var(--muted); padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
 
 .tab, .bm { display: flex; align-items: center; border-radius: 10px; touch-action: manipulation; }
+/* Rows are dragged by our own code, from anywhere on the row: no native
+   element drag, callout or tap highlight. */
+.tab, .tab *, .bm, .bm *, .pin, .pin * { -webkit-user-drag: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
 .tab { position: relative; }
 .tab.active, .bm.active { background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; }
 .bm.active .t { font-weight: 600; }
@@ -349,10 +361,10 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .palette-list mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
 
 /* ---- pinned grid ------------------------------------------------------- */
-.pingrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; min-height: 60px; padding: 2px; border-radius: 12px; }
+.pingrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-height: 60px; padding: 2px; border-radius: 12px; }
 .pingrid.drop-target { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }
 .pingrid .hint { grid-column: 1 / -1; }
-.pin { position: relative; aspect-ratio: 1; border-radius: 12px; background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; touch-action: manipulation; }
+.pin { position: relative; min-width: 0; aspect-ratio: 1; border-radius: 12px; background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; touch-action: manipulation; }
 .pin.drag-src { opacity: .35; }
 .pin.active { box-shadow: 0 0 0 2px var(--fg) inset; }
 /* Unpin appears only while the pointer is over the pin (touch-only

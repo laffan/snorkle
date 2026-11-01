@@ -637,20 +637,44 @@
     }
   }
 
-  document.addEventListener('pointermove', (ev) => {
-    if (pendingDrag && Math.hypot(ev.clientX - pendingDrag.x, ev.clientY - pendingDrag.y) > MOVE_TOLERANCE_PX) {
+  function dragMoveTo(x, y) {
+    if (pendingDrag && Math.hypot(x - pendingDrag.x, y - pendingDrag.y) > MOVE_TOLERANCE_PX) {
       cancelPending(); // the user is scrolling
     }
     if (!dragState) return;
-    dragState.ghost.style.left = ev.clientX - dragState.dx + 'px';
-    dragState.ghost.style.top = ev.clientY - dragState.dy + 'px';
-    dragState.target = dropTargetAt(ev.clientX, ev.clientY);
+    dragState.ghost.style.left = x - dragState.dx + 'px';
+    dragState.ghost.style.top = y - dragState.dy + 'px';
+    dragState.target = dropTargetAt(x, y);
     showDropFeedback(dragState.target);
-  });
+  }
+
+  // WebKit on iPadOS may cancel the pointer stream during a long press
+  // (it hands the touch to its own scroll or drag recognisers), depending on
+  // what is under the finger. While a finger is still down, a cancelled
+  // pointer therefore does not end the drag: touch events carry it on.
+  let touchDown = false;
+  document.addEventListener('pointermove', (ev) => dragMoveTo(ev.clientX, ev.clientY));
   document.addEventListener('pointerup', () => { cancelPending(); if (dragState) endDrag(true); });
-  document.addEventListener('pointercancel', () => { cancelPending(); if (dragState) endDrag(false); });
+  document.addEventListener('pointercancel', () => {
+    if (touchDown) return;
+    cancelPending();
+    if (dragState) endDrag(false);
+  });
+  document.addEventListener('touchstart', () => { touchDown = true; }, { passive: true, capture: true });
   // Once a drag has started, stop the sidebar from scrolling under it.
-  document.addEventListener('touchmove', (ev) => { if (dragState) ev.preventDefault(); }, { passive: false });
+  document.addEventListener('touchmove', (ev) => {
+    const t = ev.touches[0];
+    if (t) dragMoveTo(t.clientX, t.clientY);
+    if (dragState) ev.preventDefault();
+  }, { passive: false });
+  const touchEnded = (commit) => (ev) => {
+    if (ev.touches.length) return;
+    touchDown = false;
+    cancelPending();
+    if (dragState) endDrag(commit);
+  };
+  document.addEventListener('touchend', touchEnded(true));
+  document.addEventListener('touchcancel', touchEnded(false));
 
   // ---- sidebar ----------------------------------------------------------
 
@@ -734,8 +758,13 @@
 
   // ---- menu, settings, history ----------------------------------------------
 
-  function openMenu() { menuOpen = true; $('menu-pop').hidden = false; }
-  function closeMenu() { menuOpen = false; $('menu-pop').hidden = true; }
+  function openMenu() { menuOpen = true; $('menu-pop').hidden = false; document.body.classList.add('menu-open'); }
+  function closeMenu() { menuOpen = false; $('menu-pop').hidden = true; syncMenuOpen(); }
+  // Keeps the chrome fully opaque while any of its menus is open.
+  function syncMenuOpen() {
+    const open = menuOpen || !$('vm-pop').hidden || !!document.querySelector('.drawer-open');
+    document.body.classList.toggle('menu-open', open);
+  }
 
   function openPanel() {
     closeMenu();
@@ -1153,8 +1182,9 @@
     item.textContent = exempt ? 'Use the app setting for this tab' : appOn ? 'Disable for this tab' : 'Turn it on to set it per tab';
     closeMenu();
     $('vm-pop').hidden = false;
+    syncMenuOpen();
   }
-  function closeVmPop() { $('vm-pop').hidden = true; vmTarget = null; }
+  function closeVmPop() { $('vm-pop').hidden = true; vmTarget = null; syncMenuOpen(); }
 
   for (const b of VIEW_BUTTONS) {
     const btn = $(b.id);
