@@ -158,11 +158,14 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   to a client-world message handler (C14); the chrome shows them, nested by level, in a panel
   docked right of the page, and a click scrolls to the heading. The style modes use the same
   mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
-  Pages are black and white with images and video hidden by default (`img`, `picture`, SVG `image`, `video`, embedded players of the common video sites,
-  CSS background images); the palette button shows colour and the images button shows images
-  and video. Both are session-only (`Shared::view_mode`, not persisted), so every launch starts
-  that way. Hidden `<img>` and `<video>` elements may still download; CSS background images do
-  not. Players inside other sites' iframes are hidden only for the listed video sites.
+  Pages are black and white with media hidden by default: images, video, canvas, embedded
+  objects and video-player iframes keep their boxes but are drawn as gray rectangles (hover
+  shows them in black and white), CSS background images are dropped, and videos are paused when
+  they start unless hovered. The hide-media style runs in every frame and re-attaches itself if
+  a page removes it. The palette button shows colour and the images button shows images and
+  video. Both are session-only (`Shared::view_modes`, not persisted), so every launch starts
+  that way. Hidden `<img>` and `<video>` sources still download (hover needs them); CSS
+  background images do not.
 - **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
   tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects
   carry a `Pane` (`Full`, `Left` or `Right`), and the host places each container in its half,
