@@ -82,17 +82,31 @@ impl ViewModes {
 /// Fixed style for desaturate. `filter` on the root element does not create
 /// a containing block for fixed-position content.
 pub const GRAYSCALE_CSS: &str = "html{filter:grayscale(1)!important}";
-/// Fixed style for hide media: image and video elements, and embedded
-/// players of the common video sites, are removed from layout, and CSS
-/// background images are dropped (WebKit then does not fetch them; `<img>`
-/// sources are still fetched). Inline SVG icons stay visible.
-pub const NO_MEDIA_CSS: &str = concat!(
-    "img,picture,input[type=image],svg image,object[type^=\"image/\"],embed[type^=\"image/\"],",
-    "video,object[type^=\"video/\"],embed[type^=\"video/\"],",
+/// Elements hide media turns into gray boxes: images, video, canvas
+/// (animations, WebGL), embedded objects and the players of common video
+/// sites. Inline SVG icons stay as they are.
+const MEDIA_SELECTOR: &str = concat!(
+    "img,input[type=image],svg image,video,canvas,object,embed,",
     "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
     "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
-    "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"]",
-    "{display:none!important}*,*::before,*::after{background-image:none!important}"
+    "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"],",
+    "iframe[src*=\"/embed/\"],iframe[src*=\"player\"],iframe[src*=\"video\"]"
+);
+/// Fixed style for hide media: each media element keeps its box but is
+/// drawn as a solid gray rectangle (a gray background, then a filter that
+/// turns every opaque pixel the same gray); hovering one shows it in black
+/// and white. CSS background images are dropped (WebKit then does not
+/// fetch them); `<img>` sources are still fetched so hover can show them.
+pub const NO_MEDIA_CSS: &str = concat!(
+    "img,input[type=image],svg image,video,canvas,object,embed,",
+    "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
+    "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
+    "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"],",
+    "iframe[src*=\"/embed/\"],iframe[src*=\"player\"],iframe[src*=\"video\"]",
+    "{background-color:#c8c8c8!important;filter:brightness(0) invert(.78)!important}",
+    "img:hover,input[type=image]:hover,svg image:hover,video:hover,canvas:hover,object:hover,embed:hover,iframe:hover",
+    "{background-color:transparent!important;filter:grayscale(1)!important}",
+    "*,*::before,*::after{background-image:none!important}"
 );
 
 /// Name of the headings message handler (client world only).
@@ -138,18 +152,21 @@ pub fn injections(modes: ViewModes) -> Vec<Injection> {
     let mut out = Vec::new();
     if modes.desaturate {
         out.push(Injection {
-            source: style_js("__snorkle_grayscale", GRAYSCALE_CSS, true),
+            source: style_js("__snorkle_grayscale", GRAYSCALE_CSS, true, false),
             at: InjectAt::DocumentStart,
+            all_frames: false,
         });
     }
     if modes.hide_media {
+        // In every frame: embedded players and ads live in iframes.
         out.push(Injection {
-            source: style_js("__snorkle_no_images", NO_MEDIA_CSS, true),
+            source: style_js("__snorkle_no_images", NO_MEDIA_CSS, true, true),
             at: InjectAt::DocumentStart,
+            all_frames: true,
         });
     }
     if modes.headers {
-        out.push(Injection { source: headings_start_js(), at: InjectAt::DocumentEnd });
+        out.push(Injection { source: headings_start_js(), at: InjectAt::DocumentEnd, all_frames: false });
     }
     out
 }
@@ -158,8 +175,8 @@ pub fn injections(modes: ViewModes) -> Vec<Injection> {
 /// styles, starts or stops the headings extractor). Constant code.
 pub fn apply_js(modes: ViewModes) -> String {
     let headers = if modes.headers { headings_start_js() } else { HEADINGS_STOP_JS.to_string() };
-    style_js("__snorkle_grayscale", GRAYSCALE_CSS, modes.desaturate)
-        + &style_js("__snorkle_no_images", NO_MEDIA_CSS, modes.hide_media)
+    style_js("__snorkle_grayscale", GRAYSCALE_CSS, modes.desaturate, false)
+        + &style_js("__snorkle_no_images", NO_MEDIA_CSS, modes.hide_media, true)
         + &headers
 }
 
@@ -172,16 +189,42 @@ pub fn scroll_to_heading_js(index: u32) -> String {
     )
 }
 
-fn style_js(id: &str, css: &str, on: bool) -> String {
+/// Adds (or removes) a fixed style. While on, the style re-attaches itself
+/// if the page removes it (single-page apps that rebuild `<head>`). With
+/// `pause_media`, videos that start playing are paused unless the pointer is
+/// over them (hidden media should not play), and `MEDIA_SELECTOR` is used
+/// for nothing else.
+fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
+    let key = json_str(&format!("{id}_state"));
     let id = json_str(id);
-    if on {
+    if !on {
+        return format!(
+            "(function(){{var s=window[{key}];if(!s)return;s.obs.disconnect();s.st.remove();\
+             if(s.onPlay)document.removeEventListener('play',s.onPlay,true);delete window[{key}];}})();"
+        );
+    }
+    let pause = if pause_media {
         format!(
-            "(function(){{if(document.getElementById({id}))return;var st=document.createElement('style');st.id={id};st.textContent={};(document.head||document.documentElement).appendChild(st);}})();",
-            json_str(css)
+            "s.onPlay=function(e){{var t=e.target;if(t&&t.matches&&t.matches({sel})&&!t.matches(':hover')&&t.pause)t.pause();}};\
+             document.addEventListener('play',s.onPlay,true);\
+             document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!v.matches(':hover'))v.pause();}});",
+            sel = json_str(MEDIA_SELECTOR)
         )
     } else {
-        format!("(function(){{var st=document.getElementById({id});if(st)st.remove();}})();")
-    }
+        String::new()
+    };
+    // The root element may not exist yet at document start; the observer
+    // watches the document, <html> and <head> (each once it exists) and
+    // re-attaches the style whenever it is missing.
+    format!(
+        "(function(){{if(window[{key}])return;var s={{}};window[{key}]=s;\
+         var st=document.createElement('style');st.id={id};st.textContent={css};s.st=st;\
+         var seen=[];var watch=function(n){{if(n&&seen.indexOf(n)<0){{seen.push(n);s.obs.observe(n,{{childList:true}});}}}};\
+         var put=function(){{watch(document.documentElement);watch(document.head);\
+         var r=document.head||document.documentElement;if(r&&!st.isConnected)r.appendChild(st);}};\
+         s.obs=new MutationObserver(put);watch(document);put();{pause}}})();",
+        css = json_str(css)
+    )
 }
 
 /// One heading of the page outline.
@@ -237,7 +280,10 @@ mod tests {
         assert_eq!(inj[2].at, InjectAt::DocumentEnd);
         assert!(injections(ViewModes { desaturate: false, hide_media: false, headers: false }).is_empty());
         let off = apply_js(ViewModes { desaturate: false, hide_media: false, headers: false });
-        assert!(off.contains("__snorkle_grayscale\");if(st)st.remove()"));
+        assert!(off.contains("window[\"__snorkle_grayscale_state\"];if(!s)return;s.obs.disconnect();s.st.remove()"));
+        assert!(inj[1].all_frames, "hide media also covers iframes");
+        assert!(!inj[0].all_frames && !inj[2].all_frames);
+        assert!(inj[1].source.contains("addEventListener('play'"));
         assert!(off.contains("obs.disconnect()"));
     }
 

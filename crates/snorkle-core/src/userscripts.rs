@@ -88,6 +88,8 @@ pub enum InjectAt {
 pub struct Injection {
     pub source: String,
     pub at: InjectAt,
+    /// Also run in subframes (default: main frame only).
+    pub all_frames: bool,
 }
 
 /// Builds the injected source of each enabled user script. (View modes are
@@ -108,12 +110,14 @@ pub fn injections(scripts: &[UserScript]) -> Vec<Injection> {
                     json_str(&s.css)
                 ),
                 at: InjectAt::DocumentStart,
+                all_frames: false,
             });
         }
         if !s.js.trim().is_empty() && s.js.len() <= MAX_JS_BYTES {
             out.push(Injection {
                 source: format!("(function(){{{guard}\n{}\n}})();", s.js),
                 at: InjectAt::DocumentEnd,
+                all_frames: false,
             });
         }
     }

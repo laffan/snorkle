@@ -175,7 +175,7 @@ pub fn make_scripts(
                     WKUserScript::alloc(mtm),
                     &NSString::from_str(&i.source),
                     at,
-                    true,
+                    !i.all_frames,
                     &world,
                 )
             }
