@@ -95,8 +95,35 @@ pub fn run() {
             setup(app)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running snorkle");
+        .build(tauri::generate_context!())
+        .expect("error while building snorkle")
+        .run(on_run_event);
+}
+
+/// Links opened from other apps before setup finished (cold launch).
+static PENDING_LINKS: std::sync::Mutex<Vec<snorkle_core::Url>> = std::sync::Mutex::new(Vec::new());
+
+#[allow(unused_variables)]
+fn on_run_event<R: Runtime>(app: &tauri::AppHandle<R>, event: tauri::RunEvent) {
+    // Snorkle as the default browser: iOS sends links tapped in other apps.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    if let tauri::RunEvent::Opened { urls } = event {
+        match app.try_state::<Arc<Shared>>() {
+            Some(shared) => open_links(&shared, urls),
+            None => PENDING_LINKS.lock().unwrap_or_else(|e| e.into_inner()).extend(urls),
+        }
+    }
+}
+
+/// Opens links from other apps in new tabs (http/https only, policy-checked).
+fn open_links(shared: &Arc<Shared>, urls: Vec<snorkle_core::Url>) {
+    for url in urls {
+        let shown = url.to_string();
+        let (tab, effects) = shared.browser().open_from_other_app(url, state::now_ms());
+        let result = if tab.is_some() { "opened" } else { "refused" };
+        shared.log(snorkle_core::console::Level::Info, tab, &format!("link from another app {shown}: {result}"));
+        shared.run(effects);
+    }
 }
 
 fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
@@ -144,6 +171,8 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     scripts::apply(&shared, false);
     let effects = shared.browser().restore_session(&session, state::now_ms());
     shared.run(effects);
+    let pending = std::mem::take(&mut *PENDING_LINKS.lock().unwrap_or_else(|e| e.into_inner()));
+    open_links(&shared, pending);
 
     // Content blocking: reuses WebKit's compiled lists when unchanged,
     // otherwise converts off the main thread.

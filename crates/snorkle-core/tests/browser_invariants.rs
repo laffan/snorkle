@@ -545,6 +545,26 @@ fn split_with_self_is_ignored() {
     assert!(b.view().split.is_none());
 }
 
+// ---- links from other apps (default browser) -----------------------------------
+
+#[test]
+fn links_from_other_apps_open_in_a_new_tab() {
+    let mut b = browser(4);
+    let (t, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (id, out) = b.open_from_other_app(u("https://news.example/story"), 1);
+    let id = id.expect("opened");
+    assert_ne!(id, t);
+    assert_eq!(b.active(), Some(id));
+    assert!(out.iter().any(|e| matches!(e, Effect::Load { tab, .. } | Effect::CreateView { tab, .. } if *tab == id)));
+    for bad in ["javascript:alert(1)", "file:///etc/hosts", "https://user:pw@bank.example/", "data:text/html,x", "tel:123"] {
+        assert!(b.open_from_other_app(u(bad), 2).0.is_none(), "{bad}");
+    }
+    // http is still upgraded by the normal policy.
+    let (h, out) = b.open_from_other_app(u("http://plain.example/"), 3);
+    assert!(h.is_some());
+    assert!(out.iter().any(|e| matches!(e, Effect::Load { url, .. } | Effect::CreateView { then: AfterCreate::Load(url), .. } if url.scheme() == "https")));
+}
+
 // ---- pins and bookmarks own a tab -----------------------------------------
 
 #[test]

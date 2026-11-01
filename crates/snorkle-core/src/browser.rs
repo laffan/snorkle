@@ -479,6 +479,24 @@ impl Browser {
         out
     }
 
+    /// A link opened from another app (Snorkle as the default browser): a
+    /// new tab in the default profile, through the normal navigation
+    /// policy. Only plain http(s) URLs without credentials are accepted.
+    pub fn open_from_other_app(&mut self, url: Url, now: u64) -> (Option<TabId>, Vec<Effect>) {
+        let plain = matches!(url.scheme(), "http" | "https")
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.as_str().len() <= input::MAX_INPUT_LEN;
+        if !plain || !self.os.allows_browsing() {
+            return (None, Vec::new());
+        }
+        let mut out = Vec::new();
+        let id = self.new_tab_into(Profile::Default, now, &mut out);
+        out.extend(self.navigate_trusted(id, url, now));
+        out.push(Effect::NotifyChrome);
+        (Some(id), out)
+    }
+
     /// Opens a pin or bookmark: returns to the tab that belongs to it, or
     /// creates one (default profile), and loads `url` there unless the tab
     /// already shows it, so opening it always goes back to its own page.

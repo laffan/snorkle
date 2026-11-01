@@ -238,7 +238,7 @@ via the share sheet.
 
 | Without the entitlement | Effect on Snorkle |
 |---|---|
-| Not selectable as default browser | Links from other apps open in Safari. |
+| Not selectable as default browser | Links from other apps open in Safari. (With it, iOS sends them to Snorkle as `RunEvent::Opened`; each http/https URL without credentials opens in a new tab through the normal policy, `Browser::open_from_other_app`.) |
 | No Service Workers in WKWebView (unless App-Bound Domains, which we do not use) | PWAs, offline sites and push-dependent sites degrade. A WebKit bug report says SharedWorker pages also fail to load without the entitlement since iOS 16.1 (unverified for 26/27). |
 | "Full script access" | Not needed today: we inject no scripts and do not opt into App-Bound Domains. |
 | Entitlement key present but not provisioned | The build fails to sign. Remove the key from `ios/Entitlements.plist` for such builds. |

@@ -70,6 +70,21 @@ On Linux, the Tauri test build needs the WebKitGTK development packages
   7. Run `tests/device/ipc-probe.html` from a remote origin and `tests/device/raf-probe.html`,
      and record the results in `docs/PERFORMANCE.md`.
 
+### Default browser
+
+The app already declares the `http`/`https` URL schemes (`Info.ios.plist`) and handles links
+tapped in other apps (each opens in a new tab). To appear in **Settings → Apps → Default
+Browser App**, the app also needs Apple's managed entitlement `com.apple.developer.web-browser`:
+
+1. Request it with Apple's "Default browser entitlement request" form (developer account
+   holder), for the app's real bundle identifier.
+2. Once granted, enable it for the App ID in the developer portal, keep the key in
+   `src-tauri/ios/Entitlements.plist`, and copy it into the generated
+   `gen/apple/snorkle_iOS/snorkle_iOS.entitlements` (step 3 above).
+3. Install the signed build, then choose Snorkle under Settings → Apps → Default Browser App.
+
+Until then, builds must leave the key out, or signing fails.
+
 Minimum OS: iPadOS 26.0 (deployment target and runtime gate). Older patch levels get a warning
 banner; the table lives in `crates/snorkle-core/src/os.rs` and must be updated with each Apple
 security release.
