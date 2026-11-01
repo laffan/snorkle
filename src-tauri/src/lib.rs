@@ -62,6 +62,13 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::find_in_page,
         commands::count_in_page,
         commands::end_find,
+        commands::focus_chrome,
+        commands::share_page,
+        commands::read_selection,
+        commands::define_term,
+        commands::search_google,
+        commands::get_shortcuts,
+        commands::set_shortcuts,
         commands::clear_website_data,
         ai::ai_status,
         ai::ai_set_key,
@@ -154,6 +161,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::Headings(tab, list) => {
                 handle.emit_to(CHROME_LABEL, "headings", serde_json::json!({ "tab": tab, "headings": list }))
             }
+            ChromeEvent::Selection(tab, rect) => {
+                handle.emit_to(CHROME_LABEL, "selection", serde_json::json!({ "tab": tab, "rect": rect }))
+            }
         };
     });
     let allowlist = store.as_ref().map(|s| s.adblock_allowed()).unwrap_or_default();
@@ -163,6 +173,14 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
 
     let window = app.get_webview_window(CHROME_LABEL).ok_or("main window missing")?;
     attach_content_host(&window, shared.clone())?;
+    // The chrome's own WKWebView, so the host can give it keyboard focus.
+    #[cfg(target_os = "ios")]
+    window.with_webview(|w| {
+        let view = w.inner();
+        // SAFETY: Tauri runs this on the main thread; `view` is the chrome's
+        // WKWebView, alive as long as the window (the host retains it).
+        state::with_host(|h| unsafe { h.set_chrome_view(view) });
+    })?;
     // Debug desktop builds: open the chrome's Web Inspector (console etc.).
     // On iOS use Safari > Develop > <device or Simulator> instead.
     #[cfg(all(debug_assertions, desktop))]

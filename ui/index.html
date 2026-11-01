@@ -83,6 +83,7 @@
     </div>
     <div id="toolbar" class="urlpill">
       <button id="sidebar-toggle" class="icon" aria-label="Show or hide sidebar" aria-controls="sidebar">&#x25E7;</button>
+      <button id="share" class="icon" aria-label="Share this page" title="Share"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M8 11H6.5A1.5 1.5 0 0 0 5 12.5v7A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16"/></svg></button>
       <button id="back" class="icon" aria-label="Back">&#x2039;</button>
       <button id="forward" class="icon" aria-label="Forward">&#x203A;</button>
       <button id="reload" class="icon" aria-label="Reload">&#x21BB;</button>
@@ -160,6 +161,7 @@
         <h1 id="modal-title">Settings</h1>
         <button data-section="general" aria-current="page">General</button>
         <button data-section="ai">AI</button>
+        <button data-section="keys">Keyboard</button>
         <button data-section="cache">Cache</button>
       </nav>
       <div class="settings-body">
@@ -174,7 +176,7 @@
           </div></div>
           <div class="option"><div>
             <div class="option-title">Keyboard</div>
-            <div class="muted small">⌘T new tab (search open tabs and bookmarks) · ⌘W close tab (asks first for a bookmark's tab, which removes the bookmark; pinned tabs stay) · ⌘F find on page · ⌘S or ⌘\ show or hide the sidebar · ⌘⇧\ show or hide the right panel · ⌘⇧D bookmark this page · ⌘1–⌘5 the first pins, bookmarks and tabs · ⌘-click a link to open it in a background tab.</div>
+            <div class="muted small">Shortcuts are listed, and can be changed, under Keyboard. ⌘W asks first on a bookmark's tab (closing it removes the bookmark) and never closes a pinned site's tab.</div>
           </div></div>
           <div class="option"><div>
             <div class="option-title">Ad and tracker blocking</div>
@@ -183,6 +185,8 @@
         </section>
         <section data-panel="ai" hidden>
           <p class="muted small">Connect your own API account to use AI for site scripts, Detect Headers and page chat. Keys are kept in the iOS Keychain on this device only and are never shown again. Requests go directly to the provider. Site scripts send the site's domain, its script and what you type; Detect Headers sends short snippets of the page's headline-like text; each chat message sends the page's address, title, visible text and selection.</p>
+          <h3 class="settings-sub">Authentication</h3>
+          <p class="muted small">Test lists the models your account can use, for the menus under Uses.</p>
         <div class="ai-provider" data-provider="anthropic">
           <div class="ai-head"><span class="option-title">Anthropic</span><span class="ai-state muted small"></span></div>
           <div class="ai-row">
@@ -191,7 +195,6 @@
           </div>
           <div class="ai-row">
             <button class="button ai-test">Test</button>
-            <select class="ai-model" aria-label="Anthropic model"><option value="">Test the key to list models</option></select>
             <button class="button ai-remove">Remove</button>
           </div>
           <div class="ai-msg muted small" role="status"></div>
@@ -204,15 +207,13 @@
           </div>
           <div class="ai-row">
             <button class="button ai-test">Test</button>
-            <select class="ai-model" aria-label="OpenAI model"><option value="">Test the key to list models</option></select>
             <button class="button ai-remove">Remove</button>
           </div>
           <div class="ai-msg muted small" role="status"></div>
         </div>
-          <div class="option">
-            <div><div class="option-title">Site script helper uses</div></div>
-            <select id="ai-use" aria-label="AI provider for site scripts"></select>
-          </div>
+          <h3 class="settings-sub">Uses</h3>
+          <p class="muted small">Each feature uses its own service and model.</p>
+          <div id="ai-uses" class="ai-uses"></div>
           <div class="ai-usage">
             <div class="ai-head">
               <span class="option-title">Usage</span>
@@ -224,6 +225,14 @@
               <tbody></tbody>
               <tfoot></tfoot>
             </table>
+          </div>
+        </section>
+        <section data-panel="keys" hidden>
+          <p class="muted small">Choose a shortcut, then press the new keys: ⌘ with a letter, digit or punctuation key, plus Shift, Option or Control if you like. Escape cancels. ⌘-click on a link always opens it in a background tab.</p>
+          <ol id="keys-list" class="keys-list"></ol>
+          <div class="actions">
+            <button id="keys-reset" class="button">Restore Defaults</button>
+            <span id="keys-msg" class="muted small" role="status"></span>
           </div>
         </section>
         <section data-panel="cache" hidden>
@@ -355,6 +364,13 @@
       <button id="chat-send" class="button primary" type="submit">Send</button>
     </form>
   </aside>
+
+  <!-- Over the text selected on a page (cut out of the page, like the pill). -->
+  <div id="sel-pop" class="sel-pop" role="menu" aria-label="Selected text" hidden>
+    <button id="sel-google" role="menuitem">Google This</button>
+    <button id="sel-ask" role="menuitem">Ask AI</button>
+    <button id="sel-define" role="menuitem">Define</button>
+  </div>
 
   <div id="drop-line" hidden></div>
 </body>

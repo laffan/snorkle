@@ -57,6 +57,8 @@ pub enum ChromeEvent<'a> {
     Headings(TabId, &'a [Heading]),
     /// The heading a tab's reader has scrolled to (index into its outline).
     HeadingCurrent(TabId, u32),
+    /// Where a tab's text selection is (`None`: nothing selected).
+    Selection(TabId, Option<snorkle_core::selection::SelectionRect>),
     /// Console entries were removed (cleared, or the private session ended).
     ConsoleReset,
 }
@@ -77,6 +79,8 @@ pub struct Shared {
     pub headings: Mutex<HashMap<TabId, Vec<Heading>>>,
     /// Tabs with the headers view on (it is a per-tab mode).
     pub headers_tabs: Mutex<HashSet<TabId>>,
+    /// Effective keyboard shortcut bindings (one per `SHORTCUTS` entry).
+    pub shortcuts: Mutex<Vec<snorkle_content::KeyBinding>>,
     /// "Detect Headers" requests waiting for their page's sample.
     pub pending_samples: Mutex<HashMap<TabId, mpsc::Sender<String>>>,
     /// In-app console (in memory only).
@@ -100,6 +104,7 @@ impl Shared {
             headings: Mutex::default(),
             headers_tabs: Mutex::default(),
             pending_samples: Mutex::default(),
+            shortcuts: Mutex::new(snorkle_content::effective_bindings(&[]).unwrap_or_default()),
             console: Mutex::default(),
             console_capture: AtomicBool::new(cfg!(debug_assertions)),
         })
@@ -345,6 +350,13 @@ impl ContentEvents for Events {
     }
     fn new_window_request(&self, opener: TabId, url: Url) {
         self.apply(|b| b.on_new_window_request(opener, &url, now_ms()));
+    }
+    fn selection(&self, tab: Option<TabId>, body: String) {
+        let Some(tab) = tab else { return };
+        match snorkle_core::selection::parse_report(&body) {
+            Some(rect) => (self.shared.emit)(ChromeEvent::Selection(tab, rect)),
+            None => self.shared.log(console::Level::Warn, Some(tab), "selection menu: malformed report ignored"),
+        }
     }
     fn background_tab_requested(&self, opener: TabId, url: Url) {
         let (tab, effects) = self.shared.browser().on_background_tab_request(opener, &url, now_ms());

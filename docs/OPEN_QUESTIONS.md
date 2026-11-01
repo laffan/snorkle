@@ -301,4 +301,20 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 56. **[verify] Sidebar pop-over.** Closing it when the pointer leaves relies on the chrome's web
     view getting `pointerleave`/`mouseout` when the pointer moves from a hole onto a page view.
     If it does not, the pop-over stays until a tap outside or Escape.
+57. **[verify] Round 4 (2026-11-01).**
+    (a) `focus_chrome` (`becomeFirstResponder` on Tauri's WKWebView) followed by `input.focus()`
+    gives the palette keyboard focus after ⌘T from a page; WebKit may still ignore programmatic
+    focus without a user gesture.
+    (b) The share sheet and dictionary are presented from the window's root view controller as
+    popovers anchored to the root view; check they appear over the page views and dismiss cleanly.
+    (c) Selection menu placement assumes the page's visual viewport width maps onto the pane width
+    (`k = pane width / vw`); check at zoomed-in and desktop-scaled pages, in split view, and that it
+    does not fight the system's own selection callout on touch.
+    (d) ⌘I now toggles images and takes priority over pages (italic in web editors); ⌘D likewise.
+    (e) Rebinding rebuilds the menu bar; check that UIKit picks up `setNeedsRebuild` promptly and
+    that punctuation keys other than `\` match on non-US layouts.
+    **[decide]** "Google This" always uses Google (the address bar's default is DuckDuckGo).
+    Settings → AI now has Authentication and Uses (Site script helper, Ask Selection, Header View
+    Parsing), each with its own service and model; earlier per-provider model choices are used
+    as the defaults.
 

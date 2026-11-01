@@ -268,6 +268,27 @@ fn new_window_fallback_inherits_profile() {
 }
 
 #[test]
+fn bookmarking_moves_the_tab() {
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(t, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, t, "https://a.example/");
+    let (ok, out) = b.bind_launcher(t, "https://a.example/");
+    assert!(ok && out.iter().any(|e| matches!(e, Effect::PersistSession(_))));
+    assert_eq!(b.tab(t).unwrap().launcher.as_deref(), Some("https://a.example/"));
+    assert_eq!(b.session().tabs[0].launcher.as_deref(), Some("https://a.example/"));
+    // Opening the bookmark returns to this tab instead of making another.
+    let (id, _) = b.open_launcher("https://a.example/", u("https://a.example/"), 1);
+    assert_eq!(id, t);
+    let (t2, _) = b.new_tab(Profile::Default, 2);
+    assert!(!b.bind_launcher(t2, "https://a.example/").0, "one tab per item");
+    let (p, _) = b.new_tab(Profile::Private, 3);
+    assert!(!b.bind_launcher(p, "https://p.example/").0, "private tabs are never bound");
+    b.release_launcher("https://a.example/");
+    assert!(b.tab(t).unwrap().launcher.is_none(), "un-bookmarking makes it a normal tab");
+}
+
+#[test]
 fn command_click_opens_a_background_tab() {
     let mut b = browser(4);
     let (p, _) = b.new_tab(Profile::Private, 0);

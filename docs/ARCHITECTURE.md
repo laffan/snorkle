@@ -213,9 +213,24 @@ match, wrapping) plus a match count read back from a constant script (C18).
 Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are commands of the app's main menu, so they
 work whatever has focus, including nothing (sidebar hidden, no page): ⌘T new tab, ⌘W close tab (a
 pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘S or
-⌘\ sidebar, ⌘⇧\ right panels, ⌘⇧D bookmark the page, ⌘1–5 sidebar items. The chrome's own
-keydown handler covers the same keys when it has focus; a shortcut arriving twice within 60 ms is
-run once.
+⌘\ sidebar, ⌘⇧\ right panels, ⌘D bookmark (on a bookmark's tab: un-bookmark), ⌘I images,
+⌘1–5 sidebar items. Settings → Keyboard rebinds them: the chrome keeps the user's bindings and
+sends them at launch (`set_shortcuts`, validated, clashes refused); the menu is rebuilt, and
+while a key is being recorded the shortcuts are suspended so the keys reach the chrome. The
+chrome's own keydown handler uses the same bindings when it has focus; a shortcut arriving twice
+within 60 ms is run once. An input the chrome opens from a shortcut (palette, find, chat) first
+asks the host to make the chrome's web view first responder (`focus_chrome`).
+
+Bookmarking a tab (⌘D, the ⋯ menu, or dragging it into the bookmarks) moves it into the
+bookmark: the tab becomes that bookmark's tab (`Browser::bind_launcher`) instead of a second tab
+appearing when the bookmark is opened. Un-bookmarking makes it an ordinary tab again.
+
+The share button (between the sidebar toggle and Back) opens the system share sheet for the
+page's committed URL, as a popover from the button (so Instapaper and other share extensions
+appear). Selecting text on a page shows a small menu above it, cut out of the page: Google This
+(a new tab), Ask AI (opens the chat with the quote as a draft) and Define (the system
+dictionary). A watcher in the page's client world reports where the selection is (C19); the text
+is read when the menu appears (C20).
 
 ## 5e. Docked panels
 
@@ -234,7 +249,8 @@ kept from the narrower layout) and zooms it to fill the width.
 ## 5g. Page chat
 
 The chat button beside the headers button opens a panel docked right of the page: a model menu
-(the models of every connected provider, as listed by Settings → AI → Test), the conversation,
+(the models of every connected provider, as listed by Settings → AI → Test; it sets the "Ask
+Selection" use), the conversation,
 and an estimate of what it has cost so far (provider-reported tokens × published prices,
 `ai::estimate_cost_micros`; "≥" when a model has no known price). Each message is sent with the
 whole conversation (at most 40 messages, each ≤ 8,000 chars). At that moment the host runs a

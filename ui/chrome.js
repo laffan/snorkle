@@ -96,6 +96,7 @@
     renderChat();
     // Find and confirmations belong to the tab they were opened on.
     if (findOpen && find.tab !== null && find.tab !== state.active) closeFind();
+    if (selection && selection.tab !== state.active && !(state.split && (selection.tab === state.split.left || selection.tab === state.split.right))) hideSelection();
     if (confirmAction && confirmAction.tab !== state.active && confirmAction.tab !== state.sheet) closeConfirm();
     reportLayout();
   }
@@ -251,7 +252,7 @@
     reload.textContent = tab && tab.loading ? '×' : '↻';
     reload.setAttribute('aria-label', tab && tab.loading ? 'Stop' : 'Reload');
     $('bookmark').disabled = !(tab && tab.url && !tab.private);
-    const marked = !!(tab && tab.url && bookmarks.some((b) => b.url === tab.url.full));
+    const marked = !!(tab && ((tab.launcher && bookmarks.some((b) => b.url === tab.launcher)) || (tab.url && bookmarks.some((b) => b.url === tab.url.full))));
     $('bookmark').querySelector('.label').textContent = marked ? 'Remove Bookmark' : 'Bookmark';
     $('bookmark').querySelector('.state').textContent = marked ? '\u2605' : '\u2606';
     $('unsplit').hidden = !state.split;
@@ -911,33 +912,57 @@
     reportLayout();
   }
 
-  const SETTINGS_TITLES = { general: 'General', ai: 'AI', cache: 'Cache' };
+  const SETTINGS_TITLES = { general: 'General', ai: 'AI', keys: 'Keyboard', cache: 'Cache' };
   function showSettings(section) {
     document.querySelectorAll('.settings-nav button').forEach((b) => b.setAttribute('aria-current', b.dataset.section === section ? 'page' : 'false'));
     document.querySelectorAll('.settings-body [data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== section; });
     $('settings-heading').textContent = SETTINGS_TITLES[section];
     if (section === 'ai') { loadAi(); loadUsage(); }
+    if (section === 'keys') renderKeys();
   }
   document.querySelectorAll('.settings-nav button').forEach((b) => b.addEventListener('click', () => showSettings(b.dataset.section)));
 
   // ---- AI connections -----------------------------------------------------
   //
   // Keys go to the Keychain through Rust and never come back; the chrome
-  // only learns whether one is stored. The chosen model per provider and the
-  // provider used for site scripts are UI preferences (localStorage).
+  // only learns whether one is stored (Authentication). Each feature that
+  // uses AI has its own service and model (Uses); both are UI preferences
+  // (localStorage), as are the model lists Test fetched.
 
   const AI_DEFAULT_MODEL = { anthropic: 'claude-opus-5-5', openai: '' };
   const AI_LABEL = { anthropic: 'Anthropic', openai: 'OpenAI' };
+  const AI_USES = [
+    { id: 'scripts', label: 'Site script helper', note: 'Drafts CSS and JavaScript in Site Scripts.' },
+    { id: 'ask', label: 'Ask Selection', note: 'The page chat and “Ask AI” on selected text.' },
+    { id: 'headers', label: 'Header View Parsing', note: 'Detect Headers in the headers view.' },
+  ];
   let aiConfigured = { anthropic: false, openai: false };
 
   function aiModels(p) {
     try { return JSON.parse(pref('aiModels.' + p) || '[]'); } catch (e) { return []; }
   }
-  function aiModel(p) { return pref('aiModel.' + p) || AI_DEFAULT_MODEL[p]; }
-  function aiProvider() {
-    const chosen = pref('aiProvider');
-    if (chosen && aiConfigured[chosen]) return chosen;
-    return ['anthropic', 'openai'].find((p) => aiConfigured[p]) || null;
+  function connectedProviders() {
+    return ['anthropic', 'openai'].filter((p) => aiConfigured[p]);
+  }
+  // The service and model a use is set to: its saved choice if that
+  // service is still connected, else the first connected one with its
+  // first listed model (or the legacy per-provider model).
+  function useChoice(id) {
+    const ps = connectedProviders();
+    if (!ps.length) return null;
+    const saved = pref(`use.${id}.provider`);
+    const p = ps.includes(saved) ? saved : ps[0];
+    const models = aiModels(p);
+    const m = pref(`use.${id}.model`);
+    const model = (p === saved && m && (!models.length || models.some((x) => x.id === m)) ? m : null)
+      || pref('aiModel.' + p) || (models[0] && models[0].id) || AI_DEFAULT_MODEL[p];
+    if (!model) return null;
+    const hit = models.find((x) => x.id === model);
+    return { p, id: model, name: hit ? hit.name : model };
+  }
+  function setUse(id, p, model) {
+    setPref(`use.${id}.provider`, p);
+    setPref(`use.${id}.model`, model);
   }
 
   function loadAi() {
@@ -948,35 +973,61 @@
     document.querySelectorAll('.ai-provider').forEach((box) => {
       const p = box.dataset.provider;
       const on = !!aiConfigured[p];
-      box.querySelector('.ai-state').textContent = on ? 'Key saved' : 'Not connected';
+      const n = aiModels(p).length;
+      box.querySelector('.ai-state').textContent = on ? (n ? `Key saved · ${n} models` : 'Key saved') : 'Not connected';
       box.querySelector('.ai-key').placeholder = on ? 'Replace the saved key' : `${AI_LABEL[p]} API key`;
       box.querySelector('.ai-test').disabled = !on;
       box.querySelector('.ai-remove').disabled = !on;
-      const sel = box.querySelector('.ai-model');
-      const models = aiModels(p);
-      const current = aiModel(p);
-      sel.replaceChildren();
-      if (!models.length) {
-        const o = el('option', null, current ? current : 'Test the key to list models');
-        o.value = current || '';
-        sel.appendChild(o);
-      }
-      for (const m of models) {
-        const o = el('option', null, m.name === m.id ? m.id : `${m.name} (${m.id})`);
-        o.value = m.id;
-        sel.appendChild(o);
-      }
-      sel.value = current;
-      sel.disabled = !on;
     });
-    const use = $('ai-use');
-    use.replaceChildren();
-    const ps = ['anthropic', 'openai'].filter((p) => aiConfigured[p]);
-    if (!ps.length) use.appendChild(el('option', null, 'Connect a provider first'));
-    for (const p of ps) { const o = el('option', null, AI_LABEL[p]); o.value = p; use.appendChild(o); }
-    use.disabled = !ps.length;
-    if (ps.length) use.value = aiProvider();
-    $('se-ai').hidden = !aiProvider();
+    renderUses();
+    $('se-ai').hidden = !useChoice('scripts');
+  }
+
+  // Uses: one row per feature, with a service menu and a model menu.
+  function renderUses() {
+    const box = $('ai-uses');
+    box.replaceChildren();
+    const ps = connectedProviders();
+    for (const u of AI_USES) {
+      const row = el('div', 'ai-use');
+      const label = el('div', 'ai-use-label');
+      label.append(el('div', 'option-title', u.label), el('div', 'muted small', u.note));
+      const svc = el('select');
+      svc.setAttribute('aria-label', `${u.label}: service`);
+      const model = el('select');
+      model.setAttribute('aria-label', `${u.label}: model`);
+      const choice = useChoice(u.id);
+      if (!ps.length) {
+        svc.appendChild(el('option', null, 'Connect a service above'));
+        svc.disabled = model.disabled = true;
+      } else {
+        for (const p of ps) { const o = el('option', null, AI_LABEL[p]); o.value = p; svc.appendChild(o); }
+        svc.value = choice ? choice.p : ps[0];
+        const list = aiModels(svc.value);
+        if (!list.length) {
+          const o = el('option', null, choice ? choice.id : 'Test the key to list models');
+          o.value = choice ? choice.id : '';
+          model.appendChild(o);
+        }
+        for (const m of list) {
+          const o = el('option', null, m.name === m.id ? m.id : `${m.name} (${m.id})`);
+          o.value = m.id;
+          model.appendChild(o);
+        }
+        if (choice) model.value = choice.id;
+      }
+      svc.addEventListener('change', () => {
+        const list = aiModels(svc.value);
+        setUse(u.id, svc.value, (list[0] && list[0].id) || AI_DEFAULT_MODEL[svc.value] || '');
+        renderAi();
+        renderChatModels();
+      });
+      model.addEventListener('change', () => { setUse(u.id, svc.value, model.value); renderChatModels(); });
+      const pickers = el('div', 'ai-use-pickers');
+      pickers.append(svc, model);
+      row.append(label, pickers);
+      box.appendChild(row);
+    }
   }
 
   document.querySelectorAll('.ai-provider').forEach((box) => {
@@ -993,9 +1044,8 @@
       return T.core.invoke('ai_test', { provider: p })
         .then((models) => {
           setPref('aiModels.' + p, JSON.stringify(models));
-          if (models.length && !models.some((m) => m.id === aiModel(p))) setPref('aiModel.' + p, models[0].id);
           renderAi();
-          msg(`Connected. ${models.length} model${models.length === 1 ? '' : 's'} available.`);
+          msg(`Connected. ${models.length} model${models.length === 1 ? '' : 's'} available; choose them under Uses.`);
         })
         .catch((e) => msg(String(e)));
     };
@@ -1005,9 +1055,7 @@
         .then((st) => { aiConfigured = st.configured; renderAi(); msg('Key removed from this device.'); })
         .catch((e) => msg(String(e)));
     });
-    box.querySelector('.ai-model').addEventListener('change', (ev) => setPref('aiModel.' + p, ev.target.value));
   });
-  $('ai-use').addEventListener('change', (ev) => { setPref('aiProvider', ev.target.value); renderAi(); });
 
   // Usage: AI requests grouped by local date, with estimated cost.
   function money(micros) {
@@ -1055,11 +1103,11 @@
 
   // Site script helper: drafts CSS/JS into the editor for the user to review.
   $('se-ai-go').addEventListener('click', () => {
-    const p = aiProvider();
+    const use = useChoice('scripts');
     const out = $('se-ai-msg');
-    if (!p) { out.textContent = 'Connect an AI provider in Settings → AI.'; return; }
-    const model = aiModel(p);
-    if (!model) { out.textContent = `Choose an ${AI_LABEL[p]} model in Settings → AI.`; return; }
+    if (!use) { out.textContent = 'Connect an AI service in Settings → AI.'; return; }
+    const p = use.p;
+    const model = use.id;
     const btn = $('se-ai-go');
     btn.disabled = true;
     out.textContent = `Asking ${AI_LABEL[p]}…`;
@@ -1133,7 +1181,7 @@
     $('se-delete').hidden = !s;
     $('se-ai-prompt').value = '';
     $('se-ai-msg').textContent = '';
-    $('se-ai').hidden = !aiProvider();
+    $('se-ai').hidden = !useChoice('scripts');
   }
 
   function currentSite() {
@@ -1208,6 +1256,7 @@
   // Tells Rust where the content area starts and whether chrome UI is
   // covering it (content views are hidden while `overlay` is true).
   let lastLayout = '';
+  let contentBox = { left: 0, top: 0, right: 0, bottom: 0 };
   function reportLayout() {
     // Use the sidebar's layout width (unaffected by the slide transform) so
     // the content area moves once, to its final position.
@@ -1263,6 +1312,7 @@
     s.style.left = sLeft + 'px';
     s.style.right = sRight + 'px';
     s.style.bottom = bottom + 'px';
+    contentBox = { left, top, right, bottom };
     const holes = overlay ? [] : floatingHoles();
     const key = JSON.stringify([top, left, right, bottom, overlay, holes]);
     if (key === lastLayout) return;
@@ -1294,7 +1344,7 @@
       if (f && pill) f.h = Math.max(1, pill.y - f.y);
       if (f) out.push(f);
     }
-    for (const id of ['actions-pop', 'confirm-pop', 'toast', 'os-banner']) {
+    for (const id of ['actions-pop', 'confirm-pop', 'sel-pop', 'toast', 'os-banner']) {
       const e = $(id);
       if (e.hidden) continue;
       const h = hole(e, 15);
@@ -1511,10 +1561,10 @@
   // "Detect Headers": the AI picks this site's heading elements.
   $('detect-headers').addEventListener('click', () => {
     const tab = state && state.active;
-    const p = aiProvider();
-    if (!p) { outlineMsg('Connect an AI provider in Settings → AI to detect headers.'); return; }
-    const model = aiModel(p);
-    if (!model) { outlineMsg(`Choose an ${AI_LABEL[p]} model in Settings → AI.`); return; }
+    const use = useChoice('headers');
+    if (!use) { outlineMsg('Connect an AI service in Settings → AI to detect headers.'); return; }
+    const p = use.p;
+    const model = use.id;
     const btn = $('detect-headers');
     btn.disabled = true;
     outlineMsg(`Asking ${AI_LABEL[p]} which elements are headings…`);
@@ -1626,19 +1676,22 @@
     for (const p of ['anthropic', 'openai']) {
       if (!aiConfigured[p]) continue;
       const models = aiModels(p);
-      if (!models.length && aiModel(p)) out.push({ p, id: aiModel(p), name: aiModel(p) });
+      if (!models.length) {
+        const c = useChoice('ask');
+        const id = c && c.p === p ? c.id : AI_DEFAULT_MODEL[p];
+        if (id) out.push({ p, id, name: id });
+      }
       for (const m of models) out.push({ p, id: m.id, name: m.name || m.id });
     }
     return out;
   }
 
+  // The chat's model is the "Ask Selection" use (Settings → AI → Uses);
+  // the menu in the chat changes that use.
   function chatChoice() {
     const models = chatModels();
-    const saved = pref('chatModel');
-    const hit = models.find((m) => `${m.p}|${m.id}` === saved);
-    if (hit) return hit;
-    const p = aiProvider();
-    return models.find((m) => m.p === p && m.id === aiModel(p)) || models[0] || null;
+    const c = useChoice('ask');
+    return (c && models.find((m) => m.p === c.p && m.id === c.id)) || (c && { p: c.p, id: c.id, name: c.name }) || models[0] || null;
   }
 
   function renderChatModels() {
@@ -1713,7 +1766,7 @@
     applyChat();
     if (open) {
       loadAi().then(() => { renderChatModels(); chatKey = ''; renderChat(); });
-      setTimeout(() => $('chat-input').focus(), 0);
+      focusInput($('chat-input'));
     }
     renderViewMode();
     reportLayout();
@@ -1758,7 +1811,12 @@
     chatKey = '';
     renderChat();
   });
-  $('chat-model').addEventListener('change', (ev) => { setPref('chatModel', ev.target.value); renderChat(); });
+  $('chat-model').addEventListener('change', (ev) => {
+    const [p, ...rest] = ev.target.value.split('|');
+    setUse('ask', p, rest.join('|'));
+    chatKey = '';
+    renderChat();
+  });
   $('chat-form').addEventListener('submit', (ev) => { ev.preventDefault(); sendChat(); });
   $('chat-input').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); sendChat(); }
@@ -1989,8 +2047,18 @@
     const input = $('palette-input');
     input.value = '';
     renderPalette();
-    input.focus();
+    focusInput(input);
     reportLayout();
+  }
+
+  // Focuses an input the chrome opened from a shortcut. After a shortcut a
+  // page (or nothing) has keyboard focus, and focusing inside the chrome's
+  // web view does nothing until that web view is first responder: ask the
+  // host for it, then focus again.
+  function focusInput(input, select) {
+    const go = () => { input.focus({ preventScroll: true }); if (select) input.select(); };
+    go();
+    T.core.invoke('focus_chrome').catch(() => {}).finally(() => { go(); requestAnimationFrame(go); });
   }
 
   function closePalette() {
@@ -2055,6 +2123,8 @@
       bookmarkShortcut();
     } else if (name === 'find') {
       openFind();
+    } else if (name === 'toggle_images') {
+      toggleMode('hide_media');
     } else if (name.startsWith('item:')) {
       const item = sidebarItems()[Number(name.slice(5)) - 1];
       if (!item) return;
@@ -2105,20 +2175,25 @@
   $('confirm-ok').addEventListener('click', () => { if (confirmAction) confirmAction.run(); });
   $('confirm-cancel').addEventListener('click', closeConfirm);
 
-  // ⌘⇧D: bookmark the current page (never removes one).
-  function bookmarkShortcut() {
-    const t = activeTab();
+  // ⌘D (and the ⋯ menu's Bookmark row): bookmarks the page, moving this
+  // tab into the bookmark; on a bookmark's own tab, removes the bookmark
+  // and the tab becomes an ordinary tab again.
+  const BOOKMARK_RESULT = {
+    added: 'Bookmarked',
+    removed: 'Bookmark removed',
+    already: 'Already bookmarked',
+    pinned: 'This is a pinned site’s tab.',
+    none: 'Nothing to bookmark yet.',
+  };
+  function toggleBookmark(t) {
     if (!t || !t.url) { toast('Open a page to bookmark it.'); return; }
     if (t.private) { toast('Private tabs can’t be bookmarked.'); return; }
-    if (bookmarks.some((b) => b.url === t.url.full) || (t.launcher && bookmarks.some((b) => b.url === t.launcher))) {
-      toast('Already bookmarked.');
-      return;
-    }
     T.core.invoke('toggle_bookmark', { tab: t.id })
-      .then((on) => { toast(on ? 'Bookmarked' : 'Bookmark removed'); return loadBookmarks(); })
+      .then((r) => { toast(BOOKMARK_RESULT[r] || String(r)); return loadBookmarks(); })
       .then(render)
       .catch((e) => toast(String(e)));
   }
+  function bookmarkShortcut() { toggleBookmark(activeTab()); }
 
   // ⌘⇧\: hide the right panels (keeping them on), or show them again; with
   // none on, open the chat.
@@ -2144,9 +2219,7 @@
     findOpen = true;
     find.tab = t ? t.id : null;
     $('findbar').hidden = false;
-    const input = $('find-input');
-    input.focus();
-    input.select();
+    focusInput($('find-input'), true);
     renderFind();
     syncMenuOpen();
     reportLayout();
@@ -2226,20 +2299,212 @@
   $('find-close').addEventListener('click', closeFind);
 
   document.addEventListener('keydown', (ev) => {
-    if (!ev.metaKey || ev.altKey || ev.ctrlKey) return;
-    const k = ev.key.toLowerCase();
-    let name = null;
-    if (k === 't') name = 'new_tab';
-    else if (k === 'w') name = 'close_tab';
-    else if (k === 's') name = 'toggle_sidebar';
-    else if (k === 'f') name = 'find';
-    else if (k === 'd' && ev.shiftKey) name = 'bookmark';
-    else if (ev.code === 'Backslash' || k === '\\' || k === '|') name = ev.shiftKey ? 'toggle_right' : 'toggle_sidebar';
-    else if (k >= '1' && k <= '5' && k.length === 1) name = 'item:' + k;
+    if (!ev.metaKey || recordingKey) return;
+    const pressed = keyOf(ev);
+    const hit = pressed && shortcutList.find((x) => x.key === pressed.key && x.mods === pressed.mods);
+    const name = hit ? hit.action : null;
     if (!name) return;
     ev.preventDefault();
     runShortcut(name);
   });
+
+  // ---- keyboard shortcuts (Settings → Keyboard) ------------------------------
+  //
+  // The bindings live natively (the menu bar's key commands); the chrome
+  // keeps the user's changes (localStorage) and sends them at launch. The
+  // keydown handler above uses the same list for when the chrome has focus.
+
+  const MOD_SHIFT = 1;
+  const MOD_ALT = 2;
+  const MOD_CTRL = 4;
+  const CODE_KEYS = {
+    BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.',
+    Slash: '/', Minus: '-', Equal: '=', Backquote: '`',
+  };
+  let shortcutList = [];
+  let recordingKey = null; // id of the shortcut being rebound
+
+  // The unshifted key of a ⌘ key press (by physical key, so ⇧ does not turn
+  // \ into |), and its other modifiers.
+  function keyOf(ev) {
+    let key = null;
+    if (/^Key[A-Z]$/.test(ev.code)) key = ev.code.slice(3).toLowerCase();
+    else if (/^Digit[0-9]$/.test(ev.code)) key = ev.code.slice(5);
+    else if (CODE_KEYS[ev.code]) key = CODE_KEYS[ev.code];
+    else if (ev.key && ev.key.length === 1) key = ev.key.toLowerCase();
+    if (!key) return null;
+    const mods = (ev.shiftKey ? MOD_SHIFT : 0) | (ev.altKey ? MOD_ALT : 0) | (ev.ctrlKey ? MOD_CTRL : 0);
+    return { key, mods };
+  }
+
+  function comboLabel(key, mods) {
+    return (mods & MOD_CTRL ? '⌃' : '') + (mods & MOD_ALT ? '⌥' : '') + (mods & MOD_SHIFT ? '⇧' : '') + '⌘' + (key === ' ' ? 'Space' : key.toUpperCase());
+  }
+
+  function savedBindings() {
+    try { return JSON.parse(pref('shortcuts') || '[]'); } catch (e) { return []; }
+  }
+
+  // Sends bindings to the host; on success they are saved.
+  function applyBindings(bindings, suspend) {
+    return T.core.invoke('set_shortcuts', { bindings, suspend }).then((list) => {
+      shortcutList = list;
+      if (!suspend) setPref('shortcuts', JSON.stringify(bindings));
+      return list;
+    });
+  }
+
+  function renderKeys() {
+    const list = $('keys-list');
+    list.replaceChildren();
+    for (const sc of shortcutList) {
+      const li = el('li');
+      li.appendChild(el('span', 'keys-title', sc.title));
+      const changed = sc.key !== sc.default_key || sc.mods !== sc.default_mods;
+      if (changed) li.appendChild(el('span', 'keys-default muted small', 'default ' + comboLabel(sc.default_key, sc.default_mods)));
+      const b = el('button', 'keys-combo' + (recordingKey === sc.id ? ' recording' : ''), recordingKey === sc.id ? 'Press keys…' : comboLabel(sc.key, sc.mods));
+      b.setAttribute('aria-label', `${sc.title}: ${comboLabel(sc.key, sc.mods)}. Change`);
+      b.addEventListener('click', () => startRecording(sc.id));
+      li.appendChild(b);
+      list.appendChild(li);
+    }
+  }
+
+  function keysMsg(t) { $('keys-msg').textContent = t || ''; }
+
+  // While recording, the menu bar's shortcuts are off, so the keys reach
+  // the chrome instead of running a command.
+  function startRecording(id) {
+    recordingKey = id;
+    keysMsg('');
+    renderKeys();
+    applyBindings(savedBindings(), true).catch(() => {});
+  }
+  function stopRecording(msg) {
+    recordingKey = null;
+    applyBindings(savedBindings(), false).catch(() => {}).finally(renderKeys);
+    keysMsg(msg);
+  }
+
+  document.addEventListener('keydown', (ev) => {
+    if (!recordingKey) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    if (ev.key === 'Escape') { stopRecording(''); return; }
+    if (['Meta', 'Shift', 'Alt', 'Control', 'CapsLock'].includes(ev.key)) return;
+    if (!ev.metaKey) { keysMsg('Hold ⌘ with the key.'); return; }
+    const pressed = keyOf(ev);
+    if (!pressed) { keysMsg('That key can’t be used.'); return; }
+    const id = recordingKey;
+    const next = savedBindings().filter((b) => b.id !== id).concat([{ id, key: pressed.key, mods: pressed.mods }]);
+    T.core.invoke('set_shortcuts', { bindings: next, suspend: false })
+      .then((list) => {
+        shortcutList = list;
+        setPref('shortcuts', JSON.stringify(next));
+        recordingKey = null;
+        renderKeys();
+        keysMsg(`Saved: ${comboLabel(pressed.key, pressed.mods)}.`);
+      })
+      .catch((e) => keysMsg(String(e)));
+  }, true);
+
+  $('keys-reset').addEventListener('click', () => {
+    recordingKey = null;
+    setPref('shortcuts', '[]');
+    applyBindings([], false).then(() => { renderKeys(); keysMsg('Defaults restored.'); }).catch((e) => keysMsg(String(e)));
+  });
+
+  // At launch: the saved bindings, or the defaults if they no longer apply.
+  applyBindings(savedBindings(), false)
+    .catch(() => applyBindings([], false))
+    .catch(() => T.core.invoke('get_shortcuts').then((l) => { shortcutList = l; }))
+    .catch(() => {});
+
+  // ---- selected text on a page -----------------------------------------------
+  //
+  // A watcher in the page reports where the selection is (C19); a small
+  // menu floats above it (cut out of the page, like the pill). Its text is
+  // read when the menu appears (C20) and used only by the chosen action.
+
+  let selection = null; // { tab, text }
+
+  function paneBox(tab) {
+    const b = contentBox;
+    const w = window.innerWidth - b.left - b.right;
+    if (state && state.split && (state.split.left === tab || state.split.right === tab)) {
+      const half = Math.floor((w - 2) / 2);
+      return { x: state.split.left === tab ? b.left : b.left + w - half, y: b.top, w: half };
+    }
+    return { x: b.left, y: b.top, w };
+  }
+
+  function hideSelection() {
+    if (!selection && $('sel-pop').hidden) return;
+    selection = null;
+    $('sel-pop').hidden = true;
+    reportLayout();
+  }
+
+  function showSelection(tab, r) {
+    const pane = paneBox(tab);
+    const k = pane.w / r.vw;
+    const sx = pane.x + r.x * k;
+    const sy = pane.y + r.y * k;
+    const sw = r.w * k;
+    const sh = r.h * k;
+    const pop = $('sel-pop');
+    pop.hidden = false;
+    const pw = pop.offsetWidth;
+    const ph = pop.offsetHeight;
+    let top = sy - ph - 10;
+    if (top < pane.y + 6) top = sy + sh + 10;
+    const left = Math.max(pane.x + 6, Math.min(sx + sw / 2 - pw / 2, pane.x + pane.w - pw - 6));
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(Math.min(top, window.innerHeight - ph - 70)) + 'px';
+    reportLayout();
+  }
+
+  T.event.listen('selection', (e) => {
+    const { tab, rect } = e.payload;
+    const shown = state && (tab === state.active || (state.split && (tab === state.split.left || tab === state.split.right)));
+    if (!rect || !shown || paletteOpen || modalOpen || panel) { hideSelection(); return; }
+    T.core.invoke('read_selection', { tab }).then((text) => {
+      if (!text) { hideSelection(); return; }
+      selection = { tab, text };
+      showSelection(tab, rect);
+    }).catch(() => hideSelection());
+  });
+
+  $('sel-google').addEventListener('click', () => {
+    if (!selection) return;
+    const q = selection.text.replace(/\s+/g, ' ').trim().slice(0, 300);
+    hideSelection();
+    invoke('search_google', { query: q, private: !!(activeTab() && activeTab().private) });
+  });
+  $('sel-ask').addEventListener('click', () => {
+    if (!selection) return;
+    const quote = selection.text.length > 1500 ? selection.text.slice(0, 1500) + '…' : selection.text;
+    hideSelection();
+    setChat(true);
+    const input = $('chat-input');
+    input.value = `“${quote}”\n\n`;
+    focusInput(input);
+    requestAnimationFrame(() => { input.selectionStart = input.selectionEnd = input.value.length; });
+  });
+  $('sel-define').addEventListener('click', () => {
+    if (!selection) return;
+    const r = $('sel-pop').getBoundingClientRect();
+    const term = selection.text.replace(/\s+/g, ' ').trim().slice(0, 100);
+    hideSelection();
+    invoke('define_term', { term, x: r.left, y: r.top, w: r.width, h: r.height });
+  });
+
+  // Share: the system share sheet for this page, pointing at the button.
+  $('share').addEventListener('click', withTab((t) => {
+    if (!t.url) { toast('Open a page to share it.'); return; }
+    const r = $('share').getBoundingClientRect();
+    invoke('share_page', { tab: t.id, x: r.left, y: r.top, w: r.width, h: r.height });
+  }));
 
   // ---- wiring -----------------------------------------------------------
 
@@ -2332,13 +2597,7 @@
       .then((blocking) => toast(blocking ? `Blocking ads on ${a.site} again. Reloading…` : `Ads allowed on ${a.site}. Reloading…`))
       .catch((e) => toast(String(e)));
   }));
-  $('bookmark').addEventListener('click', withTab((t) => {
-    setActions(false);
-    T.core.invoke('toggle_bookmark', { tab: t.id })
-      .then((on) => { toast(on ? 'Bookmarked' : 'Bookmark removed'); return loadBookmarks(); })
-      .then(render)
-      .catch((e) => toast(String(e)));
-  }));
+  $('bookmark').addEventListener('click', withTab((t) => { setActions(false); toggleBookmark(t); }));
   $('panel-close').addEventListener('click', closePanel);
   $('panel-clear').addEventListener('click', () => {
     if (!clearArmed) { clearArmed = true; $('panel-clear').textContent = 'Tap again to clear'; return; }

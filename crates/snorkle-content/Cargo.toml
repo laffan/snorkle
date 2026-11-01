@@ -34,6 +34,8 @@ objc2-ui-kit = { version = "=0.3.2", features = [
   "UIGestureRecognizer", "UITapGestureRecognizer", "UIKeyCommand", "UICommand", "UIMenuElement", "UIMenu",
   "UIMenuBuilder", "UIMenuSystem", "UIControl", "UIRefreshControl",
   "UIImage", "UIColor", "UIGraphicsRenderer", "UIGraphicsImageRenderer",
+  "UIViewController", "UIWindow", "UIActivity", "UIActivityViewController", "UIPresentationController",
+  "UIPopoverPresentationController", "UIReferenceLibraryViewController", "UIViewControllerTransitioning",
 ] }
 objc2-web-kit = { version = "=0.3.2", features = [
   "std", "block2", "objc2-core-foundation",

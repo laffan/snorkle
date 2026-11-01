@@ -28,11 +28,19 @@ use objc2_ui_kit::{
     UIMenuFile, UIMenuFind, UIMenuIdentifier, UIMenuOptions, UIMenuSystem, UIMenuView,
 };
 
-use crate::{shortcut_from_plist, shortcut_plist, ContentEvents, Shortcut, ShortcutMenu, SHORTCUTS};
+use crate::{
+    shortcut_index, ContentEvents, KeyBinding, Shortcut, ShortcutMenu, MOD_ALT, MOD_CTRL, MOD_SHIFT, SHORTCUTS,
+};
 
 thread_local! {
     static EVENTS: RefCell<Option<Rc<dyn ContentEvents>>> = const { RefCell::new(None) };
     static INSTALLED: Cell<bool> = const { Cell::new(false) };
+    /// Effective binding of each `SHORTCUTS` entry (the user's or default).
+    static BINDINGS: RefCell<Vec<KeyBinding>> = RefCell::new(
+        SHORTCUTS.iter().map(|s| KeyBinding { key: s.key.to_string(), mods: s.mods }).collect()
+    );
+    /// While the shortcut editor records keys, no shortcut is bound.
+    static SUSPENDED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Whether the main menu carries the shortcuts (then the content
@@ -42,18 +50,43 @@ pub fn installed() -> bool {
     INSTALLED.with(Cell::get)
 }
 
-/// The key command for `SHORTCUTS[index]`. Its property list identifies
-/// the entry; it must be unique (`crate::shortcut_plist`), or UIKit throws.
+/// Whether shortcuts are off (the editor is recording a key).
+pub fn suspended() -> bool {
+    SUSPENDED.with(Cell::get)
+}
+
+/// New bindings (already validated, one per `SHORTCUTS` entry) and the
+/// suspended state; the menu is rebuilt.
+pub fn set_bindings(mtm: MainThreadMarker, bindings: Vec<KeyBinding>, suspend: bool) {
+    if bindings.len() == SHORTCUTS.len() {
+        BINDINGS.with(|b| *b.borrow_mut() = bindings);
+    }
+    SUSPENDED.with(|s| s.set(suspend));
+    UIMenuSystem::mainSystem(mtm).setNeedsRebuild();
+}
+
+/// The key command for `SHORTCUTS[index]` with its current binding. Its
+/// property list is the entry's id, unique as UIKit requires.
 pub fn key_command(mtm: MainThreadMarker, index: usize) -> Retained<UIKeyCommand> {
-    let (_, title, key, shift, _) = SHORTCUTS[index];
-    let flags = if shift { UIKeyModifierFlags::Command | UIKeyModifierFlags::Shift } else { UIKeyModifierFlags::Command };
+    let def = SHORTCUTS[index];
+    let b = BINDINGS.with(|b| b.borrow()[index].clone());
+    let mut flags = UIKeyModifierFlags::Command;
+    if b.mods & MOD_SHIFT != 0 {
+        flags |= UIKeyModifierFlags::Shift;
+    }
+    if b.mods & MOD_ALT != 0 {
+        flags |= UIKeyModifierFlags::Alternate;
+    }
+    if b.mods & MOD_CTRL != 0 {
+        flags |= UIKeyModifierFlags::Control;
+    }
     unsafe {
-        let plist = NSString::from_str(&shortcut_plist(index));
+        let plist = NSString::from_str(def.id);
         let c = UIKeyCommand::commandWithTitle_image_action_input_modifierFlags_propertyList(
-            &NSString::from_str(title),
+            &NSString::from_str(def.title),
             None,
             sel!(snorkleShortcut:),
-            &NSString::from_str(key),
+            &NSString::from_str(&b.key),
             flags,
             Some(&plist),
             mtm,
@@ -65,18 +98,22 @@ pub fn key_command(mtm: MainThreadMarker, index: usize) -> Retained<UIKeyCommand
     }
 }
 
-/// The shortcut a command stands for (its property list).
+/// The shortcut a command stands for (its property list is the id).
 pub fn shortcut_of(command: &UICommand) -> Option<Shortcut> {
     let plist = command.propertyList()?;
-    let text = plist.downcast_ref::<NSString>()?.to_string();
-    shortcut_from_plist(&text)
+    let id = plist.downcast_ref::<NSString>()?.to_string();
+    shortcut_index(&id).map(|i| SHORTCUTS[i].action)
 }
 
 fn inline_menu(mtm: MainThreadMarker, id: &str, title: &str, which: ShortcutMenu) -> Retained<UIMenu> {
-    let items: Vec<Retained<UIMenuElement>> = (0..SHORTCUTS.len())
-        .filter(|i| SHORTCUTS[*i].0 == which)
-        .map(|i| Retained::into_super(Retained::into_super(key_command(mtm, i))))
-        .collect();
+    let items: Vec<Retained<UIMenuElement>> = if suspended() {
+        Vec::new()
+    } else {
+        (0..SHORTCUTS.len())
+            .filter(|i| SHORTCUTS[*i].menu == which)
+            .map(|i| Retained::into_super(Retained::into_super(key_command(mtm, i))))
+            .collect()
+    };
     let children: Retained<NSArray<UIMenuElement>> = NSArray::from_retained_slice(&items);
     let options = if title.is_empty() { UIMenuOptions::DisplayInline } else { UIMenuOptions::empty() };
     UIMenu::menuWithTitle_image_identifier_options_children(

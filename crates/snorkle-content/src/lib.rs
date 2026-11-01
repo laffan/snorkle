@@ -91,32 +91,65 @@ pub enum DataKind {
 pub enum Shortcut {
     NewTab,
     CloseTab,
-    /// ⌘S or ⌘\: show or hide the tab sidebar.
+    /// Show or hide the tab sidebar.
     ToggleSidebar,
-    /// ⌘⇧\: show or hide the right panel (headers, chat).
+    /// Show or hide the right panel (headers, chat).
     ToggleRightPanel,
-    /// ⌘⇧D: bookmark the current page.
+    /// Bookmark the current page, or un-bookmark a bookmark's tab.
     Bookmark,
-    /// ⌘F: find in page.
+    /// Show or hide images and video.
+    ToggleImages,
+    /// Find in page.
     Find,
-    /// ⌘1–⌘5: the n-th item in the sidebar (pins, bookmarks, then tabs).
+    /// The n-th item in the sidebar (pins, bookmarks, then tabs).
     Item(u8),
 }
 
-/// Every native shortcut: menu, title, key, whether Shift is held, action.
-pub const SHORTCUTS: &[(ShortcutMenu, &str, &str, bool, Shortcut)] = &[
-    (ShortcutMenu::File, "New Tab", "t", false, Shortcut::NewTab),
-    (ShortcutMenu::File, "Add Bookmark", "d", true, Shortcut::Bookmark),
-    (ShortcutMenu::Close, "Close Tab", "w", false, Shortcut::CloseTab),
-    (ShortcutMenu::Find, "Find on Page", "f", false, Shortcut::Find),
-    (ShortcutMenu::View, "Show or Hide Sidebar", "s", false, Shortcut::ToggleSidebar),
-    (ShortcutMenu::View, "Toggle Sidebar", "\\", false, Shortcut::ToggleSidebar),
-    (ShortcutMenu::View, "Toggle Right Panel", "\\", true, Shortcut::ToggleRightPanel),
-    (ShortcutMenu::Tabs, "Go to Item 1", "1", false, Shortcut::Item(1)),
-    (ShortcutMenu::Tabs, "Go to Item 2", "2", false, Shortcut::Item(2)),
-    (ShortcutMenu::Tabs, "Go to Item 3", "3", false, Shortcut::Item(3)),
-    (ShortcutMenu::Tabs, "Go to Item 4", "4", false, Shortcut::Item(4)),
-    (ShortcutMenu::Tabs, "Go to Item 5", "5", false, Shortcut::Item(5)),
+/// Modifier bits of a binding besides ⌘ (always required): Shift, Option,
+/// Control (the chrome uses the same bits).
+pub const MOD_SHIFT: u8 = 1;
+pub const MOD_ALT: u8 = 2;
+pub const MOD_CTRL: u8 = 4;
+
+/// One native shortcut: a stable id (also the menu command's property
+/// list, which UIKit requires to be unique per action), where it appears
+/// in the menu bar, its title, its default key and modifiers, the action.
+#[derive(Clone, Copy, Debug)]
+pub struct ShortcutDef {
+    pub id: &'static str,
+    pub menu: ShortcutMenu,
+    pub title: &'static str,
+    pub key: &'static str,
+    pub mods: u8,
+    pub action: Shortcut,
+}
+
+const fn def(
+    id: &'static str,
+    menu: ShortcutMenu,
+    title: &'static str,
+    key: &'static str,
+    mods: u8,
+    action: Shortcut,
+) -> ShortcutDef {
+    ShortcutDef { id, menu, title, key, mods, action }
+}
+
+/// Every native shortcut, with its default binding (⌘ plus `mods`).
+pub const SHORTCUTS: &[ShortcutDef] = &[
+    def("new_tab", ShortcutMenu::File, "New Tab", "t", 0, Shortcut::NewTab),
+    def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", 0, Shortcut::Bookmark),
+    def("close_tab", ShortcutMenu::Close, "Close Tab", "w", 0, Shortcut::CloseTab),
+    def("find", ShortcutMenu::Find, "Find on Page", "f", 0, Shortcut::Find),
+    def("toggle_sidebar", ShortcutMenu::View, "Show or Hide Sidebar", "s", 0, Shortcut::ToggleSidebar),
+    def("toggle_sidebar_alt", ShortcutMenu::View, "Toggle Sidebar", "\\", 0, Shortcut::ToggleSidebar),
+    def("toggle_right", ShortcutMenu::View, "Toggle Right Panel", "\\", MOD_SHIFT, Shortcut::ToggleRightPanel),
+    def("toggle_images", ShortcutMenu::View, "Show or Hide Images", "i", 0, Shortcut::ToggleImages),
+    def("item_1", ShortcutMenu::Tabs, "Go to Item 1", "1", 0, Shortcut::Item(1)),
+    def("item_2", ShortcutMenu::Tabs, "Go to Item 2", "2", 0, Shortcut::Item(2)),
+    def("item_3", ShortcutMenu::Tabs, "Go to Item 3", "3", 0, Shortcut::Item(3)),
+    def("item_4", ShortcutMenu::Tabs, "Go to Item 4", "4", 0, Shortcut::Item(4)),
+    def("item_5", ShortcutMenu::Tabs, "Go to Item 5", "5", 0, Shortcut::Item(5)),
 ];
 
 /// Where a shortcut appears in the iPadOS menu bar.
@@ -141,31 +174,51 @@ impl Shortcut {
             Shortcut::ToggleSidebar => "toggle_sidebar".into(),
             Shortcut::ToggleRightPanel => "toggle_right".into(),
             Shortcut::Bookmark => "bookmark".into(),
+            Shortcut::ToggleImages => "toggle_images".into(),
             Shortcut::Find => "find".into(),
             Shortcut::Item(n) => format!("item:{n}"),
         }
     }
+}
 
-    /// The shortcut a menu or key command named (its property list).
-    pub fn from_name(name: &str) -> Option<Shortcut> {
-        SHORTCUTS.iter().map(|s| s.4).find(|s| s.name() == name)
+/// Index of the shortcut with this id (a menu command's property list).
+pub fn shortcut_index(id: &str) -> Option<usize> {
+    SHORTCUTS.iter().position(|s| s.id == id)
+}
+
+/// A key binding: one key and modifier bits (⌘ always included).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyBinding {
+    pub key: String,
+    pub mods: u8,
+}
+
+/// Keys a binding may use: letters, digits and a few punctuation keys
+/// (what `UIKeyCommand` matches reliably as input).
+pub fn validate_binding(key: &str, mods: u8) -> Option<KeyBinding> {
+    let key = key.to_ascii_lowercase();
+    let ok = key.chars().count() == 1
+        && key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "[]\\;',./-=`".contains(c));
+    (ok && mods & !(MOD_SHIFT | MOD_ALT | MOD_CTRL) == 0).then_some(KeyBinding { key, mods })
+}
+
+/// Applies the user's bindings (`id` → binding) over the defaults: every
+/// shortcut's effective binding, in `SHORTCUTS` order. Unknown ids and
+/// invalid keys are ignored; if two shortcuts would share a key, the
+/// later override is refused (the error names both).
+pub fn effective_bindings(overrides: &[(String, String, u8)]) -> Result<Vec<KeyBinding>, String> {
+    let mut out: Vec<KeyBinding> =
+        SHORTCUTS.iter().map(|s| KeyBinding { key: s.key.to_string(), mods: s.mods }).collect();
+    for (id, key, mods) in overrides {
+        let (Some(i), Some(b)) = (shortcut_index(id), validate_binding(key, *mods)) else { continue };
+        out[i] = b;
     }
-}
-
-/// Property list of the menu command for `SHORTCUTS[index]`. UIKit throws
-/// (terminating the app) if two commands in the menu system share an action
-/// and property list, and every command has the same action, so the list
-/// is unique per entry: `"<index>:<name>"` (⌘S and ⌘\ both toggle the
-/// sidebar).
-pub fn shortcut_plist(index: usize) -> String {
-    format!("{index}:{}", SHORTCUTS[index].4.name())
-}
-
-/// The shortcut a command's property list stands for.
-pub fn shortcut_from_plist(plist: &str) -> Option<Shortcut> {
-    let (index, name) = plist.split_once(':')?;
-    let s = SHORTCUTS.get(index.parse::<usize>().ok()?)?.4;
-    (s.name() == name).then_some(s)
+    for i in 0..out.len() {
+        if let Some(j) = (0..i).find(|j| out[*j] == out[i]) {
+            return Err(format!("“{}” and “{}” use the same keys.", SHORTCUTS[j].title, SHORTCUTS[i].title));
+        }
+    }
+    Ok(out)
 }
 
 /// Callbacks from content web views into the browser core.
@@ -212,6 +265,9 @@ pub trait ContentEvents: 'static {
     /// The user ⌘-clicked a link to `url` in `opener` (WebKit's modifier
     /// flags on a link activation); the link did not navigate `opener`.
     fn background_tab_requested(&self, opener: TabId, url: Url);
+    /// The selection watcher reported where the selection is (a JSON
+    /// string, page-influenced; `tab` comes from WebKit).
+    fn selection(&self, tab: Option<TabId>, body: String);
     fn memory_warning(&self);
     fn did_enter_background(&self);
 }
@@ -431,23 +487,22 @@ mod tests {
     }
 
     #[test]
-    fn shortcuts_round_trip() {
-        for (_, _, key, _, s) in SHORTCUTS {
-            assert_eq!(Shortcut::from_name(&s.name()), Some(*s), "{key}");
-        }
-        assert!(Shortcut::from_name("nope").is_none());
-        let keys: Vec<_> = SHORTCUTS.iter().map(|s| (s.2, s.3)).collect();
-        let unique: std::collections::BTreeSet<_> = keys.iter().collect();
-        assert_eq!(unique.len(), keys.len(), "no key is bound twice");
-        // UIKit terminates the app on two menu commands with the same
-        // action and property list (all share one action).
-        let plists: std::collections::BTreeSet<String> = (0..SHORTCUTS.len()).map(shortcut_plist).collect();
-        assert_eq!(plists.len(), SHORTCUTS.len(), "property lists are unique");
-        for i in 0..SHORTCUTS.len() {
-            assert_eq!(shortcut_from_plist(&shortcut_plist(i)), Some(SHORTCUTS[i].4));
-        }
-        assert!(shortcut_from_plist("toggle_sidebar").is_none() && shortcut_from_plist("99:new_tab").is_none());
-        assert!(shortcut_from_plist("1:new_tab").is_none(), "index and name must agree");
+    fn shortcuts_are_unique_and_rebindable() {
+        let ids: std::collections::BTreeSet<_> = SHORTCUTS.iter().map(|s| s.id).collect();
+        assert_eq!(ids.len(), SHORTCUTS.len(), "ids (menu property lists) are unique: UIKit throws otherwise");
+        let defaults = effective_bindings(&[]).expect("defaults do not collide");
+        assert_eq!(defaults.len(), SHORTCUTS.len());
+        assert_eq!(shortcut_index("bookmark").map(|i| &defaults[i]), Some(&KeyBinding { key: "d".into(), mods: 0 }));
+        let b = effective_bindings(&[("new_tab".into(), "N".into(), MOD_SHIFT)]).unwrap();
+        assert_eq!(b[0], KeyBinding { key: "n".into(), mods: MOD_SHIFT });
+        assert!(effective_bindings(&[("new_tab".into(), "w".into(), 0)]).unwrap_err().contains("Close Tab"));
+        let ignored = effective_bindings(&[
+            ("nope".into(), "x".into(), 0),
+            ("find".into(), "F1".into(), 0),
+            ("find".into(), "g".into(), 64),
+        ]);
+        assert_eq!(ignored.unwrap(), defaults, "unknown ids and invalid keys are ignored");
+        assert!(validate_binding("\\", MOD_SHIFT).is_some() && validate_binding(" ", 0).is_none());
     }
 
     #[test]

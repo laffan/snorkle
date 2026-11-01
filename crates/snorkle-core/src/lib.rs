@@ -20,6 +20,7 @@ pub mod idn;
 pub mod input;
 pub mod os;
 pub mod policy;
+pub mod selection;
 pub mod storage;
 pub mod tabs;
 pub mod text;

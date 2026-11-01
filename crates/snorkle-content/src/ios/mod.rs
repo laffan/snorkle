@@ -45,15 +45,16 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSDate, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
+    NSArray, NSDate, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSSet, NSString,
     NSURLRequest, NSURL, NSUUID,
 };
 use objc2_quartz_core::{kCAFillRuleEvenOdd, CAShapeLayer};
 use objc2_ui_kit::{
-    UIApplication, UIApplicationDidEnterBackgroundNotification, UIApplicationDidReceiveMemoryWarningNotification,
-    UIBezierPath, UIColor, UIControlEvents, UIRectCorner, UIRefreshControl, UITapGestureRecognizer, UIView,
-    UIViewAutoresizing,
+    UIActivityViewController, UIApplication, UIApplicationDidEnterBackgroundNotification,
+    UIApplicationDidReceiveMemoryWarningNotification, UIBezierPath, UIColor, UIControlEvents, UIRectCorner,
+    UIReferenceLibraryViewController, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
+    UIViewController,
 };
 use objc2_web_kit::{
     WKContentMode, WKFindConfiguration, WKFindResult, WKInactiveSchedulingPolicy, WKUserContentController,
@@ -135,6 +136,8 @@ pub struct ContentHost {
     backdrop: Retained<UIView>,
     /// Where the chrome floats over the content area (window coordinates).
     holes: keys::Holes,
+    /// The chrome's own web view (Tauri's), to give it keyboard focus.
+    chrome: Option<Retained<UIView>>,
 }
 
 impl ContentHost {
@@ -180,6 +183,7 @@ impl ContentHost {
             mtm,
             backdrop,
             holes,
+            chrome: None,
             root,
             top: Cell::new(0.0),
             left: Cell::new(0.0),
@@ -339,6 +343,84 @@ impl ContentHost {
         }
     }
 
+    /// Remembers the chrome's web view (a `WKWebView*` from Tauri).
+    ///
+    /// # Safety
+    /// `view` must be a valid `UIView*` that outlives the host, or null.
+    pub unsafe fn set_chrome_view(&mut self, view: *mut c_void) {
+        self.chrome = unsafe { Retained::retain(view.cast::<UIView>()) };
+    }
+
+    /// Gives the chrome's web view keyboard focus, so an input the chrome
+    /// focuses after a shortcut (new-tab palette, find) receives typing
+    /// even when a page, or nothing, was first responder.
+    pub fn focus_chrome(&mut self) {
+        if let Some(v) = &self.chrome {
+            v.becomeFirstResponder();
+        }
+    }
+
+    /// Keyboard shortcut bindings (validated, one per `SHORTCUTS` entry)
+    /// and whether they are suspended (the editor is recording a key).
+    pub fn set_shortcuts(&mut self, bindings: Vec<crate::KeyBinding>, suspend: bool) {
+        menu::set_bindings(self.mtm, bindings, suspend);
+    }
+
+    /// The view controller to present system UI from: the window's root,
+    /// or whatever it is already presenting.
+    fn top_controller(&self) -> Option<Retained<UIViewController>> {
+        let mut vc = self.root.window()?.rootViewController()?;
+        while let Some(next) = vc.presentedViewController() {
+            vc = next;
+        }
+        Some(vc)
+    }
+
+    /// The system share sheet for `url` (an http(s) page URL from the
+    /// core), as a popover pointing at `from` (window coordinates; the
+    /// share button). On iPad a popover needs a source, or UIKit throws.
+    pub fn share(&mut self, url: &str, from: (f64, f64, f64, f64)) {
+        let from = rect(from);
+        let Some(top) = self.top_controller() else { return };
+        let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(url)) else { return };
+        unsafe {
+            let items: Retained<NSArray> =
+                NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(nsurl))]);
+            let vc = UIActivityViewController::initWithActivityItems_applicationActivities(
+                UIActivityViewController::alloc(self.mtm),
+                &items,
+                None,
+            );
+            let Some(pop) = vc.popoverPresentationController() else { return };
+            pop.setSourceView(Some(&self.root));
+            pop.setSourceRect(from);
+            top.presentViewController_animated_completion(&vc, true, None);
+        }
+    }
+
+    /// The system dictionary ("Define") for `term`.
+    pub fn define(&mut self, term: &str, from: (f64, f64, f64, f64)) {
+        let from = rect(from);
+        let Some(top) = self.top_controller() else { return };
+        let vc = UIReferenceLibraryViewController::initWithTerm(
+            UIReferenceLibraryViewController::alloc(self.mtm),
+            &NSString::from_str(term),
+        );
+        if let Some(pop) = vc.popoverPresentationController() {
+            pop.setSourceView(Some(&self.root));
+            pop.setSourceRect(from);
+        }
+        top.presentViewController_animated_completion(&vc, true, None);
+    }
+
+    /// Reads the selected text of `tab`'s page (C20; `selection::TEXT_JS`).
+    pub fn read_selection(&mut self, tab: TabId, done: crate::TextDone) {
+        match self.views.get(&tab) {
+            Some(v) => injection::read_now(self.mtm, &v.web, snorkle_core::selection::TEXT_JS, done),
+            None => done(None),
+        }
+    }
+
     /// Find in page (⌘F): WebKit selects and scrolls to the next (or
     /// previous) match of `query`, wrapping; `done` gets whether one was
     /// found, on the main thread.
@@ -386,7 +468,7 @@ impl ContentHost {
         let console = self.console.then_some(&self.events);
         let build = |view: &crate::ViewInjections| {
             let all: Vec<Injection> = self.injections.user.iter().chain(&view.sources).cloned().collect();
-            injection::make_scripts(self.mtm, &all, console, view.headings.then_some(&self.events))
+            injection::make_scripts(self.mtm, &all, console, view.headings.then_some(&self.events), Some(&self.events))
         };
         self.scripts = build(&self.injections.view);
         self.tab_scripts = self.injections.tabs.iter().map(|(t, v)| (*t, build(v))).collect();
@@ -767,6 +849,13 @@ fn apply_mask(view: &UIView, holes: &[Hole]) {
         mask.setFillRule(kCAFillRuleEvenOdd);
         layer.setMask(Some(&mask));
     }
+}
+
+/// A popover source rectangle from the chrome (window coordinates), made
+/// finite and non-negative.
+fn rect((x, y, w, h): (f64, f64, f64, f64)) -> CGRect {
+    let f = |v: f64| if v.is_finite() { v.clamp(0.0, 100_000.0) } else { 0.0 };
+    CGRect::new(CGPoint::new(f(x), f(y)), CGSize::new(f(w).max(1.0), f(h).max(1.0)))
 }
 
 /// Rounds a container's corners (it already clips to its bounds).

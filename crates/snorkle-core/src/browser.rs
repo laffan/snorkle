@@ -530,6 +530,23 @@ impl Browser {
         (id, out)
     }
 
+    /// A tab was bookmarked or pinned as `key`: it becomes that item's tab
+    /// (moved out of the tab list, not duplicated) unless another tab
+    /// already belongs to `key`, it already belongs to an item, or it is
+    /// private (never persisted). Returns whether it was bound.
+    pub fn bind_launcher(&mut self, id: TabId, key: &str) -> (bool, Vec<Effect>) {
+        let taken = self.tabs.iter().any(|t| t.launcher.as_deref() == Some(key));
+        let ok = !taken
+            && self.tab(id).is_some_and(|t| t.launcher.is_none() && !t.is_private() && !t.sheet && t.opener.is_none());
+        if !ok {
+            return (false, Vec::new());
+        }
+        if let Some(t) = self.tab_mut(id) {
+            t.launcher = Some(key.to_string());
+        }
+        (true, vec![Effect::PersistSession(self.session()), Effect::NotifyChrome])
+    }
+
     /// The pin or bookmark `key` was removed: its tab becomes an ordinary
     /// tab (listed again), so nothing the user had open is lost.
     pub fn release_launcher(&mut self, key: &str) -> Vec<Effect> {

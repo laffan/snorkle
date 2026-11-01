@@ -30,6 +30,12 @@
 //!   to a handler registered in the client world only, so pages cannot call
 //!   it. String bodies only, passed to `ContentEvents::headings`, which
 //!   parses them strictly (`viewmodes::parse_headings`).
+//! - Selection menu (channel C19, every page, owner request 2026-11-01):
+//!   a constant watcher (`snorkle_core::selection::watch_js`) in the client
+//!   world, main frame, posts the selection's rectangle to a client-world
+//!   handler. String bodies only, passed to `ContentEvents::selection`,
+//!   which parses them strictly (`selection::parse_report`). The selected
+//!   text is read with [`read_now`] only when the user picks an action.
 
 #![allow(non_snake_case)]
 
@@ -68,7 +74,12 @@ impl WKWebView {
 
 /// Compiled user scripts, opaque outside this module.
 #[derive(Default)]
-pub struct Scripts(Vec<Retained<WKUserScript>>, Option<Console>, Option<Retained<HeadingsHandler>>);
+pub struct Scripts(
+    Vec<Retained<WKUserScript>>,
+    Option<Console>,
+    Option<Retained<HeadingsHandler>>,
+    Option<(Retained<WKUserScript>, Retained<SelectionHandler>)>,
+);
 
 /// The console hook and its handler, present only while capture is on.
 struct Console {
@@ -130,6 +141,40 @@ define_class!(
     }
 );
 
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "SnorkleSelectionHandler"]
+    #[ivars = Rc<dyn ContentEvents>]
+    struct SelectionHandler;
+
+    unsafe impl NSObjectProtocol for SelectionHandler {}
+
+    unsafe impl WKScriptMessageHandler for SelectionHandler {
+        /// The selection watcher's report (client world only). String bodies only.
+        #[unsafe(method(userContentController:didReceiveScriptMessage:))]
+        fn did_receive(&self, _controller: &WKUserContentController, message: &WKScriptMessage) {
+            unsafe {
+                if !message.frameInfo().isMainFrame() {
+                    return;
+                }
+                let body = message.body();
+                let Some(text) = body.downcast_ref::<NSString>() else { return };
+                let web: *const AnyObject = msg_send![message, webView];
+                let tab = super::tab_for_web_view(web);
+                self.ivars().selection(tab, text.to_string());
+            }
+        }
+    }
+);
+
+impl SelectionHandler {
+    fn new(mtm: MainThreadMarker, events: Rc<dyn ContentEvents>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(events);
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
 impl HeadingsHandler {
     fn new(mtm: MainThreadMarker, events: Rc<dyn ContentEvents>) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(events);
@@ -152,6 +197,7 @@ pub fn make_scripts(
     injections: &[Injection],
     console: Option<&Rc<dyn ContentEvents>>,
     headings: Option<&Rc<dyn ContentEvents>>,
+    selection: Option<&Rc<dyn ContentEvents>>,
 ) -> Scripts {
     let headings = headings.map(|events| HeadingsHandler::new(mtm, events.clone()));
     let world = unsafe { WKContentWorld::defaultClientWorld(mtm) };
@@ -185,7 +231,17 @@ pub fn make_scripts(
             }
         })
         .collect();
-    Scripts(scripts, console, headings)
+    let selection = selection.map(|events| unsafe {
+        let watcher = WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
+            WKUserScript::alloc(mtm),
+            &NSString::from_str(&snorkle_core::selection::watch_js()),
+            WKUserScriptInjectionTime::AtDocumentEnd,
+            true,
+            &world,
+        );
+        (watcher, SelectionHandler::new(mtm, events.clone()))
+    });
+    Scripts(scripts, console, headings, selection)
 }
 
 /// Replaces all user scripts (and the console handler) on a web view's
@@ -199,9 +255,19 @@ pub fn install(mtm: MainThreadMarker, controller: &WKUserContentController, scri
         let client = WKContentWorld::defaultClientWorld(mtm);
         let name = NSString::from_str(PAGE_HANDLER_NAME);
         let headings_name = NSString::from_str(HEADINGS_HANDLER_NAME);
+        let selection_name = NSString::from_str(snorkle_core::selection::HANDLER_NAME);
         controller.removeAllUserScripts();
         controller.removeScriptMessageHandlerForName_contentWorld(&name, &page);
         controller.removeScriptMessageHandlerForName_contentWorld(&headings_name, &client);
+        controller.removeScriptMessageHandlerForName_contentWorld(&selection_name, &client);
+        if let Some((watcher, handler)) = &scripts.3 {
+            controller.addScriptMessageHandler_contentWorld_name(
+                ProtocolObject::from_ref(&**handler),
+                &client,
+                &selection_name,
+            );
+            controller.addUserScript(watcher);
+        }
         if let Some(c) = &scripts.1 {
             controller.addScriptMessageHandler_contentWorld_name(ProtocolObject::from_ref(&*c.handler), &page, &name);
             controller.addUserScript(&c.hook);

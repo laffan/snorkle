@@ -13,7 +13,7 @@
 //! are not inside the container, so touches and pointer hover there reach
 //! the chrome's web view underneath instead of the page.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use objc2::rc::Retained;
@@ -30,7 +30,6 @@ pub type Holes = Rc<RefCell<Vec<Hole>>>;
 
 pub struct KeyIvars {
     events: Rc<dyn ContentEvents>,
-    commands: OnceCell<Retained<NSArray<UIKeyCommand>>>,
     holes: Holes,
 }
 
@@ -46,21 +45,14 @@ define_class!(
         /// (`menu::installed`): the same commands, while a page has focus.
         #[unsafe(method_id(keyCommands))]
         fn key_commands(&self) -> Option<Retained<NSArray<UIKeyCommand>>> {
-            // Decided on every call: the menu may be built after the first.
-            let mtm = self.mtm();
-            let list = if super::menu::installed() {
-                NSArray::new()
+            // Decided on every call: the menu may be built after the first
+            // call, and bindings can change. Only the fallback path builds.
+            let cmds: Vec<Retained<UIKeyCommand>> = if super::menu::installed() || super::menu::suspended() {
+                Vec::new()
             } else {
-                self.ivars()
-                    .commands
-                    .get_or_init(|| {
-                        let cmds: Vec<Retained<UIKeyCommand>> =
-                            (0..SHORTCUTS.len()).map(|i| super::menu::key_command(mtm, i)).collect();
-                        NSArray::from_retained_slice(&cmds)
-                    })
-                    .clone()
+                (0..SHORTCUTS.len()).map(|i| super::menu::key_command(self.mtm(), i)).collect()
             };
-            Some(list)
+            Some(NSArray::from_retained_slice(&cmds))
         }
 
         /// Outside the holes only (see the module docs). Containers are
@@ -114,7 +106,7 @@ impl KeyContainer {
         events: Rc<dyn ContentEvents>,
         holes: Holes,
     ) -> Retained<UIView> {
-        let this = Self::alloc(mtm).set_ivars(KeyIvars { events, commands: OnceCell::new(), holes });
+        let this = Self::alloc(mtm).set_ivars(KeyIvars { events, holes });
         let this: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         Retained::into_super(this)
     }

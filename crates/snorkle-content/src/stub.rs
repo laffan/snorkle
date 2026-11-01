@@ -69,6 +69,22 @@ impl ContentHost {
 
     pub fn end_find(&mut self, _tab: snorkle_core::tabs::TabId) {}
 
+    /// # Safety
+    /// Trivially safe off iOS (nothing is retained).
+    pub unsafe fn set_chrome_view(&mut self, _view: *mut std::ffi::c_void) {}
+
+    pub fn focus_chrome(&mut self) {}
+
+    pub fn set_shortcuts(&mut self, _bindings: Vec<crate::KeyBinding>, _suspend: bool) {}
+
+    pub fn share(&mut self, _url: &str, _from: (f64, f64, f64, f64)) {}
+
+    pub fn define(&mut self, _term: &str, _from: (f64, f64, f64, f64)) {}
+
+    pub fn read_selection(&mut self, _tab: snorkle_core::tabs::TabId, done: crate::TextDone) {
+        done(None);
+    }
+
     /// No pages render off iOS.
     pub fn read_page_text(&mut self, _tab: snorkle_core::tabs::TabId, done: crate::TextDone) {
         done(None);

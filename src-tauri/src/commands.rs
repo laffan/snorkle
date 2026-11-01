@@ -55,6 +55,24 @@ pub fn new_tab(s: S<'_>, private: bool) -> u64 {
     id.0
 }
 
+/// "Google This" on selected text: a new tab (private if the current one
+/// is) with a Google search for `query`. The URL is built here, so the
+/// chrome holds no remote addresses.
+#[tauri::command]
+pub fn search_google(s: S<'_>, query: String, private: bool) -> Result<u64, String> {
+    let q = snorkle_core::text::sanitize_page_text(&query, 300);
+    if q.is_empty() {
+        return Err("Nothing to search for.".into());
+    }
+    let url = Url::parse_with_params("https://www.google.com/search", [("q", q.as_str())]).map_err(|e| e.to_string())?;
+    let profile = if private { Profile::Private } else { Profile::Default };
+    let (id, effects) = s.browser().new_tab(profile, now_ms());
+    s.run(effects);
+    let effects = s.browser().navigate_trusted(id, url, now_ms());
+    s.run(effects);
+    Ok(id.0)
+}
+
 #[tauri::command]
 pub fn close_tab(s: S<'_>, tab: u64) {
     with_browser(&s, |b| b.close(TabId(tab), now_ms()));
@@ -164,32 +182,44 @@ pub fn list_bookmarks(s: S<'_>) -> Vec<Entry> {
         .unwrap_or_default()
 }
 
-/// Bookmarks or un-bookmarks the tab's committed URL. The URL is taken from
-/// the core, not from the caller. Private tabs cannot be bookmarked (that
-/// would persist private browsing data).
+/// ⌘D / the Bookmark row. On a bookmark's own tab: removes the bookmark and
+/// the tab becomes an ordinary tab ("removed"). Otherwise bookmarks the
+/// tab's committed URL and moves the tab into the bookmark, so opening the
+/// bookmark returns to it ("added"; "already" if another tab already is
+/// that bookmark's). A pin's tab is left alone ("pinned"). The URL comes
+/// from the core, not the caller; private tabs are never bookmarked.
 #[tauri::command]
-pub async fn toggle_bookmark(s: S<'_>, tab: u64) -> Result<bool, String> {
-    let (url, title) = {
+pub async fn toggle_bookmark(s: S<'_>, tab: u64) -> Result<&'static str, String> {
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    let tab = TabId(tab);
+    let (launcher, url, title) = {
         let b = s.browser();
-        match b.tab(TabId(tab)) {
-            Some(t) if !t.is_private() => match &t.committed_url {
-                Some(u) => (u.to_string(), t.title.clone()),
-                None => return Ok(false),
-            },
-            _ => return Ok(false),
+        match b.tab(tab) {
+            Some(t) if !t.is_private() => {
+                (t.launcher.clone(), t.committed_url.as_ref().map(|u| u.to_string()), t.title.clone())
+            }
+            _ => return Ok("none"),
         }
     };
-    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
-    if store.is_bookmarked(&url) {
-        store.remove_bookmark(&url).map_err(|e| e.to_string())?;
-        Ok(false)
-    } else {
-        let wall = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        store.add_bookmark(&url, &title, wall).map_err(|e| e.to_string())
+    // The tab is a bookmark's own tab: un-bookmark it (it becomes a normal
+    // tab). A pin's tab is left alone.
+    if let Some(key) = launcher {
+        if !store.is_bookmarked(&key) {
+            return Ok("pinned");
+        }
+        store.remove_bookmark(&key).map_err(|e| e.to_string())?;
+        with_browser(&s, |b| b.release_launcher(&key));
+        return Ok("removed");
     }
+    let Some(url) = url else { return Ok("none") };
+    let added = store.is_bookmarked(&url) || store.add_bookmark(&url, &title, wall_ms()).map_err(|e| e.to_string())?;
+    if !added {
+        return Ok("none");
+    }
+    // Move the tab into the bookmark (not a second tab for it).
+    let (bound, effects) = s.browser().bind_launcher(tab, &url);
+    s.run(effects);
+    Ok(if bound { "added" } else { "already" })
 }
 
 #[tauri::command]
@@ -274,7 +304,13 @@ pub async fn bookmark_tab(s: S<'_>, tab: u64, index: usize) -> Result<bool, Stri
         }
     };
     let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
-    store.insert_bookmark(&url, &title, index, wall_ms()).map_err(|e| e.to_string())
+    let added = store.insert_bookmark(&url, &title, index, wall_ms()).map_err(|e| e.to_string())?;
+    if added {
+        // The dragged tab becomes the bookmark's tab (moved, not duplicated).
+        let (_, effects) = s.browser().bind_launcher(TabId(tab), &url);
+        s.run(effects);
+    }
+    Ok(added)
 }
 
 /// Reorders the bookmarks bar.
@@ -411,6 +447,106 @@ pub async fn count_in_page(tab: u64, query: String) -> Result<Option<u32>, Strin
         .await
         .map_err(|_| "Find failed.".to_string())?;
     Ok(text.ok().flatten().and_then(|t| snorkle_core::find::parse_count(&t)))
+}
+
+/// Gives the chrome's web view keyboard focus (after a shortcut, a page or
+/// nothing may have it), so the input the chrome focuses next gets typing.
+#[tauri::command]
+pub fn focus_chrome() {
+    snorkle_content::dispatch_main(|| with_host(|h| h.focus_chrome()));
+}
+
+/// The system share sheet for the tab's page (its committed http(s) URL,
+/// from the core), pointing at the share button (`x`…`h`, window points).
+#[tauri::command]
+pub fn share_page(s: S<'_>, tab: u64, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+    let url = s
+        .browser()
+        .tab(TabId(tab))
+        .and_then(|t| t.committed_url.clone())
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or("Open a web page to share it.")?
+        .to_string();
+    snorkle_content::dispatch_main(move || with_host(|host| host.share(&url, (x, y, w, h))));
+    Ok(())
+}
+
+/// The text selected on the tab's page (channel C20), cleaned and capped,
+/// or `None`.
+#[tauri::command]
+pub async fn read_selection(tab: u64) -> Result<Option<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        with_host(|h| h.read_selection(TabId(tab), Box::new(move |t| drop(tx.send(t)))))
+    });
+    let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(4)))
+        .await
+        .map_err(|_| "Couldn't read the selection.".to_string())?;
+    Ok(text.ok().flatten().and_then(|t| snorkle_core::selection::clean_text(&t)))
+}
+
+/// The system dictionary for `term` (selected text), as a popover at `x`…`h`.
+#[tauri::command]
+pub fn define_term(term: String, x: f64, y: f64, w: f64, h: f64) {
+    let term = snorkle_core::text::sanitize_page_text(&term, 100);
+    if term.is_empty() {
+        return;
+    }
+    snorkle_content::dispatch_main(move || with_host(|host| host.define(&term, (x, y, w, h))));
+}
+
+/// A keyboard shortcut for the settings editor.
+#[derive(Serialize)]
+pub struct ShortcutInfo {
+    id: &'static str,
+    title: &'static str,
+    /// Name the chrome performs (`Shortcut::name`).
+    action: String,
+    key: String,
+    mods: u8,
+    default_key: &'static str,
+    default_mods: u8,
+}
+
+fn shortcut_infos(s: &S<'_>) -> Vec<ShortcutInfo> {
+    let current = s.shortcuts.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    snorkle_content::SHORTCUTS
+        .iter()
+        .zip(current)
+        .map(|(d, b)| ShortcutInfo {
+            id: d.id,
+            title: d.title,
+            action: d.action.name(),
+            key: b.key,
+            mods: b.mods,
+            default_key: d.key,
+            default_mods: d.mods,
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_shortcuts(s: S<'_>) -> Vec<ShortcutInfo> {
+    shortcut_infos(&s)
+}
+
+#[derive(Deserialize)]
+pub struct BindingArg {
+    id: String,
+    key: String,
+    mods: u8,
+}
+
+/// The user's bindings (applied over the defaults; a clash is refused) and
+/// whether shortcuts are suspended while the editor records a key. The
+/// menu bar is rebuilt.
+#[tauri::command]
+pub fn set_shortcuts(s: S<'_>, bindings: Vec<BindingArg>, suspend: bool) -> Result<Vec<ShortcutInfo>, String> {
+    let overrides: Vec<(String, String, u8)> = bindings.into_iter().take(64).map(|b| (b.id, b.key, b.mods)).collect();
+    let effective = snorkle_content::effective_bindings(&overrides)?;
+    *s.shortcuts.lock().unwrap_or_else(|e| e.into_inner()) = effective.clone();
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_shortcuts(effective, suspend)));
+    Ok(shortcut_infos(&s))
 }
 
 /// Closing the find bar: clears the match selection on the page.
