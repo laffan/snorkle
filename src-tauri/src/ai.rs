@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use snorkle_core::ai::{self, ChatMessage, Model, Provider, ScriptDraft};
 use snorkle_core::console::Level;
-use snorkle_core::storage::AiUsageEvent;
+use snorkle_core::storage::{AiUsageEvent, ChatEntry, ChatRecord};
 
 use crate::state::Shared;
 
@@ -158,6 +158,9 @@ pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: Stri
 /// A page-chat answer, with what the request used.
 #[derive(Serialize)]
 pub struct ChatReply {
+    /// The archived chat this turn belongs to (`None` in private tabs,
+    /// whose chats are never stored).
+    chat_id: Option<String>,
     text: String,
     input: u64,
     output: u64,
@@ -166,9 +169,16 @@ pub struct ChatReply {
     cost_micros: Option<u64>,
 }
 
-/// AI chat about the tab's page: reads the page's title, visible text and
-/// selection (channel C17) when the user sends a message, and sends them
-/// with the conversation to the provider. The URL comes from the core.
+fn wall_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// AI chat about a page. A new chat reads the tab's page (title, visible
+/// text, selection; channel C17) when the user sends the first message;
+/// the URL comes from the core. In a non-private tab the chat is archived
+/// with that context, and later turns (also when continued from the
+/// archive, from any tab) reuse the stored context instead of reading the
+/// page again.
 #[tauri::command]
 pub async fn ai_chat(
     s: S<'_>,
@@ -176,38 +186,185 @@ pub async fn ai_chat(
     provider: Provider,
     model: String,
     messages: Vec<ChatMessage>,
+    chat_id: Option<String>,
 ) -> Result<ChatReply, String> {
-    let tab = snorkle_core::tabs::TabId(tab);
-    let url = s
-        .browser()
-        .tab(tab)
-        .and_then(|t| t.committed_url.clone())
-        .filter(|u| matches!(u.scheme(), "http" | "https"))
-        .ok_or("Open a web page first.")?;
     let key = key(provider)?;
-    let (tx, rx) = mpsc::channel();
-    snorkle_content::dispatch_main(move || {
-        crate::state::with_host(|h| h.read_page_text(tab, Box::new(move |t| drop(tx.send(t)))))
-    });
-    let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
-        .await
-        .map_err(|_| "Request failed.".to_string())?;
-    let page = text
-        .ok()
-        .flatten()
-        .and_then(|t| ai::parse_page_text(&t, url.as_str()))
-        .ok_or("The page didn't answer. Wait for it to load and try again.")?;
-    let host = url.host_str().unwrap_or("").to_string();
+    // Nothing typed in a private tab is stored, also when it continues an
+    // archived chat.
+    let tab_private = s.browser().tab(snorkle_core::tabs::TabId(tab)).is_some_and(|t| t.is_private());
+    let stored = chat_id.as_deref().and_then(|id| s.store.as_ref()?.chat(id));
+    let (page, private, record) = match stored {
+        Some(rec) => {
+            let page = ai::PageText {
+                title: rec.title.clone(),
+                url: rec.url.clone(),
+                text: rec.page_text.clone(),
+                selection: rec.selection.clone(),
+            };
+            (page, tab_private, Some(rec))
+        }
+        None => {
+            let tab = snorkle_core::tabs::TabId(tab);
+            let (url, private) = {
+                let b = s.browser();
+                let t = b.tab(tab).ok_or("Open a web page first.")?;
+                let url = t
+                    .committed_url
+                    .clone()
+                    .filter(|u| matches!(u.scheme(), "http" | "https"))
+                    .ok_or("Open a web page first.")?;
+                (url, t.is_private())
+            };
+            let (tx, rx) = mpsc::channel();
+            snorkle_content::dispatch_main(move || {
+                crate::state::with_host(|h| h.read_page_text(tab, Box::new(move |t| drop(tx.send(t)))))
+            });
+            let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
+                .await
+                .map_err(|_| "Request failed.".to_string())?;
+            let page = text
+                .ok()
+                .flatten()
+                .and_then(|t| ai::parse_page_text(&t, url.as_str()))
+                .ok_or("The page didn't answer. Wait for it to load and try again.")?;
+            (page, private, None)
+        }
+    };
+    let host = snorkle_core::Url::parse(&page.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
     let req = ai::chat_request(provider, &key, &model, &page, &messages)?;
     let (status, body) = send(&s, provider, Some(&model), &format!("chat about {host} ({model})"), req).await?;
     let text = ai::parse_chat_reply(provider, status, &body)?;
     let usage = ai::parse_usage(provider, &body).unwrap_or(ai::Usage { input: 0, output: 0 });
-    Ok(ChatReply {
-        text,
-        input: usage.input,
-        output: usage.output,
-        cost_micros: ai::estimate_cost_micros(provider, &model, usage),
+    let cost_micros = ai::estimate_cost_micros(provider, &model, usage);
+    // Archive (never for private tabs).
+    let mut chat_id = None;
+    if let (false, Some(store)) = (private, s.store.as_ref()) {
+        let now = wall_ms();
+        let mut rec = record.unwrap_or_else(|| ChatRecord {
+            id: format!("c{now}-{}", s.chat_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
+            created_ms: now,
+            updated_ms: now,
+            url: page.url.clone(),
+            title: page.title.clone(),
+            page_text: page.text.clone(),
+            selection: page.selection.clone(),
+            messages: Vec::new(),
+            provider,
+            model: model.clone(),
+            input: 0,
+            output: 0,
+            cost_micros: 0,
+            unpriced: false,
+        });
+        rec.updated_ms = now;
+        rec.provider = provider;
+        rec.model = model.clone();
+        rec.messages = messages
+            .iter()
+            .map(|m| ChatEntry { role: m.role, text: m.text.clone() })
+            .chain([ChatEntry { role: ai::ChatRole::Assistant, text: text.clone() }])
+            .collect();
+        rec.input += usage.input;
+        rec.output += usage.output;
+        match cost_micros {
+            Some(c) => rec.cost_micros += c,
+            None => rec.unpriced = true,
+        }
+        let id = rec.id.clone();
+        if store.save_chat(rec).unwrap_or(false) {
+            chat_id = Some(id);
+        }
+    }
+    Ok(ChatReply { chat_id, text, input: usage.input, output: usage.output, cost_micros })
+}
+
+/// One archived chat in the list.
+#[derive(Serialize)]
+pub struct ChatSummary {
+    id: String,
+    created_ms: u64,
+    updated_ms: u64,
+    host: String,
+    title: String,
+    /// The first question, shortened.
+    first: String,
+    messages: usize,
+    cost_micros: u64,
+    unpriced: bool,
+}
+
+#[tauri::command]
+pub fn list_chats(s: S<'_>) -> Vec<ChatSummary> {
+    let Some(store) = s.store.as_ref() else { return Vec::new() };
+    store
+        .chats()
+        .into_iter()
+        .map(|c| ChatSummary {
+            host: snorkle_core::Url::parse(&c.url)
+                .ok()
+                .map(|u| snorkle_core::url_display::display(&u).registrable)
+                .unwrap_or_default(),
+            first: c
+                .messages
+                .iter()
+                .find(|m| m.role == ai::ChatRole::User)
+                .map(|m| snorkle_core::text::sanitize_page_text(&m.text, 140))
+                .unwrap_or_default(),
+            messages: c.messages.len(),
+            id: c.id,
+            created_ms: c.created_ms,
+            updated_ms: c.updated_ms,
+            title: c.title,
+            cost_micros: c.cost_micros,
+            unpriced: c.unpriced,
+        })
+        .collect()
+}
+
+/// An archived chat to show and continue (without the stored page text).
+#[derive(Serialize)]
+pub struct ChatView {
+    id: String,
+    created_ms: u64,
+    url: String,
+    host: String,
+    title: String,
+    selection: String,
+    messages: Vec<ChatEntry>,
+    input: u64,
+    output: u64,
+    cost_micros: u64,
+    unpriced: bool,
+}
+
+#[tauri::command]
+pub fn get_chat(s: S<'_>, id: String) -> Option<ChatView> {
+    let c = s.store.as_ref()?.chat(&id)?;
+    let host = snorkle_core::Url::parse(&c.url)
+        .ok()
+        .map(|u| snorkle_core::url_display::display(&u).registrable)
+        .unwrap_or_default();
+    Some(ChatView {
+        id: c.id,
+        created_ms: c.created_ms,
+        url: c.url,
+        host,
+        title: c.title,
+        selection: c.selection,
+        messages: c.messages,
+        input: c.input,
+        output: c.output,
+        cost_micros: c.cost_micros,
+        unpriced: c.unpriced,
     })
+}
+
+#[tauri::command]
+pub fn delete_chat(s: S<'_>, id: String) -> Result<(), String> {
+    match s.store.as_ref() {
+        Some(st) => st.delete_chat(&id).map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
 }
 
 /// Drafts or revises a site script. The draft is shown in the editor; it

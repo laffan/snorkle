@@ -35,6 +35,7 @@
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="spacer"></span>
       <button id="color" class="icon mode" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
+      <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg></button>
       <button id="images" class="icon mode" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/></svg></button>
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
@@ -54,7 +55,7 @@
   </aside>
   <!-- With the sidebar closed: a tab on the left edge (cut out of the
        page, like the pill). Pointing at it shows the sidebar as a pop-over. -->
-  <button id="edge-tab" aria-label="Show tabs" title="Tabs" hidden></button>
+  <button id="edge-tab" aria-label="Show or hide tabs" aria-controls="sidebar" title="Tabs"></button>
   <!-- Left edge of the right panel(s): drag to resize. -->
   <div id="right-resize" class="resize-edge" role="separator" aria-orientation="vertical" aria-label="Resize panel" hidden></div>
 
@@ -82,7 +83,6 @@
       <button id="find-close" class="icon" aria-label="Close find" title="Close (Esc)">&#x00D7;</button>
     </div>
     <div id="toolbar" class="urlpill">
-      <button id="sidebar-toggle" class="icon" aria-label="Show or hide sidebar" aria-controls="sidebar">&#x25E7;</button>
       <button id="share" class="icon" aria-label="Share this page" title="Share"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M8 11H6.5A1.5 1.5 0 0 0 5 12.5v7A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16"/></svg></button>
       <button id="back" class="icon" aria-label="Back">&#x2039;</button>
       <button id="forward" class="icon" aria-label="Forward">&#x203A;</button>
@@ -172,7 +172,7 @@
         <section data-panel="general">
           <div class="option"><div>
             <div class="option-title">View modes</div>
-            <div class="muted small">Black and white, and hiding images and video, are on at every launch. Tap a mode button in the sidebar to change it for all tabs; long-press it to turn it off for the current tab only. A dot under a button means the mode is on (a ring: off for this tab). The headers view lists the page's headings beside it; the chat button beside it opens an AI chat about the page.</div>
+            <div class="muted small">Black and white, and hiding images and video, are on at every launch; dark pages are off. Tap a mode button in the sidebar to change it for all tabs; long-press it to turn it off for the current tab only. A dot under a button means the mode is on (a ring: off for this tab). The headers view lists the page's headings beside it; the chat button beside it opens an AI chat about the page.</div>
           </div></div>
           <div class="option"><div>
             <div class="option-title">Keyboard</div>
@@ -348,21 +348,25 @@
   <!-- AI chat about the current page, docked right of the page. Replies
        are model output: textContent only. -->
   <aside id="chat" class="sheet chat" aria-labelledby="chat-title" hidden>
-    <div class="modal-head">
+    <div class="modal-head chat-head">
       <h1 id="chat-title">Chat</h1>
-      <button id="chat-new" class="pillbtn" title="Start a new conversation about this page">New</button>
+      <button id="chat-new" class="icon chat-plus" aria-label="New chat" title="New chat">+</button>
+      <span class="spacer"></span>
+      <button id="chat-archive" class="pillbtn" aria-pressed="false">Archive</button>
       <button id="chat-close" class="icon" aria-label="Close chat">&#x00D7;</button>
     </div>
-    <div class="chat-meta">
-      <select id="chat-model" aria-label="Model"></select>
-      <span id="chat-cost" class="muted small" title="Estimated from published prices; your provider's billing page is authoritative"></span>
-    </div>
-    <p id="chat-note" class="muted small"></p>
+    <div id="chat-context" class="chat-context" hidden></div>
     <ol id="chat-log" class="chat-log" aria-live="polite"></ol>
+    <ol id="chat-archive-list" class="chat-archive" aria-label="Archived chats" hidden></ol>
     <form id="chat-form" class="chat-form">
       <textarea id="chat-input" rows="2" placeholder="Ask about this page" aria-label="Message" autocapitalize="sentences"></textarea>
       <button id="chat-send" class="button primary" type="submit">Send</button>
     </form>
+    <div class="chat-foot">
+      <button id="chat-model-btn" class="linkbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
+      <span id="chat-cost" class="muted small"></span>
+    </div>
+    <div id="chat-model-menu" class="popup chat-model-menu" role="menu" aria-label="Model" hidden></div>
   </aside>
 
   <!-- Over the text selected on a page (cut out of the page, like the pill). -->

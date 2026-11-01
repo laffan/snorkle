@@ -153,7 +153,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   are the one owner-approved exception to "no scripts in content". They are installed as
   main-frame `WKUserScript`s in WebKit's isolated client world and guarded by
   `location.hostname`. There is no native bridge. See SECURITY_REVIEW I1/I2.
-- **View modes** (`snorkle_core::viewmodes`): desaturate, hide media and headers. Each is on or
+- **View modes** (`snorkle_core::viewmodes`): desaturate, hide media, dark and headers. Each is on or
   off app-wide; a long press on its button offers "Disable for this tab", which exempts that
   tab (popups inherit their opener's exemptions, since they share its content controller). The
   host compiles the injected scripts once for the app-wide modes and once per exempted tab. The
@@ -165,6 +165,12 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   the panel shows them as foldable sections. Detect Headers sends each candidate's enclosing
   section element and whether it is uppercase, and asks the model for section labels first. The style modes use the same
   mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
+  **Dark** (off by default; moon button) makes content web views prefer a dark appearance
+  (`overrideUserInterfaceStyle`), so sites with their own dark theme use it; a constant detector
+  then checks the page's background (root, body, else the canvas) and, if it is light, marks the
+  root so a constant style inverts the page with hues kept (`invert(1) hue-rotate(180deg)`) and
+  inverts images, video and embeds back (not with hide media on, whose gray boxes are simply
+  darkened). With black and white also on, the root filter includes `grayscale`.
   Pages are black and white with media hidden by default: images, video, canvas, embedded
   objects and video-player iframes keep their boxes but are drawn as gray rectangles; pointing
   at one fades it in (0.3 s) in black and white. Media under an overlay (video players, images
@@ -187,7 +193,8 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 ## 5f. URL bar
 
 The address bar is a pill floating over the bottom of the page (pages run the full height of
-the window): sidebar, back, forward and reload on its left; the address (about 400 pt wide; full
+the window): share, back, forward and reload on its left (the sidebar's toggle is a tab on the sidebar's own
+edge); the address (about 400 pt wide; full
 width in narrow windows); then a ⋯ button that opens a popup with the page actions (ad blocking,
 bookmark, site scripts), the per-tab headers-view button and the chat button. Toasts and banners
 appear above the pill. With a pointer device the pill and the sidebar sit at 50% opacity until
@@ -214,7 +221,9 @@ Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are commands of the app's main
 work whatever has focus, including nothing (sidebar hidden, no page): ⌘T new tab, ⌘W close tab (a
 pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘S or
 ⌘\ sidebar, ⌘⇧\ right panels, ⌘D bookmark (on a bookmark's tab: un-bookmark), ⌘I images,
-⌘1–5 sidebar items. Settings → Keyboard rebinds them: the chrome keeps the user's bindings and
+⌘1–5 sidebar items. The sidebar's toggle is a tab on its right edge (a hole while it is over the page) that slides
+with it; opening or closing it animates the page frames natively over the same 0.25 s
+(`set_chrome_layout` `animate`, `UIView.animateWithDuration`). Settings → Keyboard rebinds them: the chrome keeps the user's bindings and
 sends them at launch (`set_shortcuts`, validated, clashes refused); the menu is rebuilt, and
 while a key is being recorded the shortcuts are suspended so the keys reach the chrome. The
 chrome's own keydown handler uses the same bindings when it has focus; a shortcut arriving twice
@@ -259,6 +268,15 @@ constant script in the page's client world that returns the title, visible text 
 all as data in the system prompt (`ai::chat_request`). Conversations are kept in the chrome's
 memory only, one per tab, and restart when the tab's page changes. Usage is recorded like other
 AI requests (Settings → AI → Usage).
+
+The panel shows no explanatory text: a "+" beside its title starts a new chat, the model is a
+link at the bottom (a menu of every connected provider's models; it sets the Ask Selection use)
+beside the running cost, and Archive lists earlier chats. Chats begun in non-private tabs are
+stored natively (`storage::ChatRecord`, one file per chat under `chats/`, at most 60, least
+recently used dropped): the messages, and the context the first message used (the page's URL,
+title, visible text and the selection at that moment). Continuing an archived chat, from any tab,
+sends that stored context instead of reading the current page; nothing typed in a private tab is
+stored. Chats can be deleted from the archive.
 
 ## 5d. In-app console
 

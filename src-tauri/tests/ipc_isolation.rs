@@ -49,6 +49,8 @@ fn args(cmd: &str) -> serde_json::Value {
         "set_chrome_layout" => {
             json!({ "top": 80.0, "left": 264.0, "right": 0.0, "bottom": 0.0, "overlay": false, "holes": [{ "x": 300.0, "y": 900.0, "w": 500.0, "h": 46.0, "r": 23.0 }] })
         }
+        "get_chat" | "delete_chat" => json!({ "id": "c1" }),
+        "list_chats" => json!({}),
         "ai_chat" => {
             json!({ "tab": 1, "provider": "anthropic", "model": "claude-opus-5-5", "messages": [{ "role": "user", "text": "Hi" }] })
         }

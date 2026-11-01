@@ -54,7 +54,7 @@ use objc2_ui_kit::{
     UIActivityViewController, UIApplication, UIApplicationDidEnterBackgroundNotification,
     UIApplicationDidReceiveMemoryWarningNotification, UIBezierPath, UIColor, UIControlEvents, UIRectCorner,
     UIReferenceLibraryViewController, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
-    UIViewController,
+    UIUserInterfaceStyle, UIViewController,
 };
 use objc2_web_kit::{
     WKContentMode, WKFindConfiguration, WKFindResult, WKInactiveSchedulingPolicy, WKUserContentController,
@@ -270,7 +270,9 @@ impl ContentHost {
     /// of the docked console (0 when closed). Content containers never
     /// extend over any of them. `holes` are where the chrome floats over
     /// the content area (see the module docs).
-    pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64, holes: Vec<Hole>) {
+    /// With `animate`, the page frames move over 0.25 s (the sidebar's
+    /// slide in the chrome takes as long).
+    pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64, holes: Vec<Hole>, animate: bool) {
         let before = self.content_frame().size.width;
         self.top.set(top);
         self.left.set(left);
@@ -279,8 +281,22 @@ impl ContentHost {
         let b = self.root.bounds();
         *self.holes.borrow_mut() = crate::sanitize_holes(&holes, b.size.width, b.size.height);
         let grew = self.content_frame().size.width > before + 0.5;
+        let moves: Vec<(Retained<UIView>, CGRect)> =
+            self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()))).collect();
+        if animate {
+            let holes = self.holes.borrow().clone();
+            let block = RcBlock::new(move || {
+                for (view, frame) in &moves {
+                    place_view(view, *frame, &holes);
+                }
+            });
+            UIView::animateWithDuration_animations(0.25, &block, self.mtm);
+        } else {
+            for (view, frame) in &moves {
+                self.place(view, *frame);
+            }
+        }
         for v in self.views.values() {
-            self.place(&v.container, self.pane_frame(v.pane.get()));
             if grew {
                 // WebKit re-lays out the page asynchronously; check once it has.
                 unsafe {
@@ -294,11 +310,7 @@ impl ContentHost {
     /// Sets a container's frame (and its web view's, which normally follows
     /// by autoresizing) and cuts the holes out of it.
     fn place(&self, view: &UIView, frame: CGRect) {
-        view.setFrame(frame);
-        for sub in view.subviews().iter() {
-            sub.setFrame(view.bounds());
-        }
-        apply_mask(view, &self.holes.borrow());
+        place_view(view, frame, &self.holes.borrow());
     }
 
     /// Replaces everything injected (user scripts, view modes with per-tab
@@ -310,6 +322,7 @@ impl ContentHost {
         self.compile_scripts();
         for (tab, v) in &self.views {
             injection::install(self.mtm, &v.controller, self.scripts_for(*tab));
+            set_dark(&v.web, self.injections.view_for(*tab).dark);
             if run_now {
                 injection::run_now(self.mtm, &v.web, &self.injections.view_for(*tab).apply_js);
             }
@@ -680,6 +693,7 @@ impl ContentHost {
 
         container.addSubview(&web);
         apply_mask(&container, &self.holes.borrow());
+        set_dark(&web, self.injections.view_for(tab).dark);
         self.root.addSubview(&container);
         injection::install(mtm, &controller, self.scripts_for(tab));
         rules::register(tab, controller.clone());
@@ -808,6 +822,15 @@ impl Drop for ContentHost {
     }
 }
 
+/// Sets a container's frame and its web view's, and cuts `holes` out.
+fn place_view(view: &UIView, frame: CGRect, holes: &[Hole]) {
+    view.setFrame(frame);
+    for sub in view.subviews().iter() {
+        sub.setFrame(view.bounds());
+    }
+    apply_mask(view, holes);
+}
+
 /// Masks `view` (a direct subview of the root view) so the holes that
 /// intersect it are not drawn; no mask when none does. Holes never overlap
 /// (`sanitize_holes` merges them), as the even-odd fill requires.
@@ -849,6 +872,12 @@ fn apply_mask(view: &UIView, holes: &[Hole]) {
         mask.setFillRule(kCAFillRuleEvenOdd);
         layer.setMask(Some(&mask));
     }
+}
+
+/// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
+/// and the default canvas); otherwise the system's.
+fn set_dark(web: &WKWebView, dark: bool) {
+    web.setOverrideUserInterfaceStyle(if dark { UIUserInterfaceStyle::Dark } else { UIUserInterfaceStyle::Unspecified });
 }
 
 /// A popover source rectangle from the chrome (window coordinates), made

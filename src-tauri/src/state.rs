@@ -81,6 +81,8 @@ pub struct Shared {
     pub headers_tabs: Mutex<HashSet<TabId>>,
     /// Effective keyboard shortcut bindings (one per `SHORTCUTS` entry).
     pub shortcuts: Mutex<Vec<snorkle_content::KeyBinding>>,
+    /// Makes archived chat ids unique within one millisecond.
+    pub chat_seq: std::sync::atomic::AtomicU64,
     /// "Detect Headers" requests waiting for their page's sample.
     pub pending_samples: Mutex<HashMap<TabId, mpsc::Sender<String>>>,
     /// In-app console (in memory only).
@@ -104,6 +106,7 @@ impl Shared {
             headings: Mutex::default(),
             headers_tabs: Mutex::default(),
             pending_samples: Mutex::default(),
+            chat_seq: std::sync::atomic::AtomicU64::new(0),
             shortcuts: Mutex::new(snorkle_content::effective_bindings(&[]).unwrap_or_default()),
             console: Mutex::default(),
             console_capture: AtomicBool::new(cfg!(debug_assertions)),

@@ -60,6 +60,9 @@ pub struct ViewInjections {
     pub apply_js: String,
     /// Install the headings message handler (headers mode on).
     pub headings: bool,
+    /// Dark mode: the web view prefers a dark appearance, so pages with
+    /// their own dark theme (`prefers-color-scheme`) use it.
+    pub dark: bool,
 }
 
 impl Injections {

@@ -31,10 +31,12 @@ pub enum Kind {
     Desaturate,
     HideMedia,
     Headers,
+    /// Dark pages: light pages are inverted (media kept as they are).
+    Dark,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Desaturate, Kind::HideMedia, Kind::Headers];
+    pub const ALL: [Kind; 4] = [Kind::Desaturate, Kind::HideMedia, Kind::Headers, Kind::Dark];
 }
 
 /// Which view modes are on (app-wide, or effective for one tab).
@@ -45,11 +47,12 @@ pub struct ViewModes {
     pub desaturate: bool,
     pub hide_media: bool,
     pub headers: bool,
+    pub dark: bool,
 }
 
 impl Default for ViewModes {
     fn default() -> Self {
-        ViewModes { desaturate: true, hide_media: true, headers: false }
+        ViewModes { desaturate: true, hide_media: true, headers: false, dark: false }
     }
 }
 
@@ -59,6 +62,7 @@ impl ViewModes {
             Kind::Desaturate => self.desaturate,
             Kind::HideMedia => self.hide_media,
             Kind::Headers => self.headers,
+            Kind::Dark => self.dark,
         }
     }
 
@@ -67,6 +71,7 @@ impl ViewModes {
             Kind::Desaturate => self.desaturate = on,
             Kind::HideMedia => self.hide_media = on,
             Kind::Headers => self.headers = on,
+            Kind::Dark => self.dark = on,
         }
     }
 
@@ -117,6 +122,39 @@ pub const NO_MEDIA_CSS: &str = concat!(
 );
 /// Attribute the pointer tracker puts on the media under the pointer.
 pub const REVEAL_ATTR: &str = "data-snorkle-reveal";
+
+/// Fixed style for dark mode. It takes effect only once [`DARK_DETECT_JS`]
+/// has found the page light and marked the root `snorkle-dark`: the page
+/// is inverted with its hues kept (`invert` + `hue-rotate(180deg)`), and
+/// images, video and embeds are inverted back so they look as they are
+/// (unless hide media is on: its gray boxes are simply darkened). With
+/// black and white also on, the root filter includes `grayscale` (the two
+/// styles would otherwise replace each other's `filter`).
+pub const DARK_CSS: &str = concat!(
+    "html.snorkle-dark{filter:invert(1) hue-rotate(180deg)!important;min-height:100%!important}",
+    "html.snorkle-dark.snorkle-dark-bg{background-color:#fff!important}",
+    "html.snorkle-dark:has(#__snorkle_grayscale){filter:invert(1) hue-rotate(180deg) grayscale(1)!important}",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,picture,video,canvas,embed,object,iframe,svg image)",
+    "{filter:invert(1) hue-rotate(180deg)!important}"
+);
+
+/// Decides whether the page is light (then marks the root `snorkle-dark`).
+/// The page's own background: the root's, else the body's; if both are
+/// transparent, the canvas, which is dark only when the page opts into a
+/// dark color scheme and the web view prefers dark (dark mode also sets
+/// that, so sites with their own dark theme use it and are left alone).
+/// Runs at document end, on load and once more 1.5 s later. Constant code.
+pub const DARK_DETECT_JS: &str = "(function(){\
+function lum(c){var m=/rgba?\\(([\\d.]+)[, ]+([\\d.]+)[, ]+([\\d.]+)(?:[,/ ]+([\\d.]+%?))?/.exec(c||'');if(!m)return null;\
+if(m[4]!==undefined&&parseFloat(m[4])<(m[4].slice(-1)==='%'?10:0.1))return null;return (0.2126*m[1]+0.7152*m[2]+0.0722*m[3])/255;}\
+function check(){var d=document.documentElement;if(!d)return;var root=lum(getComputedStyle(d).backgroundColor),l=root;\
+if(l===null&&document.body)l=lum(getComputedStyle(document.body).backgroundColor);\
+if(l===null){var cs=String(getComputedStyle(d).colorScheme||'');l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
+d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);}\
+if(window.__snorkleDark){window.__snorkleDark.check();return;}\
+window.__snorkleDark={check:check};check();window.addEventListener('load',check);setTimeout(check,1500);})();";
+
+const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');}delete window.__snorkleDark;})();";
 
 /// Name of the headings message handler (client world only).
 pub const HEADINGS_HANDLER_NAME: &str = "snorkleHeadings";
@@ -301,6 +339,14 @@ pub fn injections(modes: ViewModes, rules: &HeadingRules) -> Vec<Injection> {
     if modes.headers {
         out.push(Injection { source: headings_start_js(rules), at: InjectAt::DocumentEnd, all_frames: false });
     }
+    if modes.dark {
+        out.push(Injection {
+            source: style_js("__snorkle_dark", DARK_CSS, true, false),
+            at: InjectAt::DocumentStart,
+            all_frames: false,
+        });
+        out.push(Injection { source: DARK_DETECT_JS.to_string(), at: InjectAt::DocumentEnd, all_frames: false });
+    }
     out
 }
 
@@ -313,8 +359,11 @@ pub fn apply_js(modes: ViewModes, rules: &HeadingRules) -> String {
     } else {
         HEADINGS_STOP_JS.to_string()
     };
+    let dark = if modes.dark { DARK_DETECT_JS } else { DARK_STOP_JS };
     style_js("__snorkle_grayscale", GRAYSCALE_CSS, modes.desaturate, false)
         + &style_js("__snorkle_no_images", NO_MEDIA_CSS, modes.hide_media, true)
+        + &style_js("__snorkle_dark", DARK_CSS, modes.dark, false)
+        + dark
         + &headers
 }
 
@@ -440,16 +489,16 @@ mod tests {
 
     #[test]
     fn injections_per_mode() {
-        let all = ViewModes { desaturate: true, hide_media: true, headers: true };
+        let all = ViewModes { desaturate: true, hide_media: true, headers: true, dark: false };
         let inj = injections(all, &HeadingRules::new());
         assert_eq!(inj.len(), 3);
         assert!(inj[0].source.contains("grayscale(1)"));
         assert!(inj[1].source.contains("video,"));
         assert!(inj[2].source.contains(&format!("messageHandlers.{HEADINGS_HANDLER_NAME}")));
         assert_eq!(inj[2].at, InjectAt::DocumentEnd);
-        assert!(injections(ViewModes { desaturate: false, hide_media: false, headers: false }, &HeadingRules::new())
+        assert!(injections(ViewModes { desaturate: false, hide_media: false, headers: false, dark: false }, &HeadingRules::new())
             .is_empty());
-        let off = apply_js(ViewModes { desaturate: false, hide_media: false, headers: false }, &HeadingRules::new());
+        let off = apply_js(ViewModes { desaturate: false, hide_media: false, headers: false, dark: false }, &HeadingRules::new());
         assert!(off.contains("window[\"__snorkle_grayscale_state\"];if(!s)return;s.obs.disconnect();s.st.remove()"));
         assert!(inj[1].all_frames, "hide media also covers iframes");
         assert!(!inj[0].all_frames && !inj[2].all_frames);
@@ -488,10 +537,10 @@ mod tests {
         assert!(validate_rule(&"a".repeat(MAX_SELECTOR_CHARS + 1), 1).is_none());
         let mut rules = HeadingRules::new();
         rules.insert("nytimes.com".into(), vec![validate_rule("h2.story-heading", 1).unwrap()]);
-        let js = &injections(ViewModes { desaturate: false, hide_media: false, headers: true }, &rules)[0].source;
+        let js = &injections(ViewModes { desaturate: false, hide_media: false, headers: true, dark: false }, &rules)[0].source;
         assert!(js.contains("story-heading"));
         assert!(!js.contains("</"), "rules are embedded as an escaped JSON literal");
-        let apply = apply_js(ViewModes { desaturate: false, hide_media: false, headers: true }, &rules);
+        let apply = apply_js(ViewModes { desaturate: false, hide_media: false, headers: true, dark: false }, &rules);
         let stop = apply.find(HEADINGS_STOP_JS).expect("stops the running extractor");
         assert!(apply[stop..].contains("story-heading"), "then restarts it with the new rules");
     }
@@ -509,6 +558,20 @@ mod tests {
         assert!(v["candidates"][0].get("extra").is_none());
         assert!(parse_report("{\"c\":-1}").is_none());
         assert!(parse_report("{\"nope\":1}").is_none());
+    }
+
+    #[test]
+    fn dark_mode() {
+        let m = ViewModes { desaturate: true, hide_media: true, headers: false, dark: true };
+        let inj = injections(m, &HeadingRules::new());
+        assert_eq!(inj.len(), 4, "grayscale, media, dark style, dark detector");
+        assert!(inj[2].source.contains("snorkle-dark") && inj[2].at == InjectAt::DocumentStart);
+        assert!(inj[3].source.contains("classList.toggle('snorkle-dark'") && inj[3].at == InjectAt::DocumentEnd);
+        assert!(DARK_CSS.contains(":has(#__snorkle_grayscale)") && DARK_CSS.contains(":not(:has(#__snorkle_no_images))"));
+        let off = apply_js(ViewModes { dark: false, ..m }, &HeadingRules::new());
+        assert!(off.contains(DARK_STOP_JS));
+        assert!(!ViewModes::default().dark);
+        assert!(DARK_DETECT_JS.contains("prefers-color-scheme: dark"));
     }
 
     #[test]

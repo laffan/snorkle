@@ -142,7 +142,18 @@ pub struct HoleArg {
 /// the URL pill, its popups and toasts float over the content area; pages
 /// are cut out there (validated and bounded by the content host).
 #[tauri::command]
-pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, right: f64, bottom: f64, overlay: bool, holes: Vec<HoleArg>) {
+#[allow(clippy::too_many_arguments)]
+pub fn set_chrome_layout(
+    s: S<'_>,
+    top: f64,
+    left: f64,
+    right: f64,
+    bottom: f64,
+    overlay: bool,
+    holes: Vec<HoleArg>,
+    animate: Option<bool>,
+) {
+    let animate = animate.unwrap_or(false);
     let holes: Vec<snorkle_content::Hole> = holes
         .into_iter()
         .take(snorkle_content::MAX_HOLES)
@@ -155,7 +166,7 @@ pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, right: f64, bottom: f64,
             corners: h.c.unwrap_or(snorkle_content::ALL_CORNERS),
         })
         .collect();
-    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, right, bottom, holes)));
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, right, bottom, holes, animate)));
     with_browser(&s, |b| b.set_chrome_overlay(overlay));
 }
 

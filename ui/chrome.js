@@ -37,7 +37,7 @@
   const MAX_PINS = 4;
   // View modes (session-only, kept in Rust): app-wide on/off, and tabs
   // exempted from a mode ("Disable for this tab").
-  let viewModes = { modes: { desaturate: true, hide_media: true, headers: false }, exempt: {} };
+  let viewModes = { modes: { desaturate: true, hide_media: true, headers: false, dark: false }, exempt: {} };
   let headingsByTab = new Map();
   let scripts = [];
   let editingDomain = null; // domain of the script open in the editor, or '' for new
@@ -776,17 +776,19 @@
     peek = false;
     if (!narrow) setPref('sidebarOpen', open ? '1' : '0');
     closeMenu();
-    applySidebar();
+    applySidebar(true);
   }
 
-  function applySidebar() {
+  // `animate`: the page slides with the sidebar (the host animates the
+  // content frames over the same 0.25 s as the CSS slide).
+  function applySidebar(animate) {
     document.body.classList.toggle('narrow', narrow);
     document.body.classList.toggle('sidebar-closed', !sidebarOpen && !peek);
     document.body.classList.toggle('peek', peek);
-    $('edge-tab').hidden = sidebarOpen || peek;
     $('sidebar').setAttribute('aria-hidden', String(!sidebarOpen && !peek));
-    $('sidebar-toggle').setAttribute('aria-expanded', String(sidebarOpen));
-    reportLayout();
+    $('edge-tab').setAttribute('aria-expanded', String(sidebarOpen));
+    $('edge-tab').setAttribute('aria-label', sidebarOpen ? 'Hide tabs' : 'Show tabs');
+    reportLayout({ animate: !!animate });
   }
 
   // Resizing: the content view follows the edge, one layout report per
@@ -873,7 +875,9 @@
     peekTimer = setTimeout(() => { if (peek && !peekBusy()) setPeek(false); }, 280);
   }
   $('edge-tab').addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse' && !narrow) setPeek(true); });
-  $('edge-tab').addEventListener('click', () => { if (narrow) setSidebar(true); else setPeek(!peek); });
+  // The tab rides on the sidebar's right edge: it opens and closes the
+  // sidebar (pointing at it while closed shows the pop-over first).
+  $('edge-tab').addEventListener('click', () => setSidebar(!sidebarOpen));
   $('sidebar').addEventListener('pointerenter', () => clearTimeout(peekTimer));
   $('sidebar').addEventListener('pointerleave', (ev) => { if (peek && ev.pointerType === 'mouse') leavePeek(); });
   // The pointer may leave the chrome's web view straight onto the page.
@@ -1257,7 +1261,7 @@
   // covering it (content views are hidden while `overlay` is true).
   let lastLayout = '';
   let contentBox = { left: 0, top: 0, right: 0, bottom: 0 };
-  function reportLayout() {
+  function reportLayout(opts) {
     // Use the sidebar's layout width (unaffected by the slide transform) so
     // the content area moves once, to its final position.
     const left = sidebarOpen && !narrow ? Math.ceil($('sidebar').offsetWidth) : 0;
@@ -1317,7 +1321,7 @@
     const key = JSON.stringify([top, left, right, bottom, overlay, holes]);
     if (key === lastLayout) return;
     lastLayout = key;
-    invoke('set_chrome_layout', { top, left, right, bottom, overlay, holes });
+    invoke('set_chrome_layout', { top, left, right, bottom, overlay, holes, animate: !!(opts && opts.animate) });
   }
 
   // Chrome that floats over the page: the pill, its popup, toasts and
@@ -1350,15 +1354,16 @@
       const h = hole(e, 15);
       if (h) out.push(h);
     }
+    // Layout boxes, not the on-screen ones: the slide may still be running.
+    const s = $('sidebar');
     if (peek) {
-      // Layout box (the slide-in transform may still be running); flush
-      // with the window's left edge, rounded on the right.
-      const s = $('sidebar');
+      // Flush with the window's left edge, rounded on the right.
       out.push({ x: 0, y: s.offsetTop - 1, w: s.offsetWidth + 1, h: s.offsetHeight + 2, r: 15, c: 10 });
-    } else if (!$('edge-tab').hidden) {
-      const e = $('edge-tab');
-      out.push({ x: 0, y: e.offsetTop - 1, w: e.offsetWidth + 1, h: e.offsetHeight + 2, r: 11, c: 10 });
     }
+    // The toggle tab, on the sidebar's right edge (or the window's edge).
+    const e = $('edge-tab');
+    const ex = (sidebarOpen && !narrow) || peek ? s.offsetWidth : 0;
+    if (!(narrow && sidebarOpen)) out.push({ x: ex, y: e.offsetTop - 1, w: e.offsetWidth + 1, h: e.offsetHeight + 2, r: 11, c: 10 });
     return out;
   }
 
@@ -1423,6 +1428,7 @@
   const VIEW_BUTTONS = [
     { id: 'color', mode: 'desaturate', pressedWhenOff: true, name: 'Black and white' },
     { id: 'images', mode: 'hide_media', pressedWhenOff: true, name: 'Hide images and video' },
+    { id: 'dark', mode: 'dark', pressedWhenOff: false, name: 'Dark pages' },
   ];
 
   // The headers view is per tab (its button is in the URL bar).
@@ -1651,26 +1657,34 @@
 
   // ---- AI chat about the page ---------------------------------------------
   //
-  // One conversation per tab, restarted when the tab's page changes. Each
-  // message is sent with the whole conversation; Rust reads the page's
-  // title, visible text and selection at that moment. Replies are model
-  // output and are shown with textContent only.
+  // One conversation per tab. A new one starts when the tab's page changes
+  // (unless it was opened from the archive) or with "+". Each message is
+  // sent with the whole conversation. The first reads the page; Rust keeps
+  // the chat (with that page context) in the archive, except in private
+  // tabs, and later turns reuse it. Replies are model output and are shown
+  // with textContent only.
 
-  const chats = new Map(); // tab id -> { url, messages: [{role, text}], input, output, cost, unpriced, busy }
+  // tab id -> { url, sticky, chatId, context, messages: [{role, text}],
+  //             log, input, output, cost, unpriced, busy }
+  const chats = new Map();
+  let archiveOpen = false;
+
+  function newChat(url) {
+    return { url, sticky: false, chatId: null, context: '', messages: [], log: [], input: 0, output: 0, cost: 0, unpriced: false, busy: false };
+  }
 
   function chatFor(t) {
     const url = t && t.url ? t.url.full : '';
     let c = chats.get(t.id);
-    if (!c || c.url !== url) {
-      const restarted = !!(c && c.messages.length);
-      c = { url, messages: [], log: restarted ? [{ role: 'info', text: 'New page: started a new conversation.' }] : [], input: 0, output: 0, cost: 0, unpriced: false, busy: false };
+    if (!c || (c.url !== url && !c.sticky && !c.busy)) {
+      c = newChat(url);
       chats.set(t.id, c);
     }
     return c;
   }
 
   // Models from every connected provider (the lists Settings → AI → Test
-  // fetched), as "provider|model".
+  // fetched).
   function chatModels() {
     const out = [];
     for (const p of ['anthropic', 'openai']) {
@@ -1687,7 +1701,7 @@
   }
 
   // The chat's model is the "Ask Selection" use (Settings → AI → Uses);
-  // the menu in the chat changes that use.
+  // the model link in the chat changes that use.
   function chatChoice() {
     const models = chatModels();
     const c = useChoice('ask');
@@ -1695,61 +1709,135 @@
   }
 
   function renderChatModels() {
-    const sel = $('chat-model');
-    const models = chatModels();
-    sel.replaceChildren();
-    if (!models.length) {
-      sel.appendChild(el('option', null, 'Connect a provider in Settings → AI'));
-      sel.disabled = true;
-      return;
-    }
-    for (const m of models) {
-      const o = el('option', null, `${m.name} · ${AI_LABEL[m.p]}`);
-      o.value = `${m.p}|${m.id}`;
-      sel.appendChild(o);
-    }
-    sel.disabled = false;
     const c = chatChoice();
-    if (c) sel.value = `${c.p}|${c.id}`;
+    const btn = $('chat-model-btn');
+    btn.textContent = c ? `${c.name} ▾` : 'No model ▾';
+    btn.disabled = !chatModels().length;
+  }
+
+  function setModelMenu(open) {
+    const menu = $('chat-model-menu');
+    menu.hidden = !open;
+    $('chat-model-btn').setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    menu.replaceChildren();
+    const cur = chatChoice();
+    let lastP = null;
+    for (const m of chatModels()) {
+      if (m.p !== lastP && connectedProviders().length > 1) { menu.appendChild(el('div', 'vm-title', AI_LABEL[m.p])); lastP = m.p; }
+      const b = el('button', cur && cur.p === m.p && cur.id === m.id ? 'chosen' : '', m.name);
+      b.setAttribute('role', 'menuitemradio');
+      b.setAttribute('aria-checked', String(!!(cur && cur.p === m.p && cur.id === m.id)));
+      b.addEventListener('click', () => {
+        setUse('ask', m.p, m.id);
+        setModelMenu(false);
+        renderChatModels();
+        chatKey = '';
+        renderChat();
+      });
+      menu.appendChild(b);
+    }
+  }
+  $('chat-model-btn').addEventListener('click', () => setModelMenu($('chat-model-menu').hidden));
+
+  function dateLabel(ms) {
+    return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
   let chatKey = '';
   function renderChat() {
     if (!chatShown()) { chatKey = ''; return; }
     const t = activeTab();
+    $('chat-archive').setAttribute('aria-pressed', String(archiveOpen));
+    $('chat-log').hidden = archiveOpen;
+    $('chat-form').hidden = archiveOpen;
+    $('chat-archive-list').hidden = !archiveOpen;
+    if (archiveOpen) { $('chat-context').hidden = true; return; }
     // State updates arrive often (load progress); rebuild only on change,
     // so a selection in the log survives.
     const cur = t ? chats.get(t.id) : null;
     const pick = chatChoice();
-    const key = JSON.stringify([t && t.id, t && t.url && t.url.full, cur && cur.log.length, cur && cur.busy, pick && pick.p + pick.id]);
+    const key = JSON.stringify([t && t.id, t && t.url && t.url.full, cur && cur.log.length, cur && cur.busy, cur && cur.chatId, pick && pick.p + pick.id]);
     if (key === chatKey) return;
     chatKey = key;
+    renderChatModels();
     const log = $('chat-log');
     const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
     log.replaceChildren();
-    const usable = !!(t && t.url);
-    const choice = chatChoice();
-    $('chat-note').textContent = !choice
-      ? 'Connect an AI provider in Settings → AI to chat about pages.'
-      : `Each message sends this page's address, title, visible text and any selected text to ${AI_LABEL[choice.p]}.`;
-    if (!usable) {
-      log.appendChild(el('li', 'info', 'Open a web page to chat about it.'));
+    const c = t && (t.url || (cur && cur.sticky)) ? chatFor(t) : null;
+    $('chat-context').hidden = !(c && c.context);
+    $('chat-context').textContent = c ? c.context : '';
+    if (!c) {
       $('chat-cost').textContent = '';
       $('chat-send').disabled = true;
       return;
     }
-    const c = chatFor(t);
-    if (!c.log.length) log.appendChild(el('li', 'info', 'Ask a question about this page, for example “Summarise this” or “What does it say about prices?”'));
     for (const m of c.log) {
       const li = el('li', m.role, m.text);
       if (m.meta) li.appendChild(el('span', 'meta', m.meta));
       log.appendChild(li);
     }
-    if (c.busy) log.appendChild(el('li', 'assistant pending', 'Reading the page…'));
+    if (c.busy) log.appendChild(el('li', 'assistant pending', '…'));
     const tokens = c.input + c.output;
     $('chat-cost').textContent = tokens ? `${c.unpriced ? '≥ ' : '≈ '}${money(c.cost)} · ${tokens.toLocaleString()} tokens` : '';
-    $('chat-send').disabled = c.busy || !choice;
+    $('chat-send').disabled = c.busy || !pick;
     if (atEnd || c.busy) log.scrollTop = log.scrollHeight;
+  }
+
+  // ---- archive: earlier chats, to read again, continue or delete ----------
+
+  function setArchive(open) {
+    archiveOpen = open;
+    setModelMenu(false);
+    if (open) loadArchive();
+    chatKey = '';
+    renderChat();
+  }
+
+  function loadArchive() {
+    const list = $('chat-archive-list');
+    T.core.invoke('list_chats').then((items) => {
+      list.replaceChildren();
+      for (const it of items) {
+        const li = el('li');
+        const open = el('button', 'open');
+        open.appendChild(el('span', 't', it.first || it.title || it.host));
+        const cost = it.cost_micros || it.unpriced ? ` · ${it.unpriced ? '≥ ' : ''}${money(it.cost_micros)}` : '';
+        open.appendChild(el('span', 'u', `${it.host} · ${dateLabel(it.updated_ms)}${cost}`));
+        open.addEventListener('click', () => openArchived(it.id));
+        const rm = el('button', 'remove', '×');
+        rm.setAttribute('aria-label', 'Delete this chat');
+        rm.addEventListener('click', () => {
+          for (const [tab, c] of chats) if (c.chatId === it.id) chats.delete(tab);
+          invoke('delete_chat', { id: it.id }).then(loadArchive);
+        });
+        li.append(open, rm);
+        list.appendChild(li);
+      }
+      if (!items.length) list.appendChild(el('li', 'muted empty', '—'));
+    }).catch((e) => toast(String(e)));
+  }
+
+  // Continues an archived chat in this tab, with the context it began with.
+  function openArchived(id) {
+    const t = activeTab();
+    if (!t) return;
+    T.core.invoke('get_chat', { id }).then((v) => {
+      if (!v) { loadArchive(); return; }
+      const c = newChat(t.url ? t.url.full : '');
+      c.sticky = true;
+      c.chatId = v.id;
+      c.context = `${v.host} · ${dateLabel(v.created_ms)}` + (v.selection ? ` · “${v.selection.length > 120 ? v.selection.slice(0, 120) + '…' : v.selection}”` : '');
+      c.messages = v.messages.map((m) => ({ role: m.role, text: m.text }));
+      c.log = c.messages.map((m) => ({ role: m.role, text: m.text }));
+      c.input = v.input;
+      c.output = v.output;
+      c.cost = v.cost_micros;
+      c.unpriced = v.unpriced;
+      chats.set(t.id, c);
+      setArchive(false);
+      focusInput($('chat-input'));
+    }).catch((e) => toast(String(e)));
   }
 
   // Shows or hides the chat panel (open, and the right panels not hidden).
@@ -1763,9 +1851,10 @@
   function setChat(open) {
     chatOpen = open;
     if (open) rightHidden = false;
+    if (!open) { archiveOpen = false; setModelMenu(false); }
     applyChat();
     if (open) {
-      loadAi().then(() => { renderChatModels(); chatKey = ''; renderChat(); });
+      loadAi().then(() => { chatKey = ''; renderChat(); });
       focusInput($('chat-input'));
     }
     renderViewMode();
@@ -1777,17 +1866,18 @@
     const input = $('chat-input');
     const text = input.value.trim();
     const choice = chatChoice();
-    if (!t || !t.url || !text || !choice) return;
+    if (!t || !text || !choice) return;
     const c = chatFor(t);
-    if (c.busy) return;
+    if (c.busy || (!t.url && !c.chatId)) return;
     input.value = '';
     c.messages.push({ role: 'user', text });
     c.log.push({ role: 'user', text });
     c.busy = true;
     renderChat();
-    T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, messages: c.messages })
+    T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, messages: c.messages, chatId: c.chatId })
       .then((r) => {
         c.messages.push({ role: 'assistant', text: r.text });
+        if (r.chat_id) c.chatId = r.chat_id;
         c.input += r.input;
         c.output += r.output;
         if (r.cost_micros === null || r.cost_micros === undefined) c.unpriced = true; else c.cost += r.cost_micros;
@@ -1807,20 +1897,20 @@
   $('chat-close').addEventListener('click', () => setChat(false));
   $('chat-new').addEventListener('click', () => {
     const t = activeTab();
-    if (t) chats.delete(t.id);
+    if (t) chats.set(t.id, newChat(t.url ? t.url.full : ''));
+    if (archiveOpen) setArchive(false);
     chatKey = '';
     renderChat();
+    focusInput($('chat-input'));
   });
-  $('chat-model').addEventListener('change', (ev) => {
-    const [p, ...rest] = ev.target.value.split('|');
-    setUse('ask', p, rest.join('|'));
-    chatKey = '';
-    renderChat();
-  });
+  $('chat-archive').addEventListener('click', () => setArchive(!archiveOpen));
   $('chat-form').addEventListener('submit', (ev) => { ev.preventDefault(); sendChat(); });
   $('chat-input').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); sendChat(); }
     else if (ev.key === 'Escape') { ev.preventDefault(); setChat(false); }
+  });
+  document.addEventListener('pointerdown', (ev) => {
+    if (!$('chat-model-menu').hidden && !$('chat-model-menu').contains(ev.target) && ev.target !== $('chat-model-btn')) setModelMenu(false);
   });
 
   // ---- console -----------------------------------------------------------
@@ -2522,7 +2612,6 @@
     invoke('new_tab', { private: true }).then(beginEdit);
   });
 
-  $('sidebar-toggle').addEventListener('click', () => setSidebar(!sidebarOpen));
   $('unsplit').addEventListener('click', withTab((t) => invoke('unsplit', { tab: t.id })));
   $('sheet-close').addEventListener('click', () => { if (state && state.sheet !== null) invoke('close_tab', { tab: state.sheet }); });
   $('menu').addEventListener('click', () => (menuOpen ? closeMenu() : openMenu()));
@@ -2570,7 +2659,7 @@
     if (menuOpen && !$('menu-pop').contains(ev.target) && ev.target !== $('menu')) closeMenu();
     if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
     if (!$('actions-pop').hidden && !$('actions').contains(ev.target)) setActions(false);
-    if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('sidebar-toggle')) {
+    if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('edge-tab')) {
       setSidebar(false);
     }
     if (peek && !$('sidebar').contains(ev.target) && ev.target !== $('edge-tab')) setPeek(false);

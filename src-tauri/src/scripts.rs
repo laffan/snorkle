@@ -17,6 +17,7 @@ fn view(modes: ViewModes, rules: &HeadingRules) -> ViewInjections {
         sources: viewmodes::injections(modes, rules),
         apply_js: viewmodes::apply_js(modes, rules),
         headings: modes.headers,
+        dark: modes.dark,
     }
 }
 

@@ -317,4 +317,18 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     Settings → AI now has Authentication and Uses (Site script helper, Ask Selection, Header View
     Parsing), each with its own service and model; earlier per-provider model choices are used
     as the defaults.
+58. **[verify] Round 5 (2026-11-01).**
+    (a) Animated sidebar: content frames animate with `UIView.animateWithDuration(0.25)` while the
+    CSS slide runs; the layer mask is set for the final frame, so a narrowing page may clip early
+    during the animation, and WKWebView may relayout once at the end rather than continuously. The
+    URL pill moves without animation.
+    (b) Dark mode: the detector runs at document end, on load and after 1.5 s, so a light page may
+    flash light before it is inverted; pages that change theme later are not re-checked. CSS
+    background images are inverted with the page (only `img`, `picture`, `video`, `canvas`,
+    embeds and `iframe` are inverted back). `:has()` (Safari 15.4+) is used to combine with the
+    other modes. Check that `overrideUserInterfaceStyle` on WKWebView switches
+    `prefers-color-scheme` for already-loaded pages.
+    (c) **[decide]** The chat archive keeps up to 60 chats with up to 48,000 characters of page
+    text each, in the app container (data protection as for other files), until deleted; there is
+    no "delete all" yet. Private-tab chats are never stored.
 

@@ -96,6 +96,66 @@ struct Data {
     heading_rules: HeadingRules,
     ai_usage: Vec<AiUsageEvent>,
     pins: Vec<Bookmark>,
+    chats: Vec<ChatRecord>,
+}
+
+/// Chat archive: one file per chat in this directory.
+const CHATS_DIR: &str = "chats";
+/// Chats kept (the least recently used are deleted first).
+pub const MAX_CHATS: usize = 60;
+pub const MAX_CHAT_MESSAGES: usize = 200;
+
+/// A page chat (Settings never shows it; the chat panel's Archive does).
+/// Only chats begun in non-private tabs are stored. It keeps what the
+/// first message was asked about: the page's address, title, the visible
+/// text sent and the selection at that moment, so the chat can be
+/// continued later with the same context.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatRecord {
+    pub id: String,
+    pub created_ms: u64,
+    pub updated_ms: u64,
+    pub url: String,
+    pub title: String,
+    pub page_text: String,
+    pub selection: String,
+    pub messages: Vec<ChatEntry>,
+    pub provider: Provider,
+    pub model: String,
+    pub input: u64,
+    pub output: u64,
+    pub cost_micros: u64,
+    /// Some reply came from a model without a known price.
+    pub unpriced: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatEntry {
+    pub role: crate::ai::ChatRole,
+    pub text: String,
+}
+
+/// A chat id: `c` and digits/dashes, short (it is also a file name).
+pub fn valid_chat_id(id: &str) -> bool {
+    id.len() <= 40 && id.starts_with('c') && id[1..].chars().all(|c| c.is_ascii_digit() || c == '-') && id.len() > 1
+}
+
+/// Checks and bounds a chat before it is stored or after it is loaded.
+pub fn validate_chat(mut c: ChatRecord) -> Option<ChatRecord> {
+    if !valid_chat_id(&c.id) || crate::ai::validate_model(&c.model).is_err() {
+        return None;
+    }
+    c.url = storable_url(&c.url)?;
+    c.title = clean_title(&c.title);
+    c.page_text = crate::ai::clean_multiline(&c.page_text, crate::ai::MAX_CHAT_PAGE_CHARS);
+    c.selection = crate::ai::clean_multiline(&c.selection, crate::ai::MAX_CHAT_SELECTION_CHARS);
+    let skip = c.messages.len().saturating_sub(MAX_CHAT_MESSAGES);
+    c.messages.drain(..skip);
+    for m in &mut c.messages {
+        m.text = crate::ai::clean_multiline(&m.text, crate::ai::MAX_CHAT_REPLY_CHARS);
+    }
+    c.messages.retain(|m| !m.text.is_empty());
+    Some(c)
 }
 
 const HISTORY_FILE: &str = "history.json";
@@ -191,9 +251,10 @@ impl Store {
             .collect();
         let excess = ai_usage.len().saturating_sub(MAX_AI_USAGE_EVENTS);
         ai_usage.drain(..excess);
+        let chats = load_chats(&dir.join(CHATS_DIR));
         Ok(Store {
             dir,
-            inner: Mutex::new(Data { history, bookmarks, adblock_allowed, user_scripts, heading_rules, ai_usage, pins }),
+            inner: Mutex::new(Data { history, bookmarks, adblock_allowed, user_scripts, heading_rules, ai_usage, pins, chats }),
         })
     }
 
@@ -369,6 +430,53 @@ impl Store {
         };
         atomic_write(&self.dir.join(USER_SCRIPTS_FILE), &snapshot).map_err(|_| UserScriptError::TooLarge)?;
         Ok(script)
+    }
+
+    /// Archived chats, most recently used first.
+    pub fn chats(&self) -> Vec<ChatRecord> {
+        let mut c = self.data().chats.clone();
+        c.sort_by_key(|c| std::cmp::Reverse(c.updated_ms));
+        c
+    }
+
+    pub fn chat(&self, id: &str) -> Option<ChatRecord> {
+        self.data().chats.iter().find(|c| c.id == id).cloned()
+    }
+
+    /// Stores (or replaces) a chat; the least recently used beyond
+    /// [`MAX_CHATS`] are deleted. Returns whether it was stored.
+    pub fn save_chat(&self, chat: ChatRecord) -> std::io::Result<bool> {
+        let Some(chat) = validate_chat(chat) else { return Ok(false) };
+        let dir = self.dir.join(CHATS_DIR);
+        fs::create_dir_all(&dir)?;
+        let bytes = serde_json::to_vec(&chat)?;
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Ok(false);
+        }
+        let dropped: Vec<String> = {
+            let mut d = self.data();
+            d.chats.retain(|c| c.id != chat.id);
+            d.chats.push(chat.clone());
+            d.chats.sort_by_key(|c| std::cmp::Reverse(c.updated_ms));
+            let keep = MAX_CHATS.min(d.chats.len());
+            d.chats.drain(keep..).map(|c| c.id).collect()
+        };
+        atomic_write(&dir.join(format!("{}.json", chat.id)), &bytes)?;
+        for id in dropped {
+            let _ = fs::remove_file(dir.join(format!("{id}.json")));
+        }
+        Ok(true)
+    }
+
+    pub fn delete_chat(&self, id: &str) -> std::io::Result<()> {
+        if !valid_chat_id(id) {
+            return Ok(());
+        }
+        self.data().chats.retain(|c| c.id != id);
+        match fs::remove_file(self.dir.join(CHATS_DIR).join(format!("{id}.json"))) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
     }
 
     pub fn ai_usage(&self) -> Vec<AiUsageEvent> {
@@ -588,6 +696,35 @@ fn load_or_reset<T: DeserializeOwned + Default>(path: &Path) -> T {
     }
 }
 
+/// Loads every valid chat file (others are deleted), newest first, capped.
+fn load_chats(dir: &Path) -> Vec<ChatRecord> {
+    let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
+    let mut chats: Vec<ChatRecord> = Vec::new();
+    for e in entries.flatten() {
+        let path = e.path();
+        let ok = path.extension().is_some_and(|x| x == "json")
+            && e.metadata().is_ok_and(|m| m.is_file() && m.len() <= MAX_FILE_BYTES);
+        let chat = ok
+            .then(|| fs::read(&path).ok())
+            .flatten()
+            .and_then(|b| serde_json::from_slice::<ChatRecord>(&b).ok())
+            .filter(|c| path.file_stem().and_then(|s| s.to_str()) == Some(c.id.as_str()))
+            .and_then(validate_chat);
+        match chat {
+            Some(c) => chats.push(c),
+            None => {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+    chats.sort_by_key(|c| std::cmp::Reverse(c.updated_ms));
+    let keep = MAX_CHATS.min(chats.len());
+    for c in chats.drain(keep..) {
+        let _ = fs::remove_file(dir.join(format!("{}.json", c.id)));
+    }
+    chats
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     {
@@ -606,6 +743,52 @@ mod tests {
         let d = std::env::temp_dir().join(format!("snorkle-store-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn chats_roundtrip_validate_and_cap() {
+        use crate::ai::ChatRole;
+        let dir = tmpdir("chats");
+        let s = Store::open(&dir).unwrap();
+        let chat = |id: &str, t: u64| ChatRecord {
+            id: id.into(),
+            created_ms: t,
+            updated_ms: t,
+            url: "https://a.example/x".into(),
+            title: "A\u{202e}".into(),
+            page_text: "Body".into(),
+            selection: String::new(),
+            messages: vec![
+                ChatEntry { role: ChatRole::User, text: "Hi".into() },
+                ChatEntry { role: ChatRole::Assistant, text: "Hello".into() },
+            ],
+            provider: Provider::Anthropic,
+            model: "claude-opus-5-5".into(),
+            input: 10,
+            output: 2,
+            cost_micros: 80,
+            unpriced: false,
+        };
+        assert!(s.save_chat(chat("c1", 1)).unwrap());
+        assert!(!s.save_chat(chat("../evil", 2)).unwrap(), "ids are file names: validated");
+        assert!(!s.save_chat(ChatRecord { url: "javascript:x".into(), ..chat("c3", 3) }).unwrap());
+        drop(s);
+        let s = Store::open(&dir).unwrap();
+        let got = s.chat("c1").unwrap();
+        assert_eq!(got.title, "A");
+        assert_eq!(got.messages.len(), 2);
+        for i in 0..(MAX_CHATS as u64 + 5) {
+            s.save_chat(chat(&format!("c{}", 100 + i), 10 + i)).unwrap();
+        }
+        assert_eq!(s.chats().len(), MAX_CHATS);
+        assert!(s.chat("c1").is_none(), "least recently used dropped");
+        s.delete_chat("c110").unwrap();
+        assert!(s.chat("c110").is_none());
+        fs::write(dir.join(CHATS_DIR).join("c9.json"), b"{not json").unwrap();
+        drop(s);
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.chats().len(), MAX_CHATS - 1);
+        assert!(!dir.join(CHATS_DIR).join("c9.json").exists(), "corrupt chat files are removed");
     }
 
     #[test]
