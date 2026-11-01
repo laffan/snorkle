@@ -195,6 +195,11 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     `wantsPriorityOverSystemBehavior`, so they take precedence over page shortcuts (e.g. ⌘S in web
     editors). Check that UIKit offers them while a page has focus, and that the chrome's own
     handler fires when the address bar or sidebar has focus.
+    ⌘W (2026-11-01) closes the current tab: a content key command while a page has focus, and
+    otherwise the main menu's Close command, which the app replaces with "Close Tab ⌘W" by adding
+    `buildMenuWithBuilder:` / `snorkleCloseTab:` to Tauri's app-delegate class at runtime
+    (`ios/menu.rs`). Check on device that the class did not already define them (else the menu
+    keeps "Close Window") and that the menu bar shows "Close Tab".
 42. **[verify] Favicon snapshots.** Check: an off-screen web view inside the window renders, so
     `takeSnapshot` returns pixels; the "blank icon" heuristic (PNG < 220 bytes) suits real sites;
     sites without `/favicon.ico` (icon only in `<link rel=icon>`) fall back to letter tiles.

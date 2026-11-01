@@ -1593,6 +1593,10 @@
   function runShortcut(name) {
     if (name === 'new_tab') {
       openPalette();
+    } else if (name === 'close_tab') {
+      // The pop-up sheet in front, else the active tab.
+      const id = state && (state.sheet !== null ? state.sheet : state.active);
+      if (id !== null && id !== undefined) invoke('close_tab', { tab: id });
     } else if (name === 'toggle_sidebar') {
       setSidebar(!sidebarOpen);
     } else if (name.startsWith('item:')) {
@@ -1608,6 +1612,7 @@
     const k = ev.key.toLowerCase();
     let name = null;
     if (k === 't') name = 'new_tab';
+    else if (k === 'w') name = 'close_tab';
     else if (k === 's') name = 'toggle_sidebar';
     else if (k >= '1' && k <= '5' && k.length === 1) name = 'item:' + k;
     if (!name) return;

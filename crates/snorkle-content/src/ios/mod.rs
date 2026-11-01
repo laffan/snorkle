@@ -27,6 +27,7 @@ pub mod http;
 mod injection;
 pub mod keychain;
 mod keys;
+mod menu;
 mod rules;
 
 use std::cell::{Cell, RefCell};
@@ -158,6 +159,7 @@ impl ContentHost {
             &bg,
         ));
 
+        menu::install(mtm, events.clone());
         let backdrop = UIView::new(mtm);
         backdrop.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(0.0, 0.45)));
         backdrop.setHidden(true);

@@ -26,6 +26,7 @@ pub struct KeyIvars {
 
 const KEYS: &[(&str, &str)] = &[
     ("t", "New Tab"),
+    ("w", "Close Tab"),
     ("s", "Show or Hide Sidebar"),
     ("1", "Go to Item 1"),
     ("2", "Go to Item 2"),
@@ -76,6 +77,7 @@ define_class!(
             let input = command.input().map(|s| s.to_string()).unwrap_or_default();
             let shortcut = match input.as_str() {
                 "t" => Some(Shortcut::NewTab),
+                "w" => Some(Shortcut::CloseTab),
                 "s" => Some(Shortcut::ToggleSidebar),
                 n => n.parse::<u8>().ok().filter(|n| (1..=5).contains(n)).map(Shortcut::Item),
             };

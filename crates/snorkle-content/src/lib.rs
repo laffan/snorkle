@@ -88,6 +88,7 @@ pub enum DataKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortcut {
     NewTab,
+    CloseTab,
     ToggleSidebar,
     /// ⌘1–⌘5: the n-th item in the sidebar (pins, bookmarks, then tabs).
     Item(u8),
@@ -98,6 +99,7 @@ impl Shortcut {
     pub fn name(self) -> String {
         match self {
             Shortcut::NewTab => "new_tab".into(),
+            Shortcut::CloseTab => "close_tab".into(),
             Shortcut::ToggleSidebar => "toggle_sidebar".into(),
             Shortcut::Item(n) => format!("item:{n}"),
         }
