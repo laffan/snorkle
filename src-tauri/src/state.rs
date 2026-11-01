@@ -418,6 +418,9 @@ impl ContentEvents for Events {
             None => self.shared.log(console::Level::Warn, Some(tab), "headers view: malformed outline ignored"),
         }
     }
+    fn reload_requested(&self, tab: TabId) {
+        self.apply(|b| b.reload(tab));
+    }
     fn memory_warning(&self) {
         self.apply(|b| b.on_memory_warning());
     }

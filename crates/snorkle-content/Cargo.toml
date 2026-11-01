@@ -27,7 +27,7 @@ objc2-foundation = { version = "=0.3.2", features = [
 objc2-ui-kit = { version = "=0.3.2", features = [
   "std", "objc2-core-foundation", "UIApplication", "UIResponder", "UIView", "UIScrollView",
   "UIGestureRecognizer", "UITapGestureRecognizer", "UIKeyCommand", "UICommand", "UIMenuElement", "UIMenu",
-  "UIMenuBuilder", "UIMenuSystem",
+  "UIMenuBuilder", "UIMenuSystem", "UIControl", "UIRefreshControl",
   "UIImage", "UIColor", "UIGraphicsRenderer", "UIGraphicsImageRenderer",
 ] }
 objc2-web-kit = { version = "=0.3.2", features = [

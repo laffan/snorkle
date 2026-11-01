@@ -48,7 +48,7 @@ use objc2_foundation::{
 };
 use objc2_ui_kit::{
     UIApplication, UIApplicationDidEnterBackgroundNotification, UIApplicationDidReceiveMemoryWarningNotification,
-    UIColor, UITapGestureRecognizer, UIView, UIViewAutoresizing,
+    UIColor, UIControlEvents, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
 };
 use objc2_web_kit::{
     WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController, WKWebViewConfiguration, WKWebsiteDataStore,
@@ -65,7 +65,7 @@ use snorkle_core::tabs::{Profile, TabId};
 use url::Url;
 
 use self::bindings::WKWebView;
-use self::delegates::{NavDelegate, Observer, TabIvars, TapFocus, UiDelegate, KVO_KEYS};
+use self::delegates::{NavDelegate, Observer, RefreshTarget, TabIvars, TapFocus, UiDelegate, KVO_KEYS};
 use crate::{clamp_inset, ContentEvents, DataKind, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
 
 // Adding any page-to-native channel requires writing installation code
@@ -83,6 +83,7 @@ struct View {
     pane: Cell<Pane>,
     _tap: Retained<TapFocus>,
     _tap_recognizer: Retained<UITapGestureRecognizer>,
+    _refresh: Retained<RefreshTarget>,
     _nav: Retained<NavDelegate>,
     _ui: Retained<UiDelegate>,
     kvo: Retained<Observer>,
@@ -526,6 +527,12 @@ impl ContentHost {
         recognizer.setDelegate(Some(ProtocolObject::from_ref(&*tap)));
         container.addGestureRecognizer(&recognizer);
 
+        // Pull down to refresh.
+        let refresh = RefreshTarget::new(mtm, TabIvars::new(tab, self.events.clone()));
+        let control = UIRefreshControl::new(mtm);
+        control.addTarget_action_forControlEvents(Some(&refresh), sel!(refresh:), UIControlEvents::ValueChanged);
+        web.scrollView().setRefreshControl(Some(&control));
+
         View {
             container,
             web,
@@ -533,6 +540,7 @@ impl ContentHost {
             pane: Cell::new(Pane::Full),
             _tap: tap,
             _tap_recognizer: recognizer,
+            _refresh: refresh,
             _nav: nav,
             _ui: ui,
             kvo,

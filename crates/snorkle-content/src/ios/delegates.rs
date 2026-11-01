@@ -20,7 +20,7 @@ use std::rc::Rc;
 use block2::Block;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, NSObject};
-use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{
     NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
     NSURLSessionAuthChallengeDisposition, NSURL,
@@ -139,12 +139,14 @@ define_class!(
         }
 
         #[unsafe(method(webView:didFinishNavigation:))]
-        fn did_finish(&self, _web_view: &WKWebView, _nav: Option<&WKNavigation>) {
+        fn did_finish(&self, web_view: &WKWebView, _nav: Option<&WKNavigation>) {
+            end_refreshing(web_view);
             self.ivars().events.finish(self.ivars().tab);
         }
 
         #[unsafe(method(webView:didFailProvisionalNavigation:withError:))]
-        fn did_fail_provisional(&self, _web_view: &WKWebView, _nav: Option<&WKNavigation>, error: &NSError) {
+        fn did_fail_provisional(&self, web_view: &WKWebView, _nav: Option<&WKNavigation>, error: &NSError) {
+            end_refreshing(web_view);
             let i = self.ivars();
             i.events.fail(
                 i.tab,
@@ -156,7 +158,8 @@ define_class!(
         }
 
         #[unsafe(method(webView:didFailNavigation:withError:))]
-        fn did_fail(&self, _web_view: &WKWebView, _nav: Option<&WKNavigation>, error: &NSError) {
+        fn did_fail(&self, web_view: &WKWebView, _nav: Option<&WKNavigation>, error: &NSError) {
+            end_refreshing(web_view);
             let i = self.ivars();
             i.events.fail(
                 i.tab,
@@ -437,6 +440,46 @@ define_class!(
         }
     }
 );
+
+/// Stops the pull-to-refresh spinner once the load it started ends.
+fn end_refreshing(web: &WKWebView) {
+    let control = unsafe { web.scrollView() }.refreshControl();
+    if let Some(c) = control.filter(|c| c.isRefreshing()) {
+        c.endRefreshing();
+    }
+}
+
+define_class!(
+    /// Pull to refresh: the refresh control's action asks the core to
+    /// reload the tab (a native UI event; pages cannot trigger it).
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "SnorkleRefreshTarget"]
+    #[ivars = TabIvars]
+    pub struct RefreshTarget;
+
+    unsafe impl NSObjectProtocol for RefreshTarget {}
+
+    impl RefreshTarget {
+        #[unsafe(method(refresh:))]
+        fn refresh(&self, control: &NSObject) {
+            self.ivars().events.reload_requested(self.ivars().tab);
+            // Safety net: if no load starts (e.g. the tab shows a notice),
+            // no finish or fail arrives to stop the spinner.
+            let none: *const AnyObject = std::ptr::null();
+            let _: () = unsafe {
+                msg_send![control, performSelector: sel!(endRefreshing), withObject: none, afterDelay: 15.0f64]
+            };
+        }
+    }
+);
+
+impl RefreshTarget {
+    pub fn new(mtm: MainThreadMarker, ivars: TabIvars) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        unsafe { msg_send![super(this), init] }
+    }
+}
 
 impl TapFocus {
     pub fn new(mtm: MainThreadMarker, ivars: TabIvars) -> Retained<Self> {

@@ -137,6 +137,8 @@ pub trait ContentEvents: 'static {
     fn shortcut(&self, shortcut: Shortcut);
     /// The user tapped inside a content pane (focus it in split view).
     fn focus_requested(&self, tab: TabId);
+    /// The user pulled the page down to refresh it.
+    fn reload_requested(&self, tab: TabId);
     /// A page's console output or uncaught error (only while console
     /// capture is on). `body` is page-controlled; `tab`, `origin_host` and
     /// `main_frame` come from WebKit.
