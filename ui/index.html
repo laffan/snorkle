@@ -188,6 +188,18 @@
             <div><div class="option-title">Site script helper uses</div></div>
             <select id="ai-use" aria-label="AI provider for site scripts"></select>
           </div>
+          <div class="ai-usage">
+            <div class="ai-head">
+              <span class="option-title">Usage</span>
+              <button id="ai-usage-reset" class="button">Reset</button>
+            </div>
+            <p class="muted small">Tokens used by Snorkle's AI requests, by day, with an estimated cost from published prices. Your provider's billing page is authoritative.</p>
+            <table id="ai-usage-table" class="usage-table">
+              <thead><tr><th scope="col">Date</th><th scope="col">Requests</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Est. cost</th></tr></thead>
+              <tbody></tbody>
+              <tfoot></tfoot>
+            </table>
+          </div>
         </section>
         <section data-panel="cache" hidden>
       <div class="option">

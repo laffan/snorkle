@@ -27,6 +27,7 @@ use url::Url;
 
 use crate::text::{sanitize_page_text, MAX_PAGE_TEXT_CHARS};
 use crate::userscripts::{self, UserScript, UserScriptError};
+use crate::ai::Provider;
 use crate::viewmodes::{self, HeadingRule, HeadingRules};
 
 pub const MAX_HISTORY: usize = 5_000;
@@ -93,6 +94,7 @@ struct Data {
     adblock_allowed: BTreeSet<String>,
     user_scripts: Vec<UserScript>,
     heading_rules: HeadingRules,
+    ai_usage: Vec<AiUsageEvent>,
     pins: Vec<Bookmark>,
 }
 
@@ -102,6 +104,23 @@ const SESSION_FILE: &str = "session.json";
 const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
 const USER_SCRIPTS_FILE: &str = "user-scripts.json";
 const HEADING_RULES_FILE: &str = "heading-rules.json";
+const AI_USAGE_FILE: &str = "ai-usage.json";
+/// AI requests remembered for the usage table (oldest dropped first).
+pub const MAX_AI_USAGE_EVENTS: usize = 20_000;
+
+/// One AI request's token use (Settings → AI → Usage). No content.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiUsageEvent {
+    /// Wall-clock milliseconds.
+    pub at_ms: u64,
+    pub provider: Provider,
+    pub model: String,
+    pub input: u64,
+    pub output: u64,
+    /// Estimated cost in millionths of a dollar; `None` if the model's price
+    /// is unknown.
+    pub cost_micros: Option<u64>,
+}
 /// Sites with detected heading rules kept.
 pub const MAX_HEADING_RULE_SITES: usize = 500;
 const PINS_FILE: &str = "pins.json";
@@ -166,9 +185,15 @@ impl Store {
             .filter(|(_, rules)| !rules.is_empty())
             .take(MAX_HEADING_RULE_SITES)
             .collect();
+        let mut ai_usage: Vec<AiUsageEvent> = load_or_reset::<Vec<AiUsageEvent>>(&dir.join(AI_USAGE_FILE))
+            .into_iter()
+            .filter(|e| crate::ai::validate_model(&e.model).is_ok())
+            .collect();
+        let excess = ai_usage.len().saturating_sub(MAX_AI_USAGE_EVENTS);
+        ai_usage.drain(..excess);
         Ok(Store {
             dir,
-            inner: Mutex::new(Data { history, bookmarks, adblock_allowed, user_scripts, heading_rules, pins }),
+            inner: Mutex::new(Data { history, bookmarks, adblock_allowed, user_scripts, heading_rules, ai_usage, pins }),
         })
     }
 
@@ -344,6 +369,29 @@ impl Store {
         };
         atomic_write(&self.dir.join(USER_SCRIPTS_FILE), &snapshot).map_err(|_| UserScriptError::TooLarge)?;
         Ok(script)
+    }
+
+    pub fn ai_usage(&self) -> Vec<AiUsageEvent> {
+        self.data().ai_usage.clone()
+    }
+
+    pub fn record_ai_usage(&self, event: AiUsageEvent) -> std::io::Result<()> {
+        if crate::ai::validate_model(&event.model).is_err() {
+            return Ok(());
+        }
+        let snapshot = {
+            let mut d = self.data();
+            d.ai_usage.push(event);
+            let excess = d.ai_usage.len().saturating_sub(MAX_AI_USAGE_EVENTS);
+            d.ai_usage.drain(..excess);
+            serde_json::to_vec(&d.ai_usage)?
+        };
+        atomic_write(&self.dir.join(AI_USAGE_FILE), &snapshot)
+    }
+
+    pub fn clear_ai_usage(&self) -> std::io::Result<()> {
+        self.data().ai_usage.clear();
+        atomic_write(&self.dir.join(AI_USAGE_FILE), b"[]")
     }
 
     /// Detected heading rules per site ("Detect Headers").
@@ -701,6 +749,20 @@ mod tests {
         v.extend_from_slice(&[depth, color, 0, 0, 0]);
         v.extend_from_slice(&[0, 0, 0, 0]); // CRC (not checked)
         v
+    }
+
+    #[test]
+    fn ai_usage_roundtrip_and_reset() {
+        let dir = tmpdir("aiusage");
+        let s = Store::open(&dir).unwrap();
+        let e = AiUsageEvent { at_ms: 1, provider: Provider::Anthropic, model: "claude-opus-5-5".into(), input: 10, output: 5, cost_micros: Some(140) };
+        s.record_ai_usage(e.clone()).unwrap();
+        s.record_ai_usage(AiUsageEvent { model: "bad model\"".into(), ..e.clone() }).unwrap();
+        drop(s);
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.ai_usage(), vec![e]);
+        s.clear_ai_usage().unwrap();
+        assert!(Store::open(&dir).unwrap().ai_usage().is_empty());
     }
 
     #[test]

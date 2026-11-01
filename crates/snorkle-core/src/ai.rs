@@ -357,6 +357,72 @@ fn parse_ok(p: Provider, status: u16, body: &[u8]) -> Result<Value, String> {
     Err(if detail.is_empty() { format!("{what}.") } else { format!("{what}: {detail}") })
 }
 
+/// Tokens one request used, as the provider reported them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+}
+
+/// Reads the token counts from a successful reply (`None` when it has none,
+/// e.g. a model list).
+pub fn parse_usage(p: Provider, body: &[u8]) -> Option<Usage> {
+    let v: Value = serde_json::from_slice(body).ok()?;
+    let u = v.get("usage")?;
+    let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let input = match p {
+        // Cache writes and reads are billed as input too.
+        Provider::Anthropic => n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens"),
+        Provider::OpenAi => n("input_tokens"),
+    };
+    Some(Usage { input, output: n("output_tokens") })
+}
+
+/// Published list prices in US dollars per million tokens (input, output),
+/// for cost estimates only. Anthropic: Anthropic's price list as of
+/// 2026-10-06. OpenAI: public price lists as of 2026-11-01 (sources
+/// disagree for some models). Matched by the longest model-id prefix.
+const PRICES: &[(Provider, &str, f64, f64)] = &[
+    (Provider::Anthropic, "claude-fable-5-1", 10.0, 50.0),
+    (Provider::Anthropic, "claude-fable-5", 10.0, 50.0),
+    (Provider::Anthropic, "claude-opus-5-5", 4.0, 20.0),
+    (Provider::Anthropic, "claude-opus-5", 5.0, 25.0),
+    (Provider::Anthropic, "claude-opus-4-8", 5.0, 25.0),
+    (Provider::Anthropic, "claude-opus-4-7", 5.0, 25.0),
+    (Provider::Anthropic, "claude-opus-4-6", 5.0, 25.0),
+    (Provider::Anthropic, "claude-sonnet-5-5", 2.0, 10.0),
+    (Provider::Anthropic, "claude-sonnet-5", 2.0, 10.0),
+    (Provider::Anthropic, "claude-sonnet-4-6", 3.0, 15.0),
+    (Provider::Anthropic, "claude-haiku-5-5", 0.10, 0.50),
+    (Provider::Anthropic, "claude-haiku-4-5", 1.0, 5.0),
+    (Provider::OpenAi, "gpt-5.5", 5.0, 30.0),
+    (Provider::OpenAi, "gpt-5.4-mini", 0.75, 4.50),
+    (Provider::OpenAi, "gpt-5.4-nano", 0.20, 1.25),
+    (Provider::OpenAi, "gpt-5.1", 1.25, 10.0),
+    (Provider::OpenAi, "gpt-5-mini", 0.25, 2.0),
+    (Provider::OpenAi, "gpt-5-nano", 0.05, 0.40),
+    (Provider::OpenAi, "gpt-5", 1.25, 10.0),
+];
+
+/// Estimated cost in millionths of a dollar, or `None` for a model without
+/// a known price. A prefix matches whole id segments only (`gpt-5` matches
+/// `gpt-5-2025-08-07`, not `gpt-5-mini`).
+pub fn estimate_cost_micros(p: Provider, model: &str, usage: Usage) -> Option<u64> {
+    // A prefix matches the id itself, or the id plus a `-<digit>…` suffix
+    // (a snapshot date or minor version), never a different model name.
+    let matches = |prefix: &str| match model.strip_prefix(prefix) {
+        Some("") => true,
+        Some(rest) => rest.strip_prefix('-').is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit())),
+        None => false,
+    };
+    let (.., input, output) = PRICES
+        .iter()
+        .filter(|(pp, prefix, ..)| *pp == p && matches(prefix))
+        .max_by_key(|(_, prefix, ..)| prefix.len())?;
+    // Dollars per million tokens are micro-dollars per token.
+    Some((usage.input as f64 * input + usage.output as f64 * output).round() as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,6 +478,23 @@ mod tests {
             parse_models(Provider::OpenAi, 401, br#"{"error":{"message":"Incorrect API key provided"}}"#).unwrap_err();
         assert_eq!(err, "The API key was rejected: Incorrect API key provided");
         assert!(parse_models(Provider::Anthropic, 200, b"not json").is_err());
+    }
+
+    #[test]
+    fn usage_and_cost() {
+        let a = br#"{"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200}}"#;
+        let u = parse_usage(Provider::Anthropic, a).unwrap();
+        assert_eq!(u, Usage { input: 1200, output: 500 });
+        // Opus 5.5: $4 / $20 per MTok → 1200*4 + 500*20 micro-dollars.
+        assert_eq!(estimate_cost_micros(Provider::Anthropic, "claude-opus-5-5", u), Some(14_800));
+        assert_eq!(estimate_cost_micros(Provider::Anthropic, "claude-opus-5", u), Some(1200 * 5 + 500 * 25));
+        let o = br#"{"usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}"#;
+        let u = parse_usage(Provider::OpenAi, o).unwrap();
+        assert_eq!(estimate_cost_micros(Provider::OpenAi, "gpt-5-mini", u), Some(100 / 4 + 10 * 2));
+        assert_eq!(estimate_cost_micros(Provider::OpenAi, "gpt-5-2025-08-07", u), Some(125 + 100), "dated id");
+        assert_eq!(estimate_cost_micros(Provider::OpenAi, "gpt-5.5-pro", u), None, "pro is not gpt-5.5");
+        assert_eq!(estimate_cost_micros(Provider::OpenAi, "o9-unknown", u), None);
+        assert!(parse_usage(Provider::OpenAi, br#"{"data":[]}"#).is_none());
     }
 
     #[test]

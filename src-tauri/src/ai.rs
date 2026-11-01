@@ -6,17 +6,28 @@
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use snorkle_core::ai::{self, Model, Provider, ScriptDraft};
 use snorkle_core::console::Level;
+use snorkle_core::storage::AiUsageEvent;
 
 use crate::state::Shared;
 
 type S<'a> = tauri::State<'a, std::sync::Arc<Shared>>;
 
 /// Sends `req` and waits (off the async runtime's worker) for the reply.
-async fn send(s: &S<'_>, p: Provider, what: &str, req: ai::HttpRequest) -> Result<(u16, Vec<u8>), String> {
+/// Sends `req` and waits (off the async runtime's worker) for the reply. A
+/// successful reply's token use is recorded against `model` (Settings →
+/// AI → Usage).
+async fn send(
+    s: &S<'_>,
+    p: Provider,
+    model: Option<&str>,
+    what: &str,
+    req: ai::HttpRequest,
+) -> Result<(u16, Vec<u8>), String> {
     let (tx, rx) = mpsc::channel();
     snorkle_content::http::send(req, Box::new(move |r| drop(tx.send(r))));
     let result = tauri::async_runtime::spawn_blocking(move || rx.recv().unwrap_or(Err("No reply.".into())))
@@ -27,6 +38,21 @@ async fn send(s: &S<'_>, p: Provider, what: &str, req: ai::HttpRequest) -> Resul
         Err(e) => e.clone(),
     };
     s.log(Level::Info, None, &format!("AI {} {what}: {outcome}", p.label()));
+    if let (Ok((200..=299, body)), Some(model), Some(store)) = (&result, model, s.store.as_ref()) {
+        if let Some(usage) = ai::parse_usage(p, body) {
+            let at_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            let cost_micros = ai::estimate_cost_micros(p, model, usage);
+            let event = AiUsageEvent {
+                at_ms,
+                provider: p,
+                model: model.to_string(),
+                input: usage.input,
+                output: usage.output,
+                cost_micros,
+            };
+            let _ = store.record_ai_usage(event);
+        }
+    }
     result
 }
 
@@ -69,11 +95,26 @@ pub fn ai_delete_key(provider: Provider) -> AiStatus {
     status()
 }
 
+/// Every recorded AI request (no content: time, provider, model, tokens,
+/// estimated cost). The chrome groups them by local date.
+#[tauri::command]
+pub fn ai_usage(s: S<'_>) -> Vec<AiUsageEvent> {
+    s.store.as_ref().map(|st| st.ai_usage()).unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn ai_reset_usage(s: S<'_>) -> Result<(), String> {
+    match s.store.as_ref() {
+        Some(st) => st.clear_ai_usage().map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
+}
+
 /// Checks the stored key by listing the account's models.
 #[tauri::command]
 pub async fn ai_test(s: S<'_>, provider: Provider) -> Result<Vec<Model>, String> {
     let req = ai::list_models_request(provider, &key(provider)?);
-    let (status, body) = send(&s, provider, "list models", req).await?;
+    let (status, body) = send(&s, provider, None, "list models", req).await?;
     ai::parse_models(provider, status, &body)
 }
 
@@ -104,7 +145,8 @@ pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: Stri
     s.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).remove(&tab);
     let sample = sample.map_err(|_| "The page didn't answer. Reload it with the headers view on and try again.")?;
     let req = ai::headings_request(provider, &key, &model, &site, &sample)?;
-    let (status, body) = send(&s, provider, &format!("detect headings for {site} ({model})"), req).await?;
+    let (status, body) =
+        send(&s, provider, Some(&model), &format!("detect headings for {site} ({model})"), req).await?;
     let rules = ai::parse_headings_reply(provider, status, &body)?;
     if let Some(store) = s.store.clone() {
         store.set_heading_rules(&site, &rules).map_err(|e| e.to_string())?;
@@ -128,6 +170,6 @@ pub async fn ai_write_script(
 ) -> Result<ScriptDraft, String> {
     let domain = snorkle_core::userscripts::normalise_domain(&domain).map_err(|e| e.to_string())?;
     let req = ai::script_request(provider, &key(provider)?, &model, &domain, &css, &js, &prompt)?;
-    let (status, body) = send(&s, provider, &format!("write script for {domain} ({model})"), req).await?;
+    let (status, body) = send(&s, provider, Some(&model), &format!("write script for {domain} ({model})"), req).await?;
     ai::parse_script_reply(provider, status, &body)
 }

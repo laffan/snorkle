@@ -285,7 +285,7 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .list li.hour { display: block; border: 0; padding: 10px 4px 2px; font-size: 12px; color: var(--muted); }
 .list .when { font-size: 12px; color: var(--muted); padding: 0 8px; flex: 0 0 auto; }
 .modal h2 { margin: 16px 0 4px; }
-.clear-data.armed { background: var(--fg); color: var(--bar); }
+.clear-data.armed, #ai-usage-reset.armed { background: var(--fg); color: var(--bar); }
 
 .notice { padding-top: 32px; }
 .actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
@@ -325,6 +325,12 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
   flex: 1; min-width: 160px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); padding: 9px 10px; font-size: 15px; color: var(--fg);
 }
 .ai-msg { margin-top: 6px; min-height: 1em; }
+.ai-usage { padding: 14px 0; border-top: 1px solid var(--line); }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.usage-table th, .usage-table td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+.usage-table th:first-child, .usage-table td:first-child { text-align: left; }
+.usage-table th { font-weight: 600; color: var(--muted); }
+.usage-table tfoot td { font-weight: 700; border-bottom: 0; }
 .ai-box { margin-top: 12px; padding: 10px 12px 12px; border: 1px dashed var(--fg); border-radius: 10px; }
 .ai-box .field { margin-top: 0; }
 .ai-box .actions { margin-top: 8px; }

@@ -65,7 +65,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "set_tab_headers" => json!({ "tab": 1, "on": true }),
         "delete_user_script" => json!({ "domain": "example.com" }),
         "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),
-        "get_view_mode" | "get_console" | "clear_console" | "ai_status" | "list_user_scripts" | "list_pins" => json!({}),
+        "get_view_mode" | "get_console" | "clear_console" | "ai_status" | "ai_usage" | "ai_reset_usage" | "list_user_scripts" | "list_pins" => json!({}),
         "pin_tab" => json!({ "tab": 1, "index": 0 }),
         "pin_bookmark" | "move_pin" => json!({ "url": "https://example.com/", "index": 0 }),
         "unpin" => json!({ "url": "https://example.com/", "bookmarkIndex": null }),

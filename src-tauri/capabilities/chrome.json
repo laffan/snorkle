@@ -46,6 +46,8 @@
     "allow-ai-test",
     "allow-ai-write-script",
     "allow-detect-headings",
+    "allow-ai-usage",
+    "allow-ai-reset-usage",
     "allow-open-launcher",
     "allow-get-console",
     "allow-set-console-capture",

@@ -66,6 +66,8 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         ai::ai_test,
         ai::ai_write_script,
         ai::detect_headings,
+        ai::ai_usage,
+        ai::ai_reset_usage,
         commands::open_launcher,
         commands::get_console,
         commands::set_console_capture,

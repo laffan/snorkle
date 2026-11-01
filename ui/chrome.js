@@ -840,7 +840,7 @@
     document.querySelectorAll('.settings-nav button').forEach((b) => b.setAttribute('aria-current', b.dataset.section === section ? 'page' : 'false'));
     document.querySelectorAll('.settings-body [data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== section; });
     $('settings-heading').textContent = SETTINGS_TITLES[section];
-    if (section === 'ai') loadAi();
+    if (section === 'ai') { loadAi(); loadUsage(); }
   }
   document.querySelectorAll('.settings-nav button').forEach((b) => b.addEventListener('click', () => showSettings(b.dataset.section)));
 
@@ -933,6 +933,50 @@
   });
   $('ai-use').addEventListener('change', (ev) => { setPref('aiProvider', ev.target.value); renderAi(); });
 
+  // Usage: AI requests grouped by local date, with estimated cost.
+  function money(micros) {
+    const d = micros / 1e6;
+    return '$' + (d > 0 && d < 0.01 ? d.toFixed(4) : d.toFixed(2));
+  }
+  function loadUsage() {
+    T.core.invoke('ai_usage').then((events) => {
+      const days = new Map();
+      for (const e of events) {
+        const dt = new Date(e.at_ms);
+        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        const d = days.get(key) || { label: dt.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }), n: 0, input: 0, output: 0, cost: 0, unpriced: false };
+        d.n += 1; d.input += e.input; d.output += e.output;
+        if (e.cost_micros === null || e.cost_micros === undefined) d.unpriced = true; else d.cost += e.cost_micros;
+        days.set(key, d);
+      }
+      const body = $('ai-usage-table').tBodies[0];
+      const foot = $('ai-usage-table').tFoot;
+      body.replaceChildren();
+      foot.replaceChildren();
+      const fmt = (n) => n.toLocaleString();
+      const row = (cells, cls) => { const tr = el('tr', cls); for (const c of cells) tr.appendChild(el('td', null, c)); return tr; };
+      const keys = [...days.keys()].sort().reverse();
+      if (!keys.length) { body.appendChild(row(['No AI requests yet.', '', '', '', ''])); return; }
+      const total = { n: 0, input: 0, output: 0, cost: 0, unpriced: false };
+      for (const k of keys) {
+        const d = days.get(k);
+        body.appendChild(row([d.label, fmt(d.n), fmt(d.input), fmt(d.output), (d.unpriced ? '≥ ' : '') + money(d.cost)]));
+        total.n += d.n; total.input += d.input; total.output += d.output; total.cost += d.cost; total.unpriced ||= d.unpriced;
+      }
+      foot.appendChild(row(['Total', fmt(total.n), fmt(total.input), fmt(total.output), (total.unpriced ? '≥ ' : '') + money(total.cost)]));
+    }).catch(() => {});
+  }
+  $('ai-usage-reset').addEventListener('click', () => {
+    const b = $('ai-usage-reset');
+    if (!b.classList.contains('armed')) {
+      b.classList.add('armed'); b.textContent = 'Tap again to reset';
+      setTimeout(() => { b.classList.remove('armed'); b.textContent = 'Reset'; }, 4000);
+      return;
+    }
+    b.classList.remove('armed'); b.textContent = 'Reset';
+    invoke('ai_reset_usage').then(loadUsage);
+  });
+
   // Site script helper: drafts CSS/JS into the editor for the user to review.
   $('se-ai-go').addEventListener('click', () => {
     const p = aiProvider();
@@ -947,6 +991,7 @@
       provider: p, model, domain: $('se-domain').value, css: $('se-css').value, js: $('se-js').value, prompt: $('se-ai-prompt').value,
     })
       .then((d) => {
+        loadUsage();
         $('se-css').value = d.css;
         $('se-js').value = d.js;
         out.textContent = (d.note ? d.note + ' ' : '') + 'Review the code, then Save.';
