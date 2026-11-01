@@ -111,6 +111,9 @@ pub struct HoleArg {
     w: f64,
     h: f64,
     r: f64,
+    /// Rounded corners (bits: 1 top left, 2 top right, 4 bottom left, 8
+    /// bottom right); all when absent.
+    c: Option<u8>,
 }
 
 /// `top`: bottom of the status bar, `left`: right edge of the docked tab
@@ -125,7 +128,14 @@ pub fn set_chrome_layout(s: S<'_>, top: f64, left: f64, right: f64, bottom: f64,
     let holes: Vec<snorkle_content::Hole> = holes
         .into_iter()
         .take(snorkle_content::MAX_HOLES)
-        .map(|h| snorkle_content::Hole { x: h.x, y: h.y, w: h.w, h: h.h, r: h.r })
+        .map(|h| snorkle_content::Hole {
+            x: h.x,
+            y: h.y,
+            w: h.w,
+            h: h.h,
+            r: h.r,
+            corners: h.c.unwrap_or(snorkle_content::ALL_CORNERS),
+        })
         .collect();
     snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, right, bottom, holes)));
     with_browser(&s, |b| b.set_chrome_overlay(overlay));
@@ -362,6 +372,51 @@ pub fn set_tab_headers(s: S<'_>, tab: u64, on: bool) -> ViewModesState {
     }
     apply_view_modes(&s);
     view_modes_state(&s)
+}
+
+/// Find in page (⌘F): WebKit selects and scrolls to the next (or previous)
+/// match, wrapping. Returns whether a match was found.
+#[tauri::command]
+pub async fn find_in_page(tab: u64, query: String, backwards: bool) -> Result<bool, String> {
+    let Some(query) = snorkle_core::find::validate_query(&query) else { return Ok(false) };
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        with_host(|h| {
+            h.find(
+                TabId(tab),
+                query,
+                backwards,
+                Box::new(move |found| {
+                    let _ = tx.send(found);
+                }),
+            )
+        })
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(4)).unwrap_or(false))
+        .await
+        .map_err(|_| "Find failed.".to_string())
+}
+
+/// Number of matches of `query` on the tab's page (case-insensitive, in
+/// its visible text; channel C18, digits only), or `None` if the page did
+/// not answer.
+#[tauri::command]
+pub async fn count_in_page(tab: u64, query: String) -> Result<Option<u32>, String> {
+    let Some(query) = snorkle_core::find::validate_query(&query) else { return Ok(Some(0)) };
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        with_host(|h| h.count_matches(TabId(tab), query, Box::new(move |t| drop(tx.send(t)))))
+    });
+    let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(4)))
+        .await
+        .map_err(|_| "Find failed.".to_string())?;
+    Ok(text.ok().flatten().and_then(|t| snorkle_core::find::parse_count(&t)))
+}
+
+/// Closing the find bar: clears the match selection on the page.
+#[tauri::command]
+pub fn end_find(tab: u64) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.end_find(TabId(tab))));
 }
 
 /// The latest outline of a tab's page (headers view).

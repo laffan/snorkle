@@ -84,14 +84,52 @@ pub enum DataKind {
     Logins,
 }
 
-/// Browser keyboard shortcuts handled natively (see `ios::keys`).
+/// Browser keyboard shortcuts handled natively (the app's main menu,
+/// `ios::menu`, with the content containers' key commands as a fallback,
+/// `ios::keys`); the chrome UI performs them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortcut {
     NewTab,
     CloseTab,
+    /// ⌘S or ⌘\: show or hide the tab sidebar.
     ToggleSidebar,
+    /// ⌘⇧\: show or hide the right panel (headers, chat).
+    ToggleRightPanel,
+    /// ⌘⇧D: bookmark the current page.
+    Bookmark,
+    /// ⌘F: find in page.
+    Find,
     /// ⌘1–⌘5: the n-th item in the sidebar (pins, bookmarks, then tabs).
     Item(u8),
+}
+
+/// Every native shortcut: menu, title, key, whether Shift is held, action.
+pub const SHORTCUTS: &[(ShortcutMenu, &str, &str, bool, Shortcut)] = &[
+    (ShortcutMenu::File, "New Tab", "t", false, Shortcut::NewTab),
+    (ShortcutMenu::File, "Add Bookmark", "d", true, Shortcut::Bookmark),
+    (ShortcutMenu::Close, "Close Tab", "w", false, Shortcut::CloseTab),
+    (ShortcutMenu::Find, "Find on Page", "f", false, Shortcut::Find),
+    (ShortcutMenu::View, "Show or Hide Sidebar", "s", false, Shortcut::ToggleSidebar),
+    (ShortcutMenu::View, "Toggle Sidebar", "\\", false, Shortcut::ToggleSidebar),
+    (ShortcutMenu::View, "Toggle Right Panel", "\\", true, Shortcut::ToggleRightPanel),
+    (ShortcutMenu::Tabs, "Go to Item 1", "1", false, Shortcut::Item(1)),
+    (ShortcutMenu::Tabs, "Go to Item 2", "2", false, Shortcut::Item(2)),
+    (ShortcutMenu::Tabs, "Go to Item 3", "3", false, Shortcut::Item(3)),
+    (ShortcutMenu::Tabs, "Go to Item 4", "4", false, Shortcut::Item(4)),
+    (ShortcutMenu::Tabs, "Go to Item 5", "5", false, Shortcut::Item(5)),
+];
+
+/// Where a shortcut appears in the iPadOS menu bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortcutMenu {
+    File,
+    /// Replaces the system's Close (⌘W closes a tab, not the window).
+    Close,
+    /// Replaces the system's Find menu.
+    Find,
+    View,
+    /// A "Tabs" menu after View.
+    Tabs,
 }
 
 impl Shortcut {
@@ -101,8 +139,16 @@ impl Shortcut {
             Shortcut::NewTab => "new_tab".into(),
             Shortcut::CloseTab => "close_tab".into(),
             Shortcut::ToggleSidebar => "toggle_sidebar".into(),
+            Shortcut::ToggleRightPanel => "toggle_right".into(),
+            Shortcut::Bookmark => "bookmark".into(),
+            Shortcut::Find => "find".into(),
             Shortcut::Item(n) => format!("item:{n}"),
         }
+    }
+
+    /// The shortcut a menu or key command named (its property list).
+    pub fn from_name(name: &str) -> Option<Shortcut> {
+        SHORTCUTS.iter().map(|s| s.4).find(|s| s.name() == name)
     }
 }
 
@@ -236,6 +282,8 @@ pub type RulesDone = Box<dyn FnOnce(Result<usize, String>) + Send>;
 /// Completion of a page-text read (AI chat): the script's string result,
 /// page-controlled and bounded to [`MAX_PAGE_TEXT_BYTES`], or `None`.
 pub type TextDone = Box<dyn FnOnce(Option<String>) + Send>;
+/// Completion of a find in page: whether a match was found.
+pub type FindDone = Box<dyn FnOnce(bool) + Send>;
 /// Largest page-text result read back from a page.
 pub const MAX_PAGE_TEXT_BYTES: usize = snorkle_core::ai::MAX_PAGE_REPORT;
 
@@ -251,7 +299,13 @@ pub struct Hole {
     pub h: f64,
     /// Corner radius.
     pub r: f64,
+    /// Which corners are rounded: bits 1 top left, 2 top right, 4 bottom
+    /// left, 8 bottom right (UIKit's `UIRectCorner`); 15 for all.
+    pub corners: u8,
 }
+
+/// All four corners rounded.
+pub const ALL_CORNERS: u8 = 15;
 
 impl Hole {
     pub fn contains(&self, x: f64, y: f64) -> bool {
@@ -282,14 +336,15 @@ pub fn sanitize_holes(raw: &[Hole], width: f64, height: f64) -> Vec<Hole> {
         if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
             continue;
         }
-        let mut hole = Hole { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: 0.0 };
+        let corners = if h.corners & ALL_CORNERS == 0 { ALL_CORNERS } else { h.corners & ALL_CORNERS };
+        let mut hole = Hole { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: 0.0, corners };
         hole.r = h.r.clamp(0.0, hole.w.min(hole.h) / 2.0);
         // Merge with every hole it touches (repeat: a merge can grow into others).
         while let Some(i) = out.iter().position(|o| o.overlaps(&hole)) {
             let o = out.remove(i);
             let (x0, y0) = (o.x.min(hole.x), o.y.min(hole.y));
             let (x1, y1) = ((o.x + o.w).max(hole.x + hole.w), (o.y + o.h).max(hole.y + hole.h));
-            hole = Hole { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: o.r.min(hole.r) };
+            hole = Hole { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: o.r.min(hole.r), corners: ALL_CORNERS };
         }
         out.push(hole);
     }
@@ -334,7 +389,7 @@ mod tests {
 
     #[test]
     fn holes_are_validated_and_merged() {
-        let h = |x, y, w, h, r| Hole { x, y, w, h, r };
+        let h = |x, y, w, h, r| Hole { x, y, w, h, r, corners: ALL_CORNERS };
         let out = sanitize_holes(
             &[h(10.0, 900.0, 400.0, 46.0, 23.0), h(f64::NAN, 0.0, 1.0, 1.0, 0.0), h(5.0, 5.0, 0.0, 10.0, 0.0)],
             1000.0,
@@ -348,6 +403,26 @@ mod tests {
         let many: Vec<Hole> = (0..20).map(|i| h(i as f64 * 20.0, 0.0, 10.0, 10.0, 0.0)).collect();
         assert_eq!(sanitize_holes(&many, 1000.0, 1000.0).len(), MAX_HOLES);
         assert!(h(0.0, 0.0, 10.0, 10.0, 0.0).contains(5.0, 5.0) && !h(0.0, 0.0, 10.0, 10.0, 0.0).contains(10.0, 5.0));
+        // Touching holes stay separate (the find bar sits on the pill).
+        let touching = [h(0.0, 20.0, 10.0, 10.0, 2.0), Hole { corners: 3, ..h(2.0, 14.0, 6.0, 6.0, 2.0) }];
+        let out = sanitize_holes(&touching, 100.0, 100.0);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1].corners, 3, "top corners only");
+        assert_eq!(
+            sanitize_holes(&[Hole { corners: 0, ..h(0.0, 0.0, 9.0, 9.0, 1.0) }], 99.0, 99.0)[0].corners,
+            ALL_CORNERS
+        );
+    }
+
+    #[test]
+    fn shortcuts_round_trip() {
+        for (_, _, key, _, s) in SHORTCUTS {
+            assert_eq!(Shortcut::from_name(&s.name()), Some(*s), "{key}");
+        }
+        assert!(Shortcut::from_name("nope").is_none());
+        let keys: Vec<_> = SHORTCUTS.iter().map(|s| (s.2, s.3)).collect();
+        let unique: std::collections::BTreeSet<_> = keys.iter().collect();
+        assert_eq!(unique.len(), keys.len(), "no key is bound twice");
     }
 
     #[test]

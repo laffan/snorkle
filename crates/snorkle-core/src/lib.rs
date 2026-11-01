@@ -15,6 +15,7 @@ pub mod ai;
 pub mod blocking;
 pub mod browser;
 pub mod console;
+pub mod find;
 pub mod idn;
 pub mod input;
 pub mod os;

@@ -69,6 +69,8 @@ fn args(cmd: &str) -> serde_json::Value {
         "set_view_mode" => json!({ "mode": "desaturate", "on": true }),
         "set_tab_view_exempt" => json!({ "tab": 1, "mode": "headers", "exempt": true }),
         "scroll_to_heading" => json!({ "tab": 1, "index": 0 }),
+        "find_in_page" => json!({ "tab": 1, "query": "x", "backwards": false }),
+        "count_in_page" => json!({ "tab": 1, "query": "x" }),
         "set_tab_headers" => json!({ "tab": 1, "on": true }),
         "delete_user_script" => json!({ "domain": "example.com" }),
         "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),

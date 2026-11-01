@@ -14,6 +14,8 @@
   --side: #eaeaea;
   /* Docked sidebar width; set from JS while resizing. */
   --sidebar-w: 264px;
+  /* Resize edges of the sidebars: a 3 pt line that lights up on hover. */
+  --edge: #d2d2d2; --edge-hot: #8c8c8c; --edge-glow: rgba(0, 0, 0, .18);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -21,6 +23,7 @@
     --bg: #151515; --bar: #1f1f1f; --fg: #efefef; --muted: #a0a0a0; --line: #363636;
     --accent: #efefef; --danger: #efefef; --warn-bg: #333333; --field: #2b2b2b;
     --tab: #262626; --tab-active: #363636; --side: #1a1a1a;
+    --edge: #3a3a3a; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
   }
 }
 /* Private browsing: unmistakably different chrome (always dark). */
@@ -28,6 +31,7 @@ body.private {
   --bar: #0c0c0c; --bg: #000000; --fg: #f5f5f5; --muted: #9a9a9a; --line: #333333;
   --field: #232323; --tab: #1b1b1b; --tab-active: #2e2e2e; --accent: #f5f5f5; --danger: #f5f5f5;
   --warn-bg: #2e2e2e; --side: #111111;
+  --edge: #333333; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
 }
 /* Catches anything colourful the palette cannot: favicons, emoji. */
 html { filter: grayscale(1); }
@@ -67,11 +71,29 @@ body.sidebar-closed #chrome, body.narrow #chrome { padding-left: max(12px, env(s
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 20;
   width: calc(var(--sidebar-w) + env(safe-area-inset-left));
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
-  background: var(--side); border-right: 1px solid var(--line);
+  background: var(--side);
   display: flex; flex-direction: column;
   transform: translateX(0); transition: transform .2s ease;
 }
 body.sidebar-closed #sidebar { transform: translateX(-100%); }
+/* Pop-over from the left-edge tab (sidebar closed): inset top and bottom,
+   rounded on the right, over the page (cut out of it like the pill). */
+body.peek #sidebar {
+  top: calc(20px + env(safe-area-inset-top)); bottom: calc(20px + env(safe-area-inset-bottom));
+  padding: 0 0 0 env(safe-area-inset-left); border-radius: 0 14px 14px 0; overflow: hidden;
+  border: 1px solid var(--line); border-left: 0; box-shadow: 0 12px 40px rgba(0, 0, 0, .28); opacity: 1 !important;
+}
+body.peek #sidebar-resize { display: none; }
+#edge-tab {
+  position: fixed; left: 0; top: 50%; z-index: 21; width: 14px; height: 76px; margin-top: -38px; padding: 0;
+  background: var(--bar); border: 1px solid var(--line); border-left: 0; border-radius: 0 10px 10px 0;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, .12);
+}
+#edge-tab::after {
+  content: ""; position: absolute; left: 5px; top: 50%; width: 3px; height: 26px; margin-top: -13px;
+  border-radius: 2px; background: var(--muted); opacity: .6; transition: opacity .15s;
+}
+#edge-tab:hover::after { opacity: 1; }
 body.narrow #sidebar { box-shadow: 0 0 24px rgba(0, 0, 0, .25); }
 /* With a pointer (trackpad, mouse), the sidebar and the URL bar recede to
    half opacity until the pointer is over them, something in them has focus,
@@ -186,6 +208,11 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
 .outline-list .l2 { font-weight: 600; }
 .outline-list li.muted { padding: 6px 8px; font-size: 13px; }
 #outline .modal-head h1 { flex: 1; }
+#outline.dock { overflow-y: auto; }
+/* Headers and chat both open: the chat takes the lower half. */
+.sheet.dock.split-lower { border-top: 1px solid var(--line); }
+.icon.sparkle { min-width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--line); }
+.icon.sparkle:disabled { opacity: .4; }
 #outline-msg { margin: -4px 0 8px; }
 /* The heading the reader has scrolled to. */
 .outline-list button { position: relative; }
@@ -193,16 +220,22 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
   content: ""; position: absolute; left: -2px; top: 50%; width: 6px; height: 6px; margin-top: -3px;
   border-radius: 3px; background: var(--fg);
 }
-#sidebar-resize {
-  position: absolute; top: 0; bottom: 0; right: -6px; width: 12px;
-  cursor: col-resize; touch-action: none; z-index: 2;
+/* Resize edges. The grab area is inside the panel (page views are drawn
+   over anything outside it); the 3 pt line is the panel's border. */
+.resize-edge { position: absolute; top: 0; bottom: 0; width: 12px; cursor: col-resize; touch-action: none; z-index: 2; }
+.resize-edge::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 3px;
+  background: var(--edge); transition: background-color .15s, box-shadow .15s;
 }
-#sidebar-resize::after {
-  content: ""; position: absolute; top: 50%; left: 4px; width: 4px; height: 44px; margin-top: -22px;
-  border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .15s;
+.resize-edge:hover::after, body.resizing #sidebar-resize::after, body.resizing-right #right-resize::after {
+  background: var(--edge-hot); box-shadow: 0 0 8px var(--edge-glow);
 }
-#sidebar-resize:hover::after, body.resizing #sidebar-resize::after { opacity: 1; }
+#sidebar-resize { right: 0; }
+#sidebar-resize::after { right: 0; }
 body.narrow #sidebar-resize { display: none; }
+#right-resize { position: fixed; bottom: 0; z-index: 14; }
+#right-resize::after { left: 0; }
+body.resizing-right, body.resizing { cursor: col-resize; }
 
 .popup {
   position: absolute; left: 10px; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 3;
@@ -211,6 +244,26 @@ body.narrow #sidebar-resize { display: none; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 6px; display: flex; flex-direction: column;
 }
 .popup button { text-align: left; padding: 10px 12px; border-radius: 8px; display: flex; justify-content: space-between; gap: 16px; }
+/* Find bar (⌘F): attached to the top of the pill, narrower than its
+   straight top edge. */
+.findbar {
+  display: flex; align-items: center; gap: 2px; width: min(440px, calc(100% - 80px)); margin-bottom: -7px;
+  padding: 4px 6px 6px 12px; background: var(--bar); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 14px 14px 0 0; position: relative; z-index: 1;
+}
+#find-input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 15px; padding: 6px 4px; }
+.find-count { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; padding: 0 6px; }
+.findbar.none .find-count { color: var(--fg); font-weight: 600; }
+.findbar .icon { min-width: 32px; height: 32px; border-radius: 16px; font-size: 20px; }
+/* ⌘W on a bookmark's tab. */
+.confirm-pop {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+  max-width: min(560px, 100%); padding: 10px 12px; background: var(--bar); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); font-size: 14px;
+}
+.confirm-pop #confirm-text { flex: 1 1 220px; }
+.pillbtn.primary { background: var(--fg); color: var(--bar); }
+
 /* Page actions: opens above the pill's ⋯ button, over the page. */
 .popup.actions-pop { left: auto; right: -6px; bottom: calc(100% + 10px); min-width: 250px; z-index: 5; }
 .actions-pop .label { white-space: nowrap; }
@@ -368,7 +421,7 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 /* Docked beside the page (top and width set from JS). */
 .sheet.dock {
   top: 0; right: 0; bottom: 0; max-height: none; height: auto; border-radius: 0; box-shadow: none;
-  border: 0; border-left: 1px solid var(--line); z-index: 12;
+  border: 0; padding-left: 24px; z-index: 12;
   padding-right: max(20px, env(safe-area-inset-right));
 }
 /* ---- AI chat (docked right of the page) ---------------------------------- */

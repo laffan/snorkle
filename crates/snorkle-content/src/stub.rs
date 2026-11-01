@@ -59,6 +59,17 @@ impl ContentHost {
     pub fn sample_headings(&mut self, _tab: snorkle_core::tabs::TabId) {}
 
     /// No pages render off iOS.
+    pub fn find(&mut self, _tab: snorkle_core::tabs::TabId, _query: String, _backwards: bool, done: crate::FindDone) {
+        done(false);
+    }
+
+    pub fn count_matches(&mut self, _tab: snorkle_core::tabs::TabId, _query: String, done: crate::TextDone) {
+        done(None);
+    }
+
+    pub fn end_find(&mut self, _tab: snorkle_core::tabs::TabId) {}
+
+    /// No pages render off iOS.
     pub fn read_page_text(&mut self, _tab: snorkle_core::tabs::TabId, done: crate::TextDone) {
         done(None);
     }

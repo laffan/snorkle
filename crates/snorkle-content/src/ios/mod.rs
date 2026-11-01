@@ -52,14 +52,16 @@ use objc2_foundation::{
 use objc2_quartz_core::{kCAFillRuleEvenOdd, CAShapeLayer};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDidEnterBackgroundNotification, UIApplicationDidReceiveMemoryWarningNotification,
-    UIBezierPath, UIColor, UIControlEvents, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
+    UIBezierPath, UIColor, UIControlEvents, UIRectCorner, UIRefreshControl, UITapGestureRecognizer, UIView,
+    UIViewAutoresizing,
 };
 use objc2_web_kit::{
-    WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController, WKWebViewConfiguration, WKWebsiteDataStore,
-    WKWebsiteDataTypeCookies, WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeFileSystem,
-    WKWebsiteDataTypeIndexedDBDatabases, WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeMediaKeys,
-    WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeOfflineWebApplicationCache,
-    WKWebsiteDataTypeServiceWorkerRegistrations, WKWebsiteDataTypeSessionStorage, WKWebsiteDataTypeWebSQLDatabases,
+    WKContentMode, WKFindConfiguration, WKFindResult, WKInactiveSchedulingPolicy, WKUserContentController,
+    WKWebViewConfiguration, WKWebsiteDataStore, WKWebsiteDataTypeCookies, WKWebsiteDataTypeDiskCache,
+    WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeFileSystem, WKWebsiteDataTypeIndexedDBDatabases,
+    WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeMediaKeys, WKWebsiteDataTypeMemoryCache,
+    WKWebsiteDataTypeOfflineWebApplicationCache, WKWebsiteDataTypeServiceWorkerRegistrations,
+    WKWebsiteDataTypeSessionStorage, WKWebsiteDataTypeWebSQLDatabases,
 };
 use snorkle_core::browser::{AfterCreate, Effect, Pane};
 use snorkle_core::os::OsVersion;
@@ -334,6 +336,42 @@ impl ContentHost {
         match self.views.get(&tab) {
             Some(v) => injection::read_now(self.mtm, &v.web, snorkle_core::ai::PAGE_TEXT_JS, done),
             None => done(None),
+        }
+    }
+
+    /// Find in page (⌘F): WebKit selects and scrolls to the next (or
+    /// previous) match of `query`, wrapping; `done` gets whether one was
+    /// found, on the main thread.
+    pub fn find(&mut self, tab: TabId, query: String, backwards: bool, done: crate::FindDone) {
+        let Some(v) = self.views.get(&tab) else { return done(false) };
+        unsafe {
+            let config = WKFindConfiguration::new(self.mtm);
+            config.setBackwards(backwards);
+            config.setWraps(true);
+            config.setCaseSensitive(false);
+            let done = Cell::new(Some(done));
+            let block = RcBlock::new(move |result: NonNull<WKFindResult>| {
+                if let Some(done) = done.take() {
+                    done(result.as_ref().matchFound());
+                }
+            });
+            v.web.findString_withConfiguration_completionHandler(&NSString::from_str(&query), Some(&config), &block);
+        }
+    }
+
+    /// Counts matches of `query` for the find bar's label (channel C18;
+    /// `snorkle_core::find::parse_count` accepts digits only).
+    pub fn count_matches(&mut self, tab: TabId, query: String, done: crate::TextDone) {
+        match self.views.get(&tab) {
+            Some(v) => injection::read_now(self.mtm, &v.web, &snorkle_core::find::count_js(&query), done),
+            None => done(None),
+        }
+    }
+
+    /// Clears the selection a find left on the page.
+    pub fn end_find(&mut self, tab: TabId) {
+        if let Some(v) = self.views.get(&tab) {
+            injection::run_now(self.mtm, &v.web, snorkle_core::find::CLEAR_JS);
         }
     }
 
@@ -694,10 +732,10 @@ impl Drop for ContentHost {
 fn apply_mask(view: &UIView, holes: &[Hole]) {
     let f = view.frame();
     let b = view.bounds();
-    let local: Vec<(CGRect, f64)> = holes
+    let local: Vec<(CGRect, f64, u8)> = holes
         .iter()
-        .map(|h| (CGRect::new(CGPoint::new(h.x - f.origin.x, h.y - f.origin.y), CGSize::new(h.w, h.h)), h.r))
-        .filter(|(r, _)| {
+        .map(|h| (CGRect::new(CGPoint::new(h.x - f.origin.x, h.y - f.origin.y), CGSize::new(h.w, h.h)), h.r, h.corners))
+        .filter(|(r, _, _)| {
             r.origin.x < b.size.width
                 && r.origin.y < b.size.height
                 && r.origin.x + r.size.width > 0.0
@@ -710,8 +748,17 @@ fn apply_mask(view: &UIView, holes: &[Hole]) {
         return;
     }
     let path = UIBezierPath::bezierPathWithRect(b);
-    for (rect, radius) in &local {
-        path.appendPath(&UIBezierPath::bezierPathWithRoundedRect_cornerRadius(*rect, *radius));
+    for (rect, radius, corners) in &local {
+        let hole = if *corners == crate::ALL_CORNERS {
+            UIBezierPath::bezierPathWithRoundedRect_cornerRadius(*rect, *radius)
+        } else {
+            UIBezierPath::bezierPathWithRoundedRect_byRoundingCorners_cornerRadii(
+                *rect,
+                UIRectCorner(*corners as usize),
+                CGSize::new(*radius, *radius),
+            )
+        };
+        path.appendPath(&hole);
     }
     let mask = CAShapeLayer::layer();
     mask.setFrame(b);

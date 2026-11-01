@@ -203,14 +203,30 @@ page shows and is used there. While the console is open the page ends above it a
 pill centres over the page, between the sidebar and any docked panel. ⌘-click on a link opens it
 in a new tab after the current one without switching to it (§4).
 
+The same holes carry the other chrome that floats over the page: the find bar (⌘F), attached to
+the top of the pill (its hole ends where the pill's begins and has only its top corners rounded,
+since overlapping holes are merged into their bounding rectangle); the confirmation ⌘W shows on a
+bookmark's tab; and, with the sidebar closed, a tab on the left edge and the sidebar pop-over it
+opens (§5b). Find uses WebKit's own `findString:withConfiguration:` (selects and scrolls to each
+match, wrapping) plus a match count read back from a constant script (C18).
+
+Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are commands of the app's main menu, so they
+work whatever has focus, including nothing (sidebar hidden, no page): ⌘T new tab, ⌘W close tab (a
+pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘S or
+⌘\ sidebar, ⌘⇧\ right panels, ⌘⇧D bookmark the page, ⌘1–5 sidebar items. The chrome's own
+keydown handler covers the same keys when it has focus; a shortcut arriving twice within 60 ms is
+run once.
+
 ## 5e. Docked panels
 
 Native page views sit above the chrome's webview, so the chrome cannot draw over a page except
 in holes (§5f). Panels that should leave the page visible dock beside it instead: the chrome
-reports `right` and `bottom` insets and the host shrinks the content area. Site scripts, the
-page chat and the headers outline dock on the right, full height, one at a time in that order of
-precedence (in narrow windows site scripts and chat overlay and hide the page); the console docks
-at the bottom. A ring around the `{ }` row (and the ⋯ button while its popup is closed) marks
+reports `right` and `bottom` insets and the host shrinks the content area. Site scripts dock on
+the right, full height; otherwise the headers outline and the page chat do, the outline on top
+and the chat below when both are open (in narrow windows site scripts and chat overlay and hide
+the page). The right panels' width is dragged at their left edge (260–640 pt, at most 60% of the
+area, remembered); ⌘⇧\ hides them without turning them off and shows them again. The console
+docks at the bottom. A ring around the `{ }` row (and the ⋯ button while its popup is closed) marks
 pages an enabled site script applies to. When the content area grows (a panel closes), the
 host checks after 0.35 s whether WebKit left the page drawn narrower than the view (a zoom scale
 kept from the narrower layout) and zooms it to fill the width.
@@ -251,7 +267,12 @@ Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both
-insets are clamped in Rust to at most half the window.
+insets are clamped in Rust to at most half the window. Both sidebars' resize edges are a 3 pt line
+inside the panel that lights up on hover. With the sidebar closed, a small tab stays on the left
+edge; pointing at it (or tapping it, without a pointer) shows the sidebar as a pop-over inset
+20 pt from the top and bottom, rounded on the right, over the page (a hole); it goes away 0.28 s
+after the pointer leaves it, or on a tap outside or Escape. In narrow windows the tab opens the
+overlaid sidebar instead.
 
 ## 6. Credentials
 

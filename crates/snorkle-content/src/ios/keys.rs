@@ -1,9 +1,10 @@
-//! Hardware-keyboard shortcuts while a web page has focus.
+//! Content containers: hardware-keyboard shortcuts while a page has focus
+//! (fallback only), and the cut-outs for floating chrome.
 //!
-//! When a content `WKWebView` is first responder, key events never reach the
-//! chrome's web view, so its JavaScript shortcuts would not fire. Each
-//! content container is a `UIView` subclass exposing `UIKeyCommand`s; UIKit
-//! finds them through the responder chain (page → web view → container).
+//! The shortcuts normally live in the app's main menu (`menu.rs`). If that
+//! could not be installed, each content container exposes the same
+//! `UIKeyCommand`s; UIKit finds them through the responder chain (page →
+//! web view → container).
 //! Pages cannot trigger these: they come from the hardware keyboard via
 //! UIKit, and only identify which shortcut was pressed.
 //!
@@ -19,10 +20,10 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGPoint, CGRect};
-use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
-use objc2_ui_kit::{UIKeyCommand, UIKeyModifierFlags, UIResponder, UIScrollView, UIView};
+use objc2_foundation::{NSArray, NSObjectProtocol};
+use objc2_ui_kit::{UIKeyCommand, UIResponder, UIScrollView, UIView};
 
-use crate::{ContentEvents, Hole, Shortcut};
+use crate::{ContentEvents, Hole, SHORTCUTS};
 
 /// The current holes, shared by the host and every container.
 pub type Holes = Rc<RefCell<Vec<Hole>>>;
@@ -33,17 +34,6 @@ pub struct KeyIvars {
     holes: Holes,
 }
 
-const KEYS: &[(&str, &str)] = &[
-    ("t", "New Tab"),
-    ("w", "Close Tab"),
-    ("s", "Show or Hide Sidebar"),
-    ("1", "Go to Item 1"),
-    ("2", "Go to Item 2"),
-    ("3", "Go to Item 3"),
-    ("4", "Go to Item 4"),
-    ("5", "Go to Item 5"),
-];
-
 define_class!(
     #[unsafe(super(UIView, UIResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
@@ -52,6 +42,8 @@ define_class!(
     pub struct KeyContainer;
 
     impl KeyContainer {
+        /// Fallback for when the main menu could not take the shortcuts
+        /// (`menu::installed`): the same commands, while a page has focus.
         #[unsafe(method_id(keyCommands))]
         fn key_commands(&self) -> Option<Retained<NSArray<UIKeyCommand>>> {
             let mtm = self.mtm();
@@ -59,22 +51,14 @@ define_class!(
                 self.ivars()
                     .commands
                     .get_or_init(|| {
-                        let cmds: Vec<Retained<UIKeyCommand>> = KEYS
-                            .iter()
-                            .map(|(input, title)| unsafe {
-                                let c = UIKeyCommand::keyCommandWithInput_modifierFlags_action(
-                                    &NSString::from_str(input),
-                                    UIKeyModifierFlags::Command,
-                                    sel!(snorkleShortcut:),
-                                    mtm,
-                                );
-                                c.setDiscoverabilityTitle(Some(&NSString::from_str(title)));
-                                if c.respondsToSelector(sel!(setWantsPriorityOverSystemBehavior:)) {
-                                    c.setWantsPriorityOverSystemBehavior(true);
-                                }
-                                c
-                            })
-                            .collect();
+                        let cmds: Vec<Retained<UIKeyCommand>> = if super::menu::installed() {
+                            Vec::new()
+                        } else {
+                            SHORTCUTS
+                                .iter()
+                                .map(|(_, title, key, shift, s)| super::menu::key_command(mtm, title, key, *shift, *s))
+                                .collect()
+                        };
                         NSArray::from_retained_slice(&cmds)
                     })
                     .clone(),
@@ -116,14 +100,7 @@ define_class!(
 
         #[unsafe(method(snorkleShortcut:))]
         fn shortcut(&self, command: &UIKeyCommand) {
-            let input = command.input().map(|s| s.to_string()).unwrap_or_default();
-            let shortcut = match input.as_str() {
-                "t" => Some(Shortcut::NewTab),
-                "w" => Some(Shortcut::CloseTab),
-                "s" => Some(Shortcut::ToggleSidebar),
-                n => n.parse::<u8>().ok().filter(|n| (1..=5).contains(n)).map(Shortcut::Item),
-            };
-            if let Some(s) = shortcut {
+            if let Some(s) = super::menu::shortcut_of(command) {
                 self.ivars().events.shortcut(s);
             }
         }

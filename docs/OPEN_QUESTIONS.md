@@ -278,3 +278,21 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     stories at 2–3; the panel groups whenever there are at least two top-level entries with
     deeper ones under them, which also applies to ordinary pages with several h1s. Rules stored
     before this change keep their old levels until Detect Headers is pressed again.
+54. **[verify] Shortcuts in the main menu** (2026-11-01). All shortcuts are now menu key commands
+    (`ios/menu.rs`), added to tao's app-delegate class at runtime like ⌘W before, to fix ⌘T doing
+    nothing with the sidebar hidden (assumed cause: no first responder, so neither the chrome's
+    JavaScript nor the content containers saw the key). Check: the menu bar shows File → New Tab /
+    Add Bookmark / Close Tab, View → sidebar items, Edit → Find on Page (the system Find menu is
+    replaced) and a Tabs menu; ⌘⇧\ matches with input `\` plus Shift on US and other layouts;
+    the chrome's keydown and the menu do not both act (de-duplicated within 60 ms); system
+    shortcuts are not shadowed. **[decide]** "Shift+D" was implemented as ⌘⇧D, since a bare Shift+D
+    would fire while typing a capital D.
+55. **[verify] Find in page.** `findString:withConfiguration:` on iOS: whether it highlights the
+    match visibly (it selects it), whether it moves focus out of the find field (the chrome
+    refocuses it after each step), and that the count (visible text, case-insensitive, collapsed
+    whitespace) agrees with WebKit's matches; "2 of 7" is tracked by counting steps, so it can
+    drift when they disagree. Closing the bar clears the selection.
+56. **[verify] Sidebar pop-over.** Closing it when the pointer leaves relies on the chrome's web
+    view getting `pointerleave`/`mouseout` when the pointer moves from a hole onto a page view.
+    If it does not, the pop-over stays until a tap outside or Escape.
+

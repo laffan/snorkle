@@ -15,7 +15,9 @@ use objc2::{extern_class, extern_methods, MainThreadOnly};
 use objc2_core_foundation::CGRect;
 use objc2_foundation::{NSObjectProtocol, NSString, NSURLRequest, NSURL};
 use objc2_ui_kit::{UIResponder, UIScrollView, UIView};
-use objc2_web_kit::{WKNavigation, WKNavigationDelegate, WKUIDelegate, WKWebViewConfiguration};
+use objc2_web_kit::{
+    WKFindConfiguration, WKFindResult, WKNavigation, WKNavigationDelegate, WKUIDelegate, WKWebViewConfiguration,
+};
 
 extern_class!(
     /// `@interface WKWebView : UIView` (iOS 8+).
@@ -124,5 +126,16 @@ impl WKWebView {
         #[unsafe(method(scrollView))]
         #[unsafe(method_family = none)]
         pub unsafe fn scrollView(&self) -> Retained<UIScrollView>;
+
+        /// iOS 14+. Selects and scrolls to the next match; the result only
+        /// says whether one was found.
+        #[unsafe(method(findString:withConfiguration:completionHandler:))]
+        #[unsafe(method_family = none)]
+        pub unsafe fn findString_withConfiguration_completionHandler(
+            &self,
+            string: &NSString,
+            configuration: Option<&WKFindConfiguration>,
+            completion: &block2::DynBlock<dyn Fn(std::ptr::NonNull<WKFindResult>)>,
+        );
     );
 }

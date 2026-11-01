@@ -50,8 +50,13 @@
       <div id="vm-title" class="vm-title"></div>
       <button id="vm-tab" role="menuitem"></button>
     </div>
-    <div id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
+    <div id="sidebar-resize" class="resize-edge" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
   </aside>
+  <!-- With the sidebar closed: a tab on the left edge (cut out of the
+       page, like the pill). Pointing at it shows the sidebar as a pop-over. -->
+  <button id="edge-tab" aria-label="Show tabs" title="Tabs" hidden></button>
+  <!-- Left edge of the right panel(s): drag to resize. -->
+  <div id="right-resize" class="resize-edge" role="separator" aria-orientation="vertical" aria-label="Resize panel" hidden></div>
 
   <!-- URL bar: a pill floating over the bottom of the page. Pages are
        native views drawn above the chrome, so the pill, its popup and the
@@ -61,6 +66,21 @@
   <header id="chrome">
     <div id="os-banner" class="banner" hidden></div>
     <div id="toast" class="toast" role="status" hidden></div>
+    <!-- ⌘W on a bookmark's tab: closing it removes the bookmark. -->
+    <div id="confirm-pop" class="confirm-pop" role="alertdialog" aria-labelledby="confirm-text" hidden>
+      <span id="confirm-text"></span>
+      <button id="confirm-cancel" class="pillbtn">Cancel</button>
+      <button id="confirm-ok" class="pillbtn primary"></button>
+    </div>
+    <!-- ⌘F: find on page, attached to the top of the pill. -->
+    <div id="findbar" class="findbar" role="search" hidden>
+      <input id="find-input" type="text" enterkeyhint="search" autocapitalize="off" autocorrect="off" spellcheck="false"
+             placeholder="Find on page" aria-label="Find on page">
+      <span id="find-count" class="find-count" aria-live="polite"></span>
+      <button id="find-prev" class="icon" aria-label="Previous match" title="Previous (⇧↩)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg></button>
+      <button id="find-next" class="icon" aria-label="Next match" title="Next (↩)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button id="find-close" class="icon" aria-label="Close find" title="Close (Esc)">&#x00D7;</button>
+    </div>
     <div id="toolbar" class="urlpill">
       <button id="sidebar-toggle" class="icon" aria-label="Show or hide sidebar" aria-controls="sidebar">&#x25E7;</button>
       <button id="back" class="icon" aria-label="Back">&#x2039;</button>
@@ -154,7 +174,7 @@
           </div></div>
           <div class="option"><div>
             <div class="option-title">Keyboard</div>
-            <div class="muted small">⌘T new tab (search open tabs and bookmarks) · ⌘S show or hide the sidebar · ⌘1–⌘5 the first pins, bookmarks and tabs · ⌘-click a link to open it in a background tab.</div>
+            <div class="muted small">⌘T new tab (search open tabs and bookmarks) · ⌘W close tab (asks first for a bookmark's tab, which removes the bookmark; pinned tabs stay) · ⌘F find on page · ⌘S or ⌘\ show or hide the sidebar · ⌘⇧\ show or hide the right panel · ⌘⇧D bookmark this page · ⌘1–⌘5 the first pins, bookmarks and tabs · ⌘-click a link to open it in a background tab.</div>
           </div></div>
           <div class="option"><div>
             <div class="option-title">Ad and tracker blocking</div>
@@ -310,7 +330,7 @@
   <aside id="outline" class="sheet" aria-labelledby="outline-title" hidden>
     <div class="modal-head">
       <h1 id="outline-title">Headers</h1>
-      <button id="detect-headers" class="pillbtn" title="Ask your AI provider which elements are headings on this site (sends a short sample of the page's headline-like elements)">Detect Headers</button>
+      <button id="detect-headers" class="icon sparkle" aria-label="Detect headers with AI" title="Detect headers with AI: asks your AI provider which elements are section labels and headings on this site (sends a short sample of the page's headline-like elements)"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M11 2.5c.5 3.9 2.6 6 6.5 6.5-3.9.5-6 2.6-6.5 6.5-.5-3.9-2.6-6-6.5-6.5 3.9-.5 6-2.6 6.5-6.5z"/><path d="M18.5 13.5c.3 2 1.2 2.9 3.2 3.2-2 .3-2.9 1.2-3.2 3.2-.3-2-1.2-2.9-3.2-3.2 2-.3 2.9-1.2 3.2-3.2z"/><path d="M6 15.5c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3z"/></svg></button>
     </div>
     <p id="outline-msg" class="muted small" role="status" hidden></p>
     <ol id="outline-list" class="outline-list"></ol>

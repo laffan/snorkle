@@ -25,6 +25,13 @@
   let scriptsOpen = false;
   let menuOpen = false;
   let chatOpen = false;
+  // ⌘⇧\ hides the right panels without closing them (headers mode and
+  // the chat stay on, and come back with the next ⌘⇧\).
+  let rightHidden = false;
+  // The sidebar shown as a pop-over from the left-edge tab (sidebar closed).
+  let peek = false;
+  let findOpen = false; // ⌘F bar
+  let confirmAction = null; // { tab, run } while a confirmation is shown
   let bookmarks = [];
   let pins = [];
   const MAX_PINS = 4;
@@ -87,6 +94,9 @@
     renderToolbar(tab);
     renderSurface(tab);
     renderChat();
+    // Find and confirmations belong to the tab they were opened on.
+    if (findOpen && find.tab !== null && find.tab !== state.active) closeFind();
+    if (confirmAction && confirmAction.tab !== state.active && confirmAction.tab !== state.sheet) closeConfirm();
     reportLayout();
   }
 
@@ -762,6 +772,7 @@
 
   function setSidebar(open) {
     sidebarOpen = open;
+    peek = false;
     if (!narrow) setPref('sidebarOpen', open ? '1' : '0');
     closeMenu();
     applySidebar();
@@ -769,8 +780,10 @@
 
   function applySidebar() {
     document.body.classList.toggle('narrow', narrow);
-    document.body.classList.toggle('sidebar-closed', !sidebarOpen);
-    $('sidebar').setAttribute('aria-hidden', String(!sidebarOpen));
+    document.body.classList.toggle('sidebar-closed', !sidebarOpen && !peek);
+    document.body.classList.toggle('peek', peek);
+    $('edge-tab').hidden = sidebarOpen || peek;
+    $('sidebar').setAttribute('aria-hidden', String(!sidebarOpen && !peek));
     $('sidebar-toggle').setAttribute('aria-expanded', String(sidebarOpen));
     reportLayout();
   }
@@ -807,13 +820,71 @@
   $('sidebar-resize').addEventListener('pointerup', endResize);
   $('sidebar-resize').addEventListener('pointercancel', endResize);
 
+  // The right panel's width (headers, chat, site scripts), dragged at its
+  // left edge and remembered.
+  const MIN_RIGHT = 260;
+  const MAX_RIGHT = 640;
+  let rightWidth = parseFloat(pref('rightWidth') || '') || 380;
+  function clampRight(w, left) {
+    return Math.round(Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, w, (window.innerWidth - left) * 0.6)));
+  }
+  let rightDrag = null;
+  $('right-resize').addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    $('right-resize').setPointerCapture(ev.pointerId);
+    rightDrag = { x: ev.clientX, w: rightWidth };
+    document.body.classList.add('resizing-right');
+  });
+  $('right-resize').addEventListener('pointermove', (ev) => {
+    if (!rightDrag) return;
+    rightWidth = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, rightDrag.w + rightDrag.x - ev.clientX));
+    queueLayout();
+  });
+  const endRightResize = () => {
+    if (!rightDrag) return;
+    rightDrag = null;
+    document.body.classList.remove('resizing-right');
+    setPref('rightWidth', String(Math.round(rightWidth)));
+    reportLayout();
+  };
+  $('right-resize').addEventListener('pointerup', endRightResize);
+  $('right-resize').addEventListener('pointercancel', endRightResize);
+
+  // ---- sidebar pop-over (sidebar closed) -------------------------------------
+  //
+  // A tab stays on the left edge. Pointing at it (or tapping it, without a
+  // pointer) shows the sidebar as a pop-over over the page, inset 20 pt top
+  // and bottom; it goes away when the pointer leaves it. In narrow windows
+  // the tab opens the usual overlaid sidebar instead.
+  let peekTimer = 0;
+  function setPeek(on) {
+    clearTimeout(peekTimer);
+    if (on === peek || (on && (sidebarOpen || narrow))) return;
+    peek = on;
+    if (!on) closeMenu();
+    applySidebar();
+  }
+  function peekBusy() {
+    return menuOpen || !$('vm-pop').hidden || !!dragState || !!resize;
+  }
+  function leavePeek() {
+    clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => { if (peek && !peekBusy()) setPeek(false); }, 280);
+  }
+  $('edge-tab').addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse' && !narrow) setPeek(true); });
+  $('edge-tab').addEventListener('click', () => { if (narrow) setSidebar(true); else setPeek(!peek); });
+  $('sidebar').addEventListener('pointerenter', () => clearTimeout(peekTimer));
+  $('sidebar').addEventListener('pointerleave', (ev) => { if (peek && ev.pointerType === 'mouse') leavePeek(); });
+  // The pointer may leave the chrome's web view straight onto the page.
+  document.addEventListener('mouseout', (ev) => { if (peek && !ev.relatedTarget) leavePeek(); });
+
   // ---- menu, settings, history ----------------------------------------------
 
   function openMenu() { menuOpen = true; $('menu-pop').hidden = false; document.body.classList.add('menu-open'); }
   function closeMenu() { menuOpen = false; $('menu-pop').hidden = true; syncMenuOpen(); }
   // Keeps the chrome fully opaque while any of its menus is open.
   function syncMenuOpen() {
-    const open = menuOpen || !$('vm-pop').hidden || !$('actions-pop').hidden;
+    const open = menuOpen || !$('vm-pop').hidden || !$('actions-pop').hidden || findOpen || !$('confirm-pop').hidden;
     document.body.classList.toggle('menu-open', open);
   }
 
@@ -1148,19 +1219,27 @@
     // beside the page (shrinking the content area), float over it as a
     // hole (the pill, its popup, toasts: the page is cut out there), or set
     // `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (chatOpen && narrow) || (narrow && sidebarOpen);
-    // A docked right panel (site scripts, chat, headers) takes the right of
-    // the content area, full height.
-    const dock = rightPanel();
-    const right = dock ? Math.min(420, Math.floor((window.innerWidth - left) * 0.45)) : 0;
+    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarOpen);
+    // Docked right panels (site scripts; or the headers outline and the
+    // chat, one above the other when both are open) take the right of the
+    // content area, full height, at the width the user dragged.
+    const docks = rightPanels();
+    const right = docks.length ? clampRight(rightWidth, left) : 0;
     $('chrome').style.left = left + 'px';
     $('chrome').style.right = right + 'px';
     const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
-    if (dock) {
-      dock.style.top = top + 'px';
-      dock.style.bottom = '0px';
-      dock.style.width = right + 'px';
-    }
+    const mid = Math.round(top + (window.innerHeight - top) / 2);
+    docks.forEach((d, i) => {
+      const split = docks.length > 1;
+      d.style.top = (split && i === 1 ? mid : top) + 'px';
+      d.style.bottom = (split && i === 0 ? window.innerHeight - mid : 0) + 'px';
+      d.style.width = right + 'px';
+      d.classList.toggle('split-lower', split && i === 1);
+    });
+    const edge = $('right-resize');
+    edge.hidden = !docks.length;
+    edge.style.left = window.innerWidth - right + 'px';
+    edge.style.top = top + 'px';
     // The docked console sits above the URL strip; while it is open the
     // page ends above it (the pill then floats over chrome, not the page).
     const con = $('console');
@@ -1194,28 +1273,58 @@
   // Chrome that floats over the page: the pill, its popup, toasts and
   // banners. Each is cut out of the page (window coordinates, rounded to
   // whole points, 1 pt larger than the element).
+  // `c`: which corners are rounded (1 top left, 2 top right, 4 bottom left,
+  // 8 bottom right). The find bar sits on the pill: its hole ends where the
+  // pill's begins and only its top corners are rounded, so the two never
+  // overlap (overlapping holes are merged into one rectangle).
   function floatingHoles() {
     const out = [];
-    for (const id of ['toolbar', 'actions-pop', 'toast', 'os-banner']) {
-      const e = $(id);
-      if (!e || e.hidden) continue;
+    const hole = (e, c) => {
       const r = e.getBoundingClientRect();
-      if (r.width < 1 || r.height < 1) continue;
-      const radius = parseFloat(getComputedStyle(e).borderTopLeftRadius) || 0;
+      if (r.width < 1 || r.height < 1) return null;
+      const radius = parseFloat(getComputedStyle(e).borderTopRightRadius) || 0;
       const x = Math.floor(r.left) - 1;
       const y = Math.floor(r.top) - 1;
-      out.push({ x, y, w: Math.ceil(r.right) + 1 - x, h: Math.ceil(r.bottom) + 1 - y, r: radius + 1 });
+      return { x, y, w: Math.ceil(r.right) + 1 - x, h: Math.ceil(r.bottom) + 1 - y, r: radius + 1, c };
+    };
+    const pill = hole($('toolbar'), 15);
+    if (pill) out.push(pill);
+    if (findOpen) {
+      const f = hole($('findbar'), 3);
+      if (f && pill) f.h = Math.max(1, pill.y - f.y);
+      if (f) out.push(f);
+    }
+    for (const id of ['actions-pop', 'confirm-pop', 'toast', 'os-banner']) {
+      const e = $(id);
+      if (e.hidden) continue;
+      const h = hole(e, 15);
+      if (h) out.push(h);
+    }
+    if (peek) {
+      // Layout box (the slide-in transform may still be running); flush
+      // with the window's left edge, rounded on the right.
+      const s = $('sidebar');
+      out.push({ x: 0, y: s.offsetTop - 1, w: s.offsetWidth + 1, h: s.offsetHeight + 2, r: 15, c: 10 });
+    } else if (!$('edge-tab').hidden) {
+      const e = $('edge-tab');
+      out.push({ x: 0, y: e.offsetTop - 1, w: e.offsetWidth + 1, h: e.offsetHeight + 2, r: 11, c: 10 });
     }
     return out;
   }
 
-  // The panel docked on the right of the content area, if any: site
-  // scripts while open, else the chat while open, else the headers outline.
-  function rightPanel() {
-    if (scriptsOpen && !narrow) return $('scripts-pop');
-    if (chatOpen && !narrow) return $('chat');
-    if (outlineShown()) return $('outline');
-    return null;
+  // The panels docked on the right of the content area: site scripts while
+  // open; otherwise the headers outline and/or the chat (outline on top).
+  function rightPanels() {
+    if (narrow || rightHidden) return [];
+    if (scriptsOpen) return [$('scripts-pop')];
+    const out = [];
+    if (outlineShown()) out.push($('outline'));
+    if (chatShown()) out.push($('chat'));
+    return out;
+  }
+
+  function chatShown() {
+    return chatOpen && !rightHidden;
   }
 
   // ---- ad blocking ------------------------------------------------------
@@ -1303,7 +1412,7 @@
 
   $('headers').addEventListener('click', withTab((t) => {
     const on = !headersOn(t.id);
-    if (on && chatOpen) setChat(false); // the outline takes the docked panel
+    if (on && rightHidden) { rightHidden = false; applyChat(); }
     applyViewModes(T.core.invoke('set_tab_headers', { tab: t.id, on }));
   }));
 
@@ -1416,7 +1525,7 @@
   });
 
   function outlineShown() {
-    return !!state && !narrow && !scriptsOpen && !chatOpen && headersOn(state.active);
+    return !!state && !narrow && !scriptsOpen && !rightHidden && headersOn(state.active);
   }
 
   // Folded sections, per tab and section index (session only).
@@ -1553,7 +1662,7 @@
 
   let chatKey = '';
   function renderChat() {
-    if (!chatOpen) { chatKey = ''; return; }
+    if (!chatShown()) { chatKey = ''; return; }
     const t = activeTab();
     // State updates arrive often (load progress); rebuild only on change,
     // so a selection in the log survives.
@@ -1590,10 +1699,18 @@
     if (atEnd || c.busy) log.scrollTop = log.scrollHeight;
   }
 
+  // Shows or hides the chat panel (open, and the right panels not hidden).
+  function applyChat() {
+    const shown = chatShown();
+    $('chat').hidden = !shown;
+    $('chat').classList.toggle('dock', shown && !narrow);
+    if (!shown) $('chat').classList.remove('split-lower');
+  }
+
   function setChat(open) {
     chatOpen = open;
-    $('chat').hidden = !open;
-    $('chat').classList.toggle('dock', open && !narrow);
+    if (open) rightHidden = false;
+    applyChat();
     if (open) {
       loadAi().then(() => { renderChatModels(); chatKey = ''; renderChat(); });
       setTimeout(() => $('chat-input').focus(), 0);
@@ -1919,15 +2036,25 @@
     return items;
   }
 
+  // A shortcut can arrive twice for one key press (the native menu command
+  // and this page's own keydown, depending on what has focus).
+  let lastShortcut = { name: '', at: 0 };
   function runShortcut(name) {
+    const now = performance.now();
+    if (name === lastShortcut.name && now - lastShortcut.at < 60) return;
+    lastShortcut = { name, at: now };
     if (name === 'new_tab') {
       openPalette();
     } else if (name === 'close_tab') {
-      // The pop-up sheet in front, else the active tab.
-      const id = state && (state.sheet !== null ? state.sheet : state.active);
-      if (id !== null && id !== undefined) invoke('close_tab', { tab: id });
+      closeTabShortcut();
     } else if (name === 'toggle_sidebar') {
       setSidebar(!sidebarOpen);
+    } else if (name === 'toggle_right') {
+      toggleRight();
+    } else if (name === 'bookmark') {
+      bookmarkShortcut();
+    } else if (name === 'find') {
+      openFind();
     } else if (name.startsWith('item:')) {
       const item = sidebarItems()[Number(name.slice(5)) - 1];
       if (!item) return;
@@ -1936,6 +2063,168 @@
     }
   }
 
+  // ⌘W: the pop-up sheet in front, else the active tab. A pin's tab is
+  // never closed this way; a bookmark's tab is, after confirming, and the
+  // bookmark is removed with it (that tab is the bookmark).
+  function closeTabShortcut() {
+    const id = state && (state.sheet !== null ? state.sheet : state.active);
+    if (id === null || id === undefined) return;
+    const t = state.tabs.find((x) => x.id === id);
+    const key = t && t.sheet_over === null ? t.launcher : null;
+    if (key && pins.some((p) => p.url === key)) {
+      toast('Pinned tabs stay open. Unpin the site to close its tab.');
+      return;
+    }
+    const bm = key ? bookmarks.find((b) => b.url === key) : null;
+    if (!bm) { invoke('close_tab', { tab: id }); return; }
+    if (confirmAction && confirmAction.tab === id) { confirmAction.run(); return; } // ⌘W again confirms
+    askConfirm(`Close this tab and remove the bookmark “${bm.title || bm.display.registrable}”?`, 'Remove Bookmark', id, () =>
+      T.core.invoke('remove_bookmark', { url: bm.url })
+        .then(loadBookmarks)
+        .then(() => invoke('close_tab', { tab: id }))
+        .catch((e) => toast(String(e))));
+  }
+
+  // A small confirmation floating above the pill (a hole, like the pill).
+  // ⌘W or Return confirms, Escape cancels.
+  function askConfirm(text, ok, tab, run) {
+    confirmAction = { tab, run: () => { closeConfirm(); run(); } };
+    $('confirm-text').textContent = text;
+    $('confirm-ok').textContent = ok + ' (⌘W)';
+    $('confirm-pop').hidden = false;
+    $('confirm-ok').focus();
+    syncMenuOpen();
+    reportLayout();
+  }
+  function closeConfirm() {
+    confirmAction = null;
+    $('confirm-pop').hidden = true;
+    syncMenuOpen();
+    reportLayout();
+  }
+  $('confirm-ok').addEventListener('click', () => { if (confirmAction) confirmAction.run(); });
+  $('confirm-cancel').addEventListener('click', closeConfirm);
+
+  // ⌘⇧D: bookmark the current page (never removes one).
+  function bookmarkShortcut() {
+    const t = activeTab();
+    if (!t || !t.url) { toast('Open a page to bookmark it.'); return; }
+    if (t.private) { toast('Private tabs can’t be bookmarked.'); return; }
+    if (bookmarks.some((b) => b.url === t.url.full) || (t.launcher && bookmarks.some((b) => b.url === t.launcher))) {
+      toast('Already bookmarked.');
+      return;
+    }
+    T.core.invoke('toggle_bookmark', { tab: t.id })
+      .then((on) => { toast(on ? 'Bookmarked' : 'Bookmark removed'); return loadBookmarks(); })
+      .then(render)
+      .catch((e) => toast(String(e)));
+  }
+
+  // ⌘⇧\: hide the right panels (keeping them on), or show them again; with
+  // none on, open the chat.
+  function toggleRight() {
+    const anyOn = scriptsOpen || chatOpen || (state && headersOn(state.active));
+    if (!anyOn) { setChat(true); return; }
+    if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !(state && headersOn(state.active))) return; }
+    rightHidden = !rightHidden;
+    applyChat();
+    renderOutline();
+    renderViewMode();
+    reportLayout();
+  }
+
+  // ---- find on page (⌘F) ------------------------------------------------------
+  //
+  // WebKit's own find selects and scrolls to each match; a separate count
+  // (digits only) gives "3 of 12". The bar sits on top of the pill.
+  let find = { tab: null, query: '', total: null, index: 0, timer: 0, seq: 0 };
+
+  function openFind() {
+    const t = activeTab();
+    findOpen = true;
+    find.tab = t ? t.id : null;
+    $('findbar').hidden = false;
+    const input = $('find-input');
+    input.focus();
+    input.select();
+    renderFind();
+    syncMenuOpen();
+    reportLayout();
+  }
+
+  function closeFind() {
+    if (!findOpen) return;
+    findOpen = false;
+    clearTimeout(find.timer);
+    if (find.tab !== null && find.query) invoke('end_find', { tab: find.tab });
+    find = { tab: null, query: '', total: null, index: 0, timer: 0, seq: find.seq + 1 };
+    $('findbar').hidden = true;
+    $('find-input').value = '';
+    syncMenuOpen();
+    reportLayout();
+  }
+
+  function renderFind() {
+    const c = $('find-count');
+    const q = find.query;
+    $('findbar').classList.toggle('none', !!q && find.total === 0);
+    if (!q) c.textContent = '';
+    else if (find.total === null) c.textContent = '…';
+    else if (find.total === 0) c.textContent = 'No matches';
+    else c.textContent = `${Math.max(1, find.index)} of ${find.total >= 1000 ? '1000+' : find.total}`;
+    $('find-prev').disabled = $('find-next').disabled = !q || find.total === 0;
+  }
+
+  // A new query: count, then select the first match.
+  function findQuery(q) {
+    const t = activeTab();
+    find.query = q;
+    find.total = null;
+    find.index = 0;
+    const seq = ++find.seq;
+    renderFind();
+    if (!q || !t || !t.url) { if (q) { find.total = 0; renderFind(); } return; }
+    find.tab = t.id;
+    T.core.invoke('count_in_page', { tab: t.id, query: q }).then((n) => {
+      if (seq !== find.seq) return;
+      find.total = n === null || n === undefined ? find.total : n;
+      return T.core.invoke('find_in_page', { tab: t.id, query: q, backwards: false }).then((found) => {
+        if (seq !== find.seq) return;
+        if (!found) find.total = 0;
+        else { find.index = 1; if (!find.total) find.total = 1; }
+        renderFind();
+        $('find-input').focus(); // WebKit may move focus to the page
+      });
+    }).catch((e) => toast(String(e)));
+  }
+
+  function findStep(backwards) {
+    const t = activeTab();
+    if (!t || !find.query || !find.total) return;
+    const seq = find.seq;
+    T.core.invoke('find_in_page', { tab: t.id, query: find.query, backwards }).then((found) => {
+      if (seq !== find.seq || !found) return;
+      const n = find.total;
+      find.index = backwards ? (find.index <= 1 ? n : find.index - 1) : (find.index >= n ? 1 : find.index + 1);
+      renderFind();
+      $('find-input').focus();
+    }).catch((e) => toast(String(e)));
+  }
+
+  $('find-input').addEventListener('input', () => {
+    clearTimeout(find.timer);
+    const q = $('find-input').value.trim();
+    find.timer = setTimeout(() => findQuery(q), 180);
+  });
+  $('find-input').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); findStep(ev.shiftKey); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); closeFind(); }
+    else if (ev.metaKey && ev.key.toLowerCase() === 'g') { ev.preventDefault(); findStep(ev.shiftKey); }
+  });
+  $('find-prev').addEventListener('click', () => findStep(true));
+  $('find-next').addEventListener('click', () => findStep(false));
+  $('find-close').addEventListener('click', closeFind);
+
   document.addEventListener('keydown', (ev) => {
     if (!ev.metaKey || ev.altKey || ev.ctrlKey) return;
     const k = ev.key.toLowerCase();
@@ -1943,6 +2232,9 @@
     if (k === 't') name = 'new_tab';
     else if (k === 'w') name = 'close_tab';
     else if (k === 's') name = 'toggle_sidebar';
+    else if (k === 'f') name = 'find';
+    else if (k === 'd' && ev.shiftKey) name = 'bookmark';
+    else if (ev.code === 'Backslash' || k === '\\' || k === '|') name = ev.shiftKey ? 'toggle_right' : 'toggle_sidebar';
     else if (k >= '1' && k <= '5' && k.length === 1) name = 'item:' + k;
     if (!name) return;
     ev.preventDefault();
@@ -2016,10 +2308,15 @@
     if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('sidebar-toggle')) {
       setSidebar(false);
     }
+    if (peek && !$('sidebar').contains(ev.target) && ev.target !== $('edge-tab')) setPeek(false);
+    if (confirmAction && !$('confirm-pop').contains(ev.target)) closeConfirm();
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
     if (paletteOpen) closePalette();
+    else if (confirmAction) closeConfirm();
+    else if (findOpen) closeFind();
+    else if (peek) setPeek(false);
     else if (!$('actions-pop').hidden) setActions(false);
     else if (menuOpen) closeMenu();
     else if (modalOpen) setModal(false);
@@ -2070,8 +2367,9 @@
       sidebarOpen = nowNarrow ? false : loadSidebarPref();
     }
     setSidebarWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 264);
-    $('chat').classList.toggle('dock', chatOpen && !narrow);
+    applyChat();
     $('scripts-pop').classList.toggle('dock', scriptsOpen && !narrow);
+    if (narrow && peek) peek = false;
     applySidebar();
   });
   const savedWidth = parseFloat(pref('sidebarWidth') || '');
