@@ -79,6 +79,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "search_google" => json!({ "query": "x", "private": false }),
         "focus_chrome" | "get_shortcuts" => json!({}),
         "set_tab_headers" => json!({ "tab": 1, "on": true }),
+        "zoom_page" => json!({ "tab": 1, "step": "in" }),
         "delete_user_script" => json!({ "domain": "example.com" }),
         "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),
         "get_view_mode" | "get_console" | "clear_console" | "ai_status" | "ai_usage" | "ai_reset_usage"

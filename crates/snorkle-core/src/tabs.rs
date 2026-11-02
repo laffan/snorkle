@@ -152,6 +152,40 @@ pub struct Tab {
     /// View modes turned off for this tab ("Disable for this tab"); saved
     /// with the session.
     pub view_exempt: Vec<crate::viewmodes::Kind>,
+    /// Page zoom in percent (one of [`ZOOM_LEVELS`]); saved with the
+    /// session.
+    pub zoom: u16,
+}
+
+/// Page zoom levels, in percent (the steps of the ⋯ menu's − and +).
+pub const ZOOM_LEVELS: [u16; 11] = [50, 75, 85, 100, 115, 125, 150, 175, 200, 250, 300];
+pub const DEFAULT_ZOOM: u16 = 100;
+
+/// The zoom level nearest to `percent` (for values read from disk).
+pub fn clean_zoom(percent: u16) -> u16 {
+    ZOOM_LEVELS.iter().copied().min_by_key(|z| z.abs_diff(percent)).unwrap_or(DEFAULT_ZOOM)
+}
+
+/// A change of page zoom from the ⋯ menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoomStep {
+    In,
+    Out,
+    Reset,
+}
+
+impl ZoomStep {
+    /// The level after `from`; stays at the ends.
+    pub fn apply(self, from: u16) -> u16 {
+        let from = clean_zoom(from);
+        let i = ZOOM_LEVELS.iter().position(|z| *z == from).unwrap_or(0);
+        match self {
+            ZoomStep::In => ZOOM_LEVELS[(i + 1).min(ZOOM_LEVELS.len() - 1)],
+            ZoomStep::Out => ZOOM_LEVELS[i.saturating_sub(1)],
+            ZoomStep::Reset => DEFAULT_ZOOM,
+        }
+    }
 }
 
 impl Tab {
@@ -177,6 +211,7 @@ impl Tab {
             opener: None,
             sheet: false,
             view_exempt: Vec::new(),
+            zoom: DEFAULT_ZOOM,
             launcher: None,
         }
     }
@@ -196,5 +231,18 @@ mod tests {
         assert_eq!(MemoryBudget::for_physical_memory(3 * GIB).max_live, 2);
         assert_eq!(MemoryBudget::for_physical_memory(8 * GIB).max_live, 6);
         assert_eq!(MemoryBudget::for_physical_memory(16 * GIB).max_live, 8);
+    }
+
+    #[test]
+    fn zoom_steps() {
+        assert_eq!(ZoomStep::In.apply(100), 115);
+        assert_eq!(ZoomStep::Out.apply(100), 85);
+        assert_eq!(ZoomStep::Out.apply(50), 50, "stays at the smallest");
+        assert_eq!(ZoomStep::In.apply(300), 300, "stays at the largest");
+        assert_eq!(ZoomStep::Reset.apply(250), 100);
+        assert_eq!(clean_zoom(0), 50);
+        assert_eq!(clean_zoom(9999), 300);
+        assert_eq!(clean_zoom(112), 115);
+        assert_eq!(ZoomStep::In.apply(112), 125, "an off-level value snaps first");
     }
 }

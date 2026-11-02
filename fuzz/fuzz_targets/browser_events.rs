@@ -10,7 +10,7 @@ use libfuzzer_sys::fuzz_target;
 use snorkle_core::browser::{Browser, Effect, NavErrorKind, NavKind, PopupStyle};
 use snorkle_core::os::OsSupport;
 use snorkle_core::policy::Frame;
-use snorkle_core::tabs::{MemoryBudget, Profile, TabId};
+use snorkle_core::tabs::{MemoryBudget, Profile, TabId, ZoomStep};
 use snorkle_core::Url;
 
 const PUBLIC: &[&str] = &[
@@ -35,7 +35,7 @@ fuzz_target!(|data: &[u8]| {
             let set = if p == Profile::Private { SECRET } else { PUBLIC };
             Url::parse(set[i as usize % set.len()]).unwrap()
         };
-        let effects: Vec<Effect> = match op % 14 {
+        let effects: Vec<Effect> = match op % 15 {
             0 | 1 => {
                 let p = if op % 2 == 0 { Profile::Default } else { Profile::Private };
                 let (id, e) = b.new_tab(p, now);
@@ -126,6 +126,9 @@ fuzz_target!(|data: &[u8]| {
                 (Some((x, _)), Some((y, _))) => b.split(x, y, now),
                 _ => vec![],
             },
+            14 => pick(&tabs)
+                .map(|(id, _)| b.zoom(id, [ZoomStep::In, ZoomStep::Out, ZoomStep::Reset][c as usize % 3]))
+                .unwrap_or_default(),
             _ => {
                 if c & 1 == 0 { b.on_memory_warning() } else { b.tick(now) }
             }
@@ -136,6 +139,7 @@ fuzz_target!(|data: &[u8]| {
             match e {
                 Effect::RecordHistory { url, .. } => assert!(!url.as_str().contains("secret"), "private history leaked"),
                 Effect::PersistSession(s) => assert!(s.tabs.iter().all(|t| !t.url.contains("secret")), "private session leaked"),
+                Effect::SetZoom { percent, .. } => assert!((50..=300).contains(percent), "zoom {percent} out of range"),
                 _ => {}
             }
         }

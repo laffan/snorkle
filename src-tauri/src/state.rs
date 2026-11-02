@@ -253,6 +253,7 @@ impl Shared {
                 | Effect::AdoptPopup { tab }
                 | Effect::DestroyView { tab, .. }
                 | Effect::ShowView { tab, .. }
+                | Effect::SetZoom { tab, .. }
                 | Effect::Load { tab, .. } => Some(*tab),
                 Effect::HideView(t)
                 | Effect::GoBack(t)

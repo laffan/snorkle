@@ -64,6 +64,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::end_find,
         commands::focus_chrome,
         commands::share_page,
+        commands::zoom_page,
         commands::read_selection,
         commands::define_term,
         commands::search_google,

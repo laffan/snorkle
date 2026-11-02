@@ -37,6 +37,7 @@ pub const COMMANDS: &[&str] = &[
     "end_find",
     "focus_chrome",
     "share_page",
+    "zoom_page",
     "read_selection",
     "define_term",
     "search_google",

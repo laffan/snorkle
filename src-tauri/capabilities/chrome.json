@@ -43,6 +43,7 @@
     "allow-end-find",
     "allow-focus-chrome",
     "allow-share-page",
+    "allow-zoom-page",
     "allow-read-selection",
     "allow-define-term",
     "allow-search-google",

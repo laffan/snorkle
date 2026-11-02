@@ -259,6 +259,7 @@
     $('sheet-pill').hidden = !state.sheet;
     renderShield(tab);
     renderScriptsMark(tab);
+    renderZoom(tab);
     $('private-pill').hidden = !(tab && tab.private);
 
     const d = tab && tab.url;
@@ -1311,6 +1312,7 @@
     editing = true;
     const input = $('url-input');
     $('url-display').hidden = true;
+    $('share').hidden = true;
     input.hidden = false;
     input.value = tab && tab.url ? tab.url.full : '';
     input.focus();
@@ -1321,6 +1323,7 @@
     editing = false;
     $('url-input').hidden = true;
     $('url-display').hidden = false;
+    $('share').hidden = false;
   }
 
   // ---- layout -----------------------------------------------------------
@@ -1568,6 +1571,23 @@
     reportLayout();
   }
   $('actions-toggle').addEventListener('click', () => setActions($('actions-pop').hidden));
+
+  // Page zoom (⋯ menu): per tab, decided and saved by the core. The menu
+  // stays open so the buttons can be pressed repeatedly.
+  const ZOOM_MIN = 50, ZOOM_MAX = 300;
+  function renderZoom(tab) {
+    const z = tab ? tab.zoom : 100;
+    const page = !!(tab && tab.url);
+    const level = $('zoom-level');
+    level.textContent = `${z}%`;
+    level.classList.toggle('changed', z !== 100);
+    level.disabled = !page || z === 100;
+    $('zoom-out').disabled = !page || z <= ZOOM_MIN;
+    $('zoom-in').disabled = !page || z >= ZOOM_MAX;
+  }
+  for (const [id, step] of [['zoom-out', 'out'], ['zoom-in', 'in'], ['zoom-level', 'reset']]) {
+    $(id).addEventListener('click', withTab((t) => invoke('zoom_page', { tab: t.id, step })));
+  }
 
   function applyViewModes(p) {
     p.then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch((e) => toast(String(e)));

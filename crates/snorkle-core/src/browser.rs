@@ -60,6 +60,12 @@ pub enum Effect {
         pane: Pane,
     },
     HideView(TabId),
+    /// Set the web view's page zoom (`percent` / 100). Also follows
+    /// `CreateView` for a tab whose zoom is not 100 %.
+    SetZoom {
+        tab: TabId,
+        percent: u16,
+    },
     Load {
         tab: TabId,
         url: Url,
@@ -178,6 +184,8 @@ pub struct TabView {
     pub sheet_over: Option<TabId>,
     /// The pin or bookmark (URL) this tab belongs to; not listed as a tab.
     pub launcher: Option<String>,
+    /// Page zoom in percent.
+    pub zoom: u16,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -299,6 +307,7 @@ impl Browser {
             tab.title = sanitize_page_text(&st.title, MAX_PAGE_TEXT_CHARS);
             tab.launcher = st.launcher.as_deref().and_then(crate::storage::storable_url);
             tab.view_exempt = clean_exempt(&st.exempt);
+            tab.zoom = st.zoom.map(crate::tabs::clean_zoom).unwrap_or(crate::tabs::DEFAULT_ZOOM);
             self.tabs.push(tab);
             ids.push(id);
         }
@@ -561,6 +570,26 @@ impl Browser {
         if private { Vec::new() } else { vec![Effect::PersistSession(self.session())] }
     }
 
+    /// Changes a tab's page zoom (⋯ menu). Saved with the session (not for
+    /// private tabs); a tab without a web view gets it when one is created.
+    pub fn zoom(&mut self, id: TabId, step: crate::tabs::ZoomStep) -> Vec<Effect> {
+        let Some(t) = self.tab_mut(id) else { return Vec::new() };
+        let percent = step.apply(t.zoom);
+        if percent == t.zoom {
+            return Vec::new();
+        }
+        t.zoom = percent;
+        let mut out = Vec::new();
+        if t.life == Life::Live {
+            out.push(Effect::SetZoom { tab: id, percent });
+        }
+        if !t.is_private() {
+            out.push(Effect::PersistSession(self.session()));
+        }
+        out.push(Effect::NotifyChrome);
+        out
+    }
+
     /// Tabs with view-mode exemptions (restored from the session).
     pub fn view_exemptions(&self) -> Vec<(TabId, Vec<crate::viewmodes::Kind>)> {
         self.tabs.iter().filter(|t| !t.view_exempt.is_empty()).map(|t| (t.id, t.view_exempt.clone())).collect()
@@ -651,8 +680,11 @@ impl Browser {
         t.life = Life::Live;
         t.expected_load = expected;
         t.loading = true;
-        let profile = t.profile;
+        let (profile, zoom) = (t.profile, t.zoom);
         out.push(Effect::CreateView { tab: id, profile, then });
+        if zoom != crate::tabs::DEFAULT_ZOOM {
+            out.push(Effect::SetZoom { tab: id, percent: zoom });
+        }
     }
 
     pub fn go_back(&mut self, id: TabId) -> Vec<Effect> {
@@ -1252,6 +1284,7 @@ impl Browser {
                 .iter()
                 .map(|t| SessionTab {
                     exempt: t.view_exempt.clone(),
+                    zoom: (t.zoom != crate::tabs::DEFAULT_ZOOM).then_some(t.zoom),
                     launcher: t.launcher.clone(),
                     url: t.committed_url.as_ref().map(|u| u.to_string()).unwrap_or_default(),
                     title: t.title.clone(),
@@ -1350,6 +1383,7 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
         }),
         sheet_over: t.opener.filter(|_| t.sheet),
         launcher: t.launcher.clone(),
+        zoom: t.zoom,
     }
 }
 

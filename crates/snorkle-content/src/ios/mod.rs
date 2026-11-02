@@ -603,6 +603,12 @@ impl ContentHost {
                         load(&v.web, url);
                     }
                 }
+                Effect::SetZoom { tab, percent } => {
+                    if let Some(v) = self.views.get(tab) {
+                        // The core only sends levels from 50 to 300 %.
+                        v.web.setPageZoom(f64::from((*percent).clamp(50, 300)) / 100.0);
+                    }
+                }
                 Effect::GoBack(tab) => {
                     if let Some(v) = self.views.get(tab) {
                         v.web.goBack();

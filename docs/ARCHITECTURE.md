@@ -172,6 +172,11 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   Until the detector has run, the page is dimmed to 20% brightness so white pages do not flash
   while loading. Images, video and embeds are never shown inverted and are dimmed to 60% until
   pointed at (with hide media on, its gray boxes stay, and what it reveals is shown un-inverted). With black and white also on, the root filter includes `grayscale`.
+  Video gets its counter-filter on its frame rather than on itself: the detector marks the
+  nearest ancestor with the same box as the video (`data-snorkle-media-box`, in the document,
+  crossing open shadow roots to their host), and media inside a frame get no filter of their own.
+  A filter on a playing `<video>` is not reliably applied by WebKit while the root's inversion
+  still is, which showed videos inverted (2026-11-02; see OPEN_QUESTIONS 64).
   Pages are black and white with media hidden by default: images, video, canvas, embedded
   objects and video-player iframes keep their boxes but are drawn as gray rectangles; pointing
   at one fades it in (0.3 s) in black and white. Media under an overlay (video players, images
@@ -181,7 +186,10 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   a page removes it. The palette button shows colour and the images button shows images and
   video. Both are session-only (`Shared::view_modes`, not persisted), so every launch starts
   that way. Hidden `<img>` and `<video>` sources still download (hover needs them); CSS
-  background images do not.
+  background images do not. Hidden images and videos are drawn opaque, so lazy-loading
+  placeholders kept at `opacity: 0` still show their gray box; an image pointed at before it has
+  loaded is marked `data-snorkle-loading` (a lazy one is switched to eager loading) and stays a
+  pulsing gray box until its load or error event, then fades in.
 - **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
   tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects
   carry a `Pane` (`Full`, `Left` or `Right`), and the host places each container in its half,
@@ -194,10 +202,11 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 ## 5f. URL bar
 
 The address bar is a pill floating over the bottom of the page (pages run the full height of
-the window): share, back, forward and reload on its left (the sidebar's toggle is a tab on the sidebar's own
+the window): back, forward and reload on its left (the sidebar's toggle is a tab on the sidebar's own
 edge); the address (about 400 pt wide; full
-width in narrow windows); then a ⋯ button that opens a popup with the page actions (ad blocking,
-bookmark, site scripts), the per-tab headers-view button and the chat button. Toasts and banners
+width in narrow windows), with the share button inside its right end (hidden while editing);
+then a ⋯ button that opens a popup with the page actions (ad blocking,
+bookmark, site scripts, page zoom), the per-tab headers-view button and the chat button. Toasts and banners
 appear above the pill. With a pointer device the pill and the sidebar sit at 50% opacity until
 hovered.
 
@@ -248,7 +257,13 @@ Bookmarking a tab (⌘D, the ⋯ menu, or dragging it into the bookmarks) moves 
 bookmark: the tab becomes that bookmark's tab (`Browser::bind_launcher`) instead of a second tab
 appearing when the bookmark is opened. Un-bookmarking makes it an ordinary tab again.
 
-The share button (between the sidebar toggle and Back) opens the system share sheet for the
+**Page zoom** (⋯ menu: −, the level, +; the level resets to 100%) is per tab. The core keeps it
+on the tab (`Tab::zoom`, one of `tabs::ZOOM_LEVELS`, 50–300%), saves it with the session
+(`SessionTab::zoom`, snapped to a level when read back; private tabs are never saved) and emits
+`Effect::SetZoom`, which the host applies as `WKWebView.pageZoom`, both when it changes and right
+after a web view is created for the tab (restore, discard and reload).
+
+The share button (inside the address field, at its right end) opens the system share sheet for the
 page's committed URL, as a popover from the button (so Instapaper and other share extensions
 appear). Selecting text on a page shows a small menu above it, cut out of the page: Google This
 (a new tab), Ask AI (opens the chat with the quote as a draft) and Define (the system

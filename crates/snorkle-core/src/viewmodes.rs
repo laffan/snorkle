@@ -107,6 +107,14 @@ const MEDIA_SELECTOR: &str = concat!(
 /// tracker in [`style_js`] also marks the media under the pointer with
 /// [`REVEAL_ATTR`]. CSS background images are dropped (WebKit then does not
 /// fetch them); `<img>` sources are still fetched so pointing can show them.
+///
+/// Loading: lazy-loading scripts keep images (and some videos) at
+/// `opacity: 0` until their real source has loaded, which left no gray box
+/// at all, so hidden images and videos are drawn opaque. An image pointed
+/// at before it has loaded is marked [`LOADING_ATTR`] by the tracker: it
+/// stays a gray box that pulses until it loads, then fades in (the pulse
+/// animates a registered custom property, since the `!important` filter
+/// cannot be animated directly; without `@property` the box is still).
 pub const NO_MEDIA_CSS: &str = concat!(
     "img,input[type=image],svg image,video,canvas,object,embed,",
     "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
@@ -115,13 +123,26 @@ pub const NO_MEDIA_CSS: &str = concat!(
     "iframe[src*=\"/embed/\"],iframe[src*=\"player\"],iframe[src*=\"video\"]",
     "{background-color:#c8c8c8!important;filter:grayscale(1) contrast(0) brightness(1.57)!important;",
     "transition:filter .3s ease-out,background-color .3s ease-out!important}",
+    "img:not([data-snorkle-reveal]):not(:hover),video:not([data-snorkle-reveal]):not(:hover),[data-snorkle-loading]",
+    "{opacity:1!important}",
     "img:hover,input[type=image]:hover,svg image:hover,video:hover,canvas:hover,object:hover,embed:hover,iframe:hover,",
     ":root [data-snorkle-reveal][data-snorkle-reveal]",
     "{background-color:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
+    "@property --snorkle-pulse{syntax:'<number>';inherits:false;initial-value:1.57}",
+    "@keyframes snorkle-pulse{50%{--snorkle-pulse:1.25}}",
+    ":root [data-snorkle-loading][data-snorkle-loading][data-snorkle-loading]",
+    "{background-color:#c8c8c8!important;filter:grayscale(1) contrast(0) brightness(var(--snorkle-pulse,1.57))!important;",
+    "animation:snorkle-pulse 1.1s ease-in-out infinite!important}",
     "*,*::before,*::after{background-image:none!important}"
 );
 /// Attribute the pointer tracker puts on the media under the pointer.
 pub const REVEAL_ATTR: &str = "data-snorkle-reveal";
+/// Attribute the pointer tracker puts on an image under the pointer that
+/// has not finished loading.
+pub const LOADING_ATTR: &str = "data-snorkle-loading";
+/// Attribute dark mode's detector puts on the element that frames a video
+/// (see [`DARK_CSS`]).
+pub const MEDIA_BOX_ATTR: &str = "data-snorkle-media-box";
 
 /// Fixed style for dark mode (main frame, document start).
 /// - Until [`DARK_DETECT_JS`] has looked at the page (root not yet
@@ -129,12 +150,19 @@ pub const REVEAL_ATTR: &str = "data-snorkle-reveal";
 ///   white page does not flash at full brightness while it loads.
 /// - A page found light (root `snorkle-dark`) is inverted with its hues
 ///   kept (`invert` + `hue-rotate(180deg)`); with black and white also on,
-///   the root filter includes `grayscale` (the two styles would otherwise
-///   replace each other's `filter`).
+///   the root filter includes `grayscale`.
 /// - Images, video and embeds are never shown inverted, and are dimmed
 ///   (60 %) until pointed at, fading in over 0.3 s. With hide media on, its
-///   gray boxes are left to it, but what it reveals on hover is shown
-///   un-inverted on an inverted page.
+///   gray boxes are left to it, but what it reveals is shown un-inverted on
+///   an inverted page.
+/// - Video: a filter on the `<video>` element itself is not reliably
+///   applied by WebKit to a playing video (its picture is a separate
+///   compositing layer), while the root's inversion still reaches it, so
+///   videos were shown inverted. The detector therefore marks the element
+///   that frames each video (the nearest ancestor with the same box, in
+///   the document rather than a shadow tree) with [`MEDIA_BOX_ATTR`]; the
+///   counter-filter goes on that element, and media inside it get none.
+///   A video with no such ancestor keeps the filter on itself.
 pub const DARK_CSS: &str = concat!(
     "html.snorkle-dark-checked{transition:filter .2s ease-out}",
     "html:not(.snorkle-dark-checked){filter:brightness(.2)!important}",
@@ -142,20 +170,27 @@ pub const DARK_CSS: &str = concat!(
     "html.snorkle-dark.snorkle-dark-bg{background-color:#fff!important}",
     "html.snorkle-dark:has(#__snorkle_grayscale){filter:invert(1) hue-rotate(180deg) grayscale(1)!important}",
     // Visible media: not inverted, dimmed until hovered.
-    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image])",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
     "{filter:invert(1) hue-rotate(180deg) brightness(.6)!important;transition:filter .3s ease-out!important}",
-    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):hover",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
     "{filter:invert(1) hue-rotate(180deg) brightness(1)!important}",
-    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image])",
+    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
     "{filter:brightness(.6)!important;transition:filter .3s ease-out!important}",
-    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):hover",
+    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
     "{filter:brightness(1)!important}",
     // Hidden media on an inverted page: gray boxes; revealed un-inverted.
     // Same filter functions in both states, so the reveal still fades.
-    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image])",
+    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
     "{filter:invert(0) hue-rotate(0deg) grayscale(1) contrast(0) brightness(1.57)!important}",
-    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):is(:hover,[data-snorkle-reveal])",
-    "{filter:invert(1) hue-rotate(180deg) grayscale(1) contrast(1) brightness(1)!important}"
+    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
+    "{filter:invert(1) hue-rotate(180deg) grayscale(1) contrast(1) brightness(1)!important}",
+    // Revealed before it has loaded: still a (pulsing) gray box.
+    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,input[type=image])[data-snorkle-loading][data-snorkle-loading]",
+    "{filter:invert(0) hue-rotate(0deg) grayscale(1) contrast(0) brightness(var(--snorkle-pulse,1.57))!important}",
+    // Media inside a video's frame: the frame's filter already covers
+    // them (two ids, so this beats every rule above).
+    "html:has(#__snorkle_dark):has(#__snorkle_dark) [data-snorkle-media-box] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
+    "{filter:none!important}"
 );
 
 /// Decides whether the page is light (then marks the root `snorkle-dark`).
@@ -164,17 +199,43 @@ pub const DARK_CSS: &str = concat!(
 /// dark color scheme and the web view prefers dark (dark mode also sets
 /// that, so sites with their own dark theme use it and are left alone).
 /// Runs at document end, on load and once more 1.5 s later. Constant code.
+///
+/// It also marks each video's frame with [`MEDIA_BOX_ATTR`] (see
+/// [`DARK_CSS`]): the nearest ancestor whose box matches the video's to
+/// within 4 px (up to 8 levels, crossing shadow roots to their host),
+/// skipping elements inside shadow trees, which the style cannot reach.
+/// Videos are looked for in the document and in open shadow roots one
+/// level deep; marks are refreshed when the document changes (at most once
+/// every 0.5 s), when a video's size becomes known, and on resize.
 pub const DARK_DETECT_JS: &str = "(function(){\
 function lum(c){var m=/rgba?\\(([\\d.]+)[, ]+([\\d.]+)[, ]+([\\d.]+)(?:[,/ ]+([\\d.]+%?))?/.exec(c||'');if(!m)return null;\
 if(m[4]!==undefined&&parseFloat(m[4])<(m[4].slice(-1)==='%'?10:0.1))return null;return (0.2126*m[1]+0.7152*m[2]+0.0722*m[3])/255;}\
 function check(){var d=document.documentElement;if(!d)return;var root=lum(getComputedStyle(d).backgroundColor),l=root;\
 if(l===null&&document.body)l=lum(getComputedStyle(document.body).backgroundColor);\
 if(l===null){var cs=String(getComputedStyle(d).colorScheme||'');l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
-d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');}\
+d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');boxes();}\
 if(window.__snorkleDark){window.__snorkleDark.check();return;}\
-window.__snorkleDark={check:check};check();window.addEventListener('load',check);setTimeout(check,1500);})();";
+var BOX='data-snorkle-media-box',marked=[],timer=0;\
+function videos(){var out=[].slice.call(document.querySelectorAll('video')),all=document.querySelectorAll('*');\
+for(var i=0;i<all.length&&i<30000;i++){var r=all[i].shadowRoot;if(r)out=out.concat([].slice.call(r.querySelectorAll('video')));}return out;}\
+function frame(v){var r=v.getBoundingClientRect();if(r.width<2||r.height<2)return null;var e=v;\
+for(var i=0;i<8;i++){var p=e.parentElement||(e.parentNode&&e.parentNode.host)||null;\
+if(!p||p===document.body||p===document.documentElement)return null;var q=p.getBoundingClientRect();\
+if(Math.abs(q.left-r.left)>4||Math.abs(q.top-r.top)>4||Math.abs(q.right-r.right)>4||Math.abs(q.bottom-r.bottom)>4)return null;\
+if(p.getRootNode()===document)return p;e=p;}return null;}\
+function boxes(){timer=0;var want=[];videos().forEach(function(v){var b=frame(v);if(b&&want.indexOf(b)<0)want.push(b);});\
+marked.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(BOX);});\
+want.forEach(function(e){if(!e.hasAttribute(BOX))e.setAttribute(BOX,'');});marked=want;}\
+function later(){if(!timer)timer=setTimeout(boxes,500);}\
+function onMeta(e){if(e.target&&e.target.tagName==='VIDEO')later();}\
+var obs=new MutationObserver(later);obs.observe(document,{childList:true,subtree:true});\
+document.addEventListener('loadedmetadata',onMeta,true);window.addEventListener('resize',later);\
+window.__snorkleDark={check:check,stop:function(){obs.disconnect();clearTimeout(timer);\
+document.removeEventListener('loadedmetadata',onMeta,true);window.removeEventListener('resize',later);\
+marked.forEach(function(e){e.removeAttribute(BOX);});marked=[];}};\
+check();window.addEventListener('load',check);setTimeout(check,1500);})();";
 
-const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}delete window.__snorkleDark;})();";
+const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}if(window.__snorkleDark&&window.__snorkleDark.stop)window.__snorkleDark.stop();delete window.__snorkleDark;})();";
 
 /// Name of the headings message handler (client world only).
 pub const HEADINGS_HANDLER_NAME: &str = "snorkleHeadings";
@@ -411,20 +472,24 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
     let key = json_str(&format!("{id}_state"));
     let id = json_str(id);
     let attr = json_str(REVEAL_ATTR);
+    let ld = json_str(LOADING_ATTR);
     if !on {
         return format!(
             "(function(){{var s=window[{key}];if(!s)return;s.obs.disconnect();s.st.remove();\
              if(s.onPlay)document.removeEventListener('play',s.onPlay,true);\
              if(s.onMove){{document.removeEventListener('pointermove',s.onMove,true);\
              document.removeEventListener('scroll',s.onScroll,true);document.removeEventListener('mouseout',s.onOut,true);\
-             if(s.raf)cancelAnimationFrame(s.raf);s.rev.forEach(function(e){{e.removeAttribute({attr});}});}}\
+             document.removeEventListener('load',s.onLoad,true);document.removeEventListener('error',s.onLoad,true);\
+             if(s.raf)cancelAnimationFrame(s.raf);s.rev.forEach(function(e){{e.removeAttribute({attr});e.removeAttribute({ld});}});}}\
              delete window[{key}];}})();"
         );
     }
     // Pointer tracker: marks every media element under the pointer (also
     // under overlays, which `:hover` misses), at most once per frame. Video
     // boxes are also checked by geometry, since players often put a layer
-    // with `pointer-events:none` or their controls over the video.
+    // with `pointer-events:none` or their controls over the video. An image
+    // under the pointer that has not loaded yet is marked loading (a lazy
+    // one is asked to load now) until its load or error event.
     let pause = if pause_media {
         format!(
             "var sel={sel};s.rev=[];s.raf=0;s.x=null;\
@@ -433,8 +498,12 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              for(var i=0;i<els.length;i++){{var e=els[i];if(e.matches&&e.matches(sel))on.push(e);}}\
              document.querySelectorAll('video').forEach(function(v){{if(on.indexOf(v)>=0)return;var r=v.getBoundingClientRect();\
              if(s.x>=r.left&&s.x<=r.right&&s.y>=r.top&&s.y<=r.bottom)on.push(v);}});}}\
-             s.rev.forEach(function(e){{if(on.indexOf(e)<0)e.removeAttribute({attr});}});\
-             on.forEach(function(e){{if(!e.hasAttribute({attr}))e.setAttribute({attr},'');}});s.rev=on;}};\
+             s.rev.forEach(function(e){{if(on.indexOf(e)<0){{e.removeAttribute({attr});e.removeAttribute({ld});}}}});\
+             on.forEach(function(e){{if(!e.hasAttribute({attr}))e.setAttribute({attr},'');s.load(e);}});s.rev=on;}};\
+             s.load=function(e){{var p=e.tagName==='IMG'&&!e.complete;if(p&&e.loading==='lazy')e.loading='eager';\
+             if(p!==e.hasAttribute({ld})){{if(p)e.setAttribute({ld},'');else e.removeAttribute({ld});}}}};\
+             s.onLoad=function(e){{var t=e.target;if(t&&t.hasAttribute&&t.hasAttribute({ld}))s.load(t);}};\
+             document.addEventListener('load',s.onLoad,true);document.addEventListener('error',s.onLoad,true);\
              s.queue=function(){{if(!s.raf)s.raf=requestAnimationFrame(s.mark);}};\
              s.onMove=function(e){{if(e.pointerType==='touch')return;s.x=e.clientX;s.y=e.clientY;s.queue();}};\
              s.onScroll=function(){{if(s.x!==null)s.queue();}};\
@@ -619,6 +688,46 @@ mod tests {
         let off = style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true);
         assert!(off.contains("removeEventListener('pointermove'") && off.contains("removeAttribute("));
         assert!(!style_js("__snorkle_grayscale", GRAYSCALE_CSS, true, false).contains("pointermove"));
+    }
+
+    #[test]
+    fn hidden_media_accounts_for_loading() {
+        // Lazy-loading placeholders at opacity 0 still show a gray box.
+        assert!(
+            NO_MEDIA_CSS.contains("img:not([data-snorkle-reveal]):not(:hover)")
+                && NO_MEDIA_CSS.contains("{opacity:1!important}")
+        );
+        // A revealed image that has not loaded stays a pulsing box.
+        assert!(NO_MEDIA_CSS.contains(&format!("[{LOADING_ATTR}][{LOADING_ATTR}][{LOADING_ATTR}]")));
+        assert!(
+            NO_MEDIA_CSS.contains("@property --snorkle-pulse")
+                && NO_MEDIA_CSS.contains("brightness(var(--snorkle-pulse,1.57))")
+        );
+        let on = style_js("__snorkle_no_images", NO_MEDIA_CSS, true, true);
+        assert!(on.contains("!e.complete") && on.contains("e.loading='eager'"));
+        assert!(
+            on.contains("addEventListener('load',s.onLoad,true)")
+                && on.contains("addEventListener('error',s.onLoad,true)")
+        );
+        let off = style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true);
+        assert!(
+            off.contains("removeEventListener('load',s.onLoad,true)")
+                && off.contains("removeAttribute(\"data-snorkle-loading\")")
+        );
+    }
+
+    #[test]
+    fn dark_mode_counter_inverts_video_frames() {
+        assert!(DARK_DETECT_JS.contains(&format!("BOX='{MEDIA_BOX_ATTR}'")));
+        assert!(DARK_DETECT_JS.contains("shadowRoot") && DARK_DETECT_JS.contains("getRootNode()===document"));
+        assert!(DARK_CSS.contains(&format!("input[type=image],[{MEDIA_BOX_ATTR}])")), "frames get the media filters");
+        // Media inside a frame get no filter of their own, over every
+        // other dark rule (two ids in the selector).
+        let none = format!("html:has(#__snorkle_dark):has(#__snorkle_dark) [{MEDIA_BOX_ATTR}] :is(");
+        let at = DARK_CSS.find(&none).expect("inner media rule");
+        assert!(DARK_CSS[at..].starts_with(&none) && DARK_CSS.ends_with("{filter:none!important}"));
+        assert!(DARK_STOP_JS.contains("__snorkleDark.stop()"));
+        assert!(DARK_DETECT_JS.contains("removeAttribute(BOX)"));
     }
 
     #[test]

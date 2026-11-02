@@ -288,6 +288,66 @@ fn view_exemptions_are_saved_with_the_session() {
 }
 
 #[test]
+fn page_zoom_is_per_tab_and_saved_with_the_session() {
+    use snorkle_core::tabs::ZoomStep;
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(t, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, t, "https://a.example/");
+    let (other, _) = b.new_tab(Profile::Default, 1);
+    b.navigate_input(other, "https://b.example/", 1).unwrap();
+    webkit_load(&mut b, other, "https://b.example/");
+
+    let out = b.zoom(t, ZoomStep::In);
+    assert!(out.contains(&Effect::SetZoom { tab: t, percent: 115 }));
+    assert!(out.iter().any(|e| matches!(e, Effect::PersistSession(_))));
+    b.zoom(t, ZoomStep::In);
+    let view = b.view();
+    assert_eq!(view.tabs.iter().find(|v| v.id == t).unwrap().zoom, 125);
+    assert_eq!(view.tabs.iter().find(|v| v.id == other).unwrap().zoom, 100, "other tabs keep theirs");
+
+    let session = b.session();
+    assert_eq!(session.tabs[0].zoom, Some(125));
+    assert_eq!(session.tabs[1].zoom, None, "100 % is not written");
+
+    // Restored, the tab's new web view gets the zoom right after creation.
+    let mut b2 = browser(4);
+    let out = b2.restore_session(&Session { active: Some(0), ..session.clone() }, 0);
+    let create = out.iter().position(|e| matches!(e, Effect::CreateView { .. })).expect("active tab is created");
+    assert!(matches!(out[create + 1], Effect::SetZoom { percent: 125, .. }));
+    let mut b3 = browser(4);
+    let out = b3.restore_session(&Session { active: Some(1), ..session }, 0);
+    assert!(!out.iter().any(|e| matches!(e, Effect::SetZoom { .. })), "nothing to set at 100 %");
+
+    assert!(b.zoom(t, ZoomStep::Reset).contains(&Effect::SetZoom { tab: t, percent: 100 }));
+    assert!(b.zoom(t, ZoomStep::Reset).is_empty(), "no change, no effects");
+
+    let (p, _) = b.new_tab(Profile::Private, 2);
+    b.navigate_input(p, "https://c.example/", 2).unwrap();
+    webkit_load(&mut b, p, "https://c.example/");
+    let out = b.zoom(p, ZoomStep::Out);
+    assert!(out.contains(&Effect::SetZoom { tab: p, percent: 85 }));
+    assert!(!out.iter().any(|e| matches!(e, Effect::PersistSession(_))), "private tabs are never saved");
+}
+
+#[test]
+fn saved_zoom_is_snapped_to_a_level() {
+    let session = Session {
+        tabs: vec![SessionTab {
+            url: "https://a.example/".into(),
+            title: String::new(),
+            launcher: None,
+            exempt: vec![],
+            zoom: Some(4000),
+        }],
+        active: Some(0),
+    };
+    let mut b = browser(4);
+    b.restore_session(&session, 0);
+    assert_eq!(b.view().tabs[0].zoom, 300);
+}
+
+#[test]
 fn bookmarking_moves_the_tab() {
     let mut b = browser(4);
     let (t, _) = b.new_tab(Profile::Default, 0);
@@ -415,7 +475,13 @@ fn session_restore_is_lazy() {
     let mut b = browser(4);
     let s = Session {
         tabs: (0..10)
-            .map(|i| SessionTab { url: format!("https://s{i}.example/"), title: String::new(), launcher: None, exempt: vec![] })
+            .map(|i| SessionTab {
+                url: format!("https://s{i}.example/"),
+                title: String::new(),
+                launcher: None,
+                exempt: vec![],
+                zoom: None,
+            })
             .collect(),
         active: Some(3),
     };

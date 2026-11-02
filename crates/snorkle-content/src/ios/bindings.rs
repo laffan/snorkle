@@ -123,6 +123,12 @@ impl WKWebView {
         #[unsafe(method_family = none)]
         pub unsafe fn setCustomUserAgent(&self, user_agent: Option<&NSString>);
 
+        /// iOS 14+. `@property (nonatomic) CGFloat pageZoom;` (1.0 is
+        /// 100 %); CGFloat is f64 on 64-bit iOS.
+        #[unsafe(method(setPageZoom:))]
+        #[unsafe(method_family = none)]
+        pub unsafe fn setPageZoom(&self, zoom: f64);
+
         #[unsafe(method(scrollView))]
         #[unsafe(method_family = none)]
         pub unsafe fn scrollView(&self) -> Retained<UIScrollView>;

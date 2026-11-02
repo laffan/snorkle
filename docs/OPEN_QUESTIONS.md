@@ -366,4 +366,33 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     unverified. ⌘S was removed (⌘\ remains).
 63. **[verify] View-mode exemptions are saved with the session** (`SessionTab.exempt`), restored
     before the restored views are created; not for private tabs.
-
+64. **[verify] Dark mode: videos shown inverted** (reported on the nytimes.com homepage,
+    2026-11-02). Not reproduced (no device; nytimes.com is unreachable from this environment).
+    Working assumption: WebKit does not reliably apply a filter on the `<video>` element itself to
+    a playing video (its picture is a separate compositing layer, hosted from the GPU process),
+    while the root's `invert` still reaches it. The counter-filter now goes on the video's frame
+    (the nearest same-size ancestor, `data-snorkle-media-box`) and media inside it get none, which
+    is right whichever of the two filters WebKit drops. Other possible causes this also covers:
+    a video inside an open shadow root (the style cannot match it, but its host can be the
+    frame). Not covered: a video with no same-size ancestor (letterboxed in a larger box; it
+    keeps the filter on itself), videos in closed or nested shadow roots, CSS background images
+    (inverted when hide media is off), WebGL canvases. Check on the device: NYT homepage loops
+    playing, paused and hovered; a YouTube embed; a page with a letterboxed video. In Safari's
+    Web Inspector, the frame element should carry `data-snorkle-media-box`. Cost: the detector
+    rescans videos (and every element for open shadow roots) at most every 0.5 s while the page
+    changes.
+65. **[verify] Hide media and loading** (2026-11-02). Hidden `img` and `video` are forced to
+    `opacity: 1`, so lazy-loading placeholders at opacity 0 show a gray box. Risk: an image kept
+    at opacity 0 on purpose (crossfade carousels, hover-swap product images) now shows as a gray
+    box over or under its neighbour while hidden; revealed media keep the page's opacity. An
+    image pointed at before it has loaded pulses (registered custom property `--snorkle-pulse`
+    animated under the `!important` filter; checked in Chromium, not in WebKit) and a
+    `loading="lazy"` one is switched to `eager`. Lazy loaders that keep the real URL in
+    `data-src` until the image scrolls into view are not triggered by pointing; containers kept
+    at opacity 0 still hide their images.
+66. **[verify] Page zoom** (2026-11-02). Applied as `WKWebView.pageZoom` (iOS 14+, hand-written
+    `setPageZoom:` taking a CGFloat, see `bindings.rs`), when changed and right after a tab's web
+    view is created. Assumed: the value survives navigations and process swaps within the same
+    web view (it is a view property, not per document); if it resets on cross-site navigation,
+    re-apply it on commit. Levels are Safari's (50–300%). No keyboard shortcuts (⌘+/⌘−/⌘0)
+    yet. Popups open at 100%.
