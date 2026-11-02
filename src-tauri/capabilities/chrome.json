@@ -35,6 +35,7 @@
     "allow-unsplit",
     "allow-get-view-mode",
     "allow-set-view-mode",
+    "allow-set-launch-mode",
     "allow-set-tab-view-exempt",
     "allow-set-tab-headers",
     "allow-get-headings",

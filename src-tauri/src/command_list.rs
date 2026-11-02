@@ -28,6 +28,7 @@ pub const COMMANDS: &[&str] = &[
     "unsplit",
     "get_view_mode",
     "set_view_mode",
+    "set_launch_mode",
     "set_tab_view_exempt",
     "set_tab_headers",
     "get_headings",

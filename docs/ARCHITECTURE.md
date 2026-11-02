@@ -165,7 +165,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   the panel shows them as foldable sections. Detect Headers sends each candidate's enclosing
   section element and whether it is uppercase, and asks the model for section labels first. The style modes use the same
   mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
-  **Dark** (off by default; moon button) makes content web views prefer a dark appearance
+  **Dark** (off by default; moon button; remembered across launches) makes content web views prefer a dark appearance
   (`overrideUserInterfaceStyle`), so sites with their own dark theme use it; a constant detector
   then checks the page's background (root, body, else the canvas) and, if it is light, marks the
   root so a constant style inverts the page with hues kept (`invert(1) hue-rotate(180deg)`).
@@ -176,7 +176,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   nearest ancestor with the same box as the video (`data-snorkle-media-box`, in the document,
   crossing open shadow roots to their host), and media inside a frame get no filter of their own.
   A filter on a playing `<video>` is not reliably applied by WebKit while the root's inversion
-  still is, which showed videos inverted (2026-11-02; see OPEN_QUESTIONS 64).
+  still is, which showed videos inverted (2026-11-02; see OPEN_QUESTIONS 65).
   Pages are black and white with media hidden by default: images, video, canvas, embedded
   objects and video-player iframes keep their boxes but are drawn as gray rectangles; pointing
   at one fades it in (0.3 s) in black and white. Media under an overlay (video players, images
@@ -184,8 +184,11 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   pointer (`elementsFromPoint`, plus video boxes by geometry). CSS background images are
   dropped, and videos are paused when they start unless pointed at. The hide-media style runs in every frame and re-attaches itself if
   a page removes it. The palette button shows colour and the images button shows images and
-  video. Both are session-only (`Shared::view_modes`, not persisted), so every launch starts
-  that way. Hidden `<img>` and `<video>` sources still download (hover needs them); CSS
+  video. Each launch starts from the stored launch modes (`viewmodes::LaunchModes`,
+  `view-modes.json`), set in Settings → General (defaults: black and white and hide media on,
+  dark off). The palette and images buttons change the current session only; the moon button
+  also stores the new dark setting, so dark mode is remembered. "Disable for this tab" choices
+  are saved with the session (`SessionTab.exempt`). Hidden `<img>` and `<video>` sources still download (hover needs them); CSS
   background images do not. Hidden images and videos are drawn opaque, so lazy-loading
   placeholders kept at `opacity: 0` still show their gray box; an image pointed at before it has
   loaded is marked `data-snorkle-loading` (a lazy one is switched to eager loading) and stays a

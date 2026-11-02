@@ -167,8 +167,8 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     image flashes before the style applies; iframes (main-frame-only scripts) still show their
     images; `<img>` files are still downloaded (only CSS background images are skipped).
     **[decide]** Block image loads too, with a WebKit content rule (`resource-type: image`,
-    saves data, needs a reload to toggle), and whether either mode should be remembered across
-    launches.
+    saves data, needs a reload to toggle). (2026-11-02: what each launch starts with is now a
+    setting, Settings → General; see 64.)
 37. **[verify] Split view.** Tap-to-focus uses a gesture recognizer that fires simultaneously with
     WebKit's own and does not cancel touches. Confirm links and scrolling are unaffected. The
     50/50 split has no draggable divider yet. The memory budget counts both panes as protected;
@@ -370,7 +370,31 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     unverified. ⌘S was removed (⌘\ remains).
 63. **[verify] View-mode exemptions are saved with the session** (`SessionTab.exempt`), restored
     before the restored views are created; not for private tabs.
-64. **[verify] Dark mode: videos shown inverted** (reported on the nytimes.com homepage,
+64. **[verify] Round 7 (2026-11-02).**
+    (a) **Launch view modes.** Settings → General sets what black and white, hide media and dark
+    start as at every launch (`view-modes.json`); changing one there also applies it now. The
+    moon button stores dark too (owner request: dark persists); the palette and images buttons
+    stay session-only. The Keyboard and ad-blocking explainer rows were removed; the EasyList /
+    EasyPrivacy credit is kept as a line under General, since CC BY-SA 3.0 requires attribution.
+    (b) **Pins ignoring single clicks** (reported: frequent, worse with nytimes.com and Google
+    Drive, a double click works, later a single click works again). Cause found in the chrome:
+    with a mouse or trackpad, a press started a drag after 120 ms even without movement, and
+    every ended drag swallowed the click. A click held a little longer did nothing; reproduced in
+    a desktop browser (a 400 ms press on a pin did not open it). The busy-page link is assumed,
+    not observed: while the app's main thread is busy with a heavy page, the pointerup reaches
+    the chrome late, so short presses also crossed 120 ms. Now mouse drags start only after
+    the pointer moves 8 px, and a drag that never moved lets its click through (touch keeps the
+    280 ms long-press). Tabs and bookmarks used the same code and get the same fix. Check on
+    device with the trackpad while a heavy page loads.
+    (c) **"Disable for this tab" for hide media lost after relaunch** (reported). Not reproduced:
+    exemptions are saved with the session since round 6 (63), and the core test round-trips
+    them. If the report predates that build, it is fixed there. Two weaknesses were fixed: the
+    session write waited for 400 ms without any storage job, so a steady stream of navigations
+    and history entries could postpone it indefinitely (it is now written at most 400 ms after
+    the first change); and a pending write is flushed when the app enters the background. The
+    in-app console logs at launch `session: N tabs restored; view modes …; off per tab: …`,
+    which shows whether the exemption came back.
+65. **[verify] Dark mode: videos shown inverted** (reported on the nytimes.com homepage,
     2026-11-02). Not reproduced (no device; nytimes.com is unreachable from this environment).
     Working assumption: WebKit does not reliably apply a filter on the `<video>` element itself to
     a playing video (its picture is a separate compositing layer, hosted from the GPU process),
@@ -385,7 +409,7 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     Web Inspector, the frame element should carry `data-snorkle-media-box`. Cost: the detector
     rescans videos (and every element for open shadow roots) at most every 0.5 s while the page
     changes.
-65. **[verify] Hide media and loading** (2026-11-02). Hidden `img` and `video` are forced to
+66. **[verify] Hide media and loading** (2026-11-02). Hidden `img` and `video` are forced to
     `opacity: 1`, so lazy-loading placeholders at opacity 0 show a gray box. Risk: an image kept
     at opacity 0 on purpose (crossfade carousels, hover-swap product images) now shows as a gray
     box over or under its neighbour while hidden; revealed media keep the page's opacity. An
@@ -394,7 +418,7 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     `loading="lazy"` one is switched to `eager`. Lazy loaders that keep the real URL in
     `data-src` until the image scrolls into view are not triggered by pointing; containers kept
     at opacity 0 still hide their images.
-66. **[verify] Page zoom** (2026-11-02). Applied as `WKWebView.pageZoom` (iOS 14+, hand-written
+67. **[verify] Page zoom** (2026-11-02). Applied as `WKWebView.pageZoom` (iOS 14+, hand-written
     `setPageZoom:` taking a CGFloat, see `bindings.rs`), when changed and right after a tab's web
     view is created. Assumed: the value survives navigations and process swaps within the same
     web view (it is a view property, not per document); if it resets on cross-site navigation,
