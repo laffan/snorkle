@@ -168,9 +168,10 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   **Dark** (off by default; moon button) makes content web views prefer a dark appearance
   (`overrideUserInterfaceStyle`), so sites with their own dark theme use it; a constant detector
   then checks the page's background (root, body, else the canvas) and, if it is light, marks the
-  root so a constant style inverts the page with hues kept (`invert(1) hue-rotate(180deg)`) and
-  inverts images, video and embeds back (not with hide media on, whose gray boxes are simply
-  darkened). With black and white also on, the root filter includes `grayscale`.
+  root so a constant style inverts the page with hues kept (`invert(1) hue-rotate(180deg)`).
+  Until the detector has run, the page is dimmed to 20% brightness so white pages do not flash
+  while loading. Images, video and embeds are never shown inverted and are dimmed to 60% until
+  pointed at (with hide media on, its gray boxes stay, and what it reveals is shown un-inverted). With black and white also on, the root filter includes `grayscale`.
   Pages are black and white with media hidden by default: images, video, canvas, embedded
   objects and video-player iframes keep their boxes but are drawn as gray rectangles; pointing
   at one fades it in (0.3 s) in black and white. Media under an overlay (video players, images
@@ -221,9 +222,17 @@ Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are commands of the app's main
 work whatever has focus, including nothing (sidebar hidden, no page): ⌘T new tab, ⌘W close tab (a
 pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘S or
 ⌘\ sidebar, ⌘⇧\ right panels, ⌘D bookmark (on a bookmark's tab: un-bookmark), ⌘I images,
-⌘1–5 sidebar items. The sidebar's toggle is a tab on its right edge (a hole while it is over the page) that slides
-with it; opening or closing it animates the page frames natively over the same 0.25 s
-(`set_chrome_layout` `animate`, `UIView.animateWithDuration`). Settings → Keyboard rebinds them: the chrome keeps the user's bindings and
+⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or right-click / long-press its toggle):
+**attached**, a full-height column beside the page that the toggle shows and hides, and
+**flyout**, hidden until the pointer rests on the toggle (160 ms) and hidden again 280 ms after it
+leaves the sidebar. ⌘\ (and ⌘S, and clicking the toggle) shows or hides an attached sidebar, and
+turns a flyout, hidden or showing, into an attached, shown sidebar. The toggle tab is a child of
+the sidebar on its right edge, so it always moves with it (a line in attached mode, an arrow in
+flyout mode). All state changes go through `setSidebarState`. The chrome always reports two
+sidebar holes, the panel (off-screen while hidden; left of the page while attached) and the tab,
+so the set of holes keeps its shape and the host animates the mask path with the CSS slide
+(`apply_mask` keeps its `CAShapeLayer`; `CATransaction`, 0.25 s ease-in-out) together with the
+page frames (`set_chrome_layout` `animate`, `UIView.animateWithDuration`). Settings → Keyboard rebinds them: the chrome keeps the user's bindings and
 sends them at launch (`set_shortcuts`, validated, clashes refused); the menu is rebuilt, and
 while a key is being recorded the shortcuts are suspended so the keys reach the chrome. The
 chrome's own keydown handler uses the same bindings when it has focus; a shortcut arriving twice

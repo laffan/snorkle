@@ -49,7 +49,9 @@ use objc2_foundation::{
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSSet, NSString,
     NSURLRequest, NSURL, NSUUID,
 };
-use objc2_quartz_core::{kCAFillRuleEvenOdd, CAShapeLayer};
+use objc2_quartz_core::{
+    kCAFillRuleEvenOdd, kCAMediaTimingFunctionEaseInEaseOut, CAMediaTimingFunction, CAShapeLayer, CATransaction,
+};
 use objc2_ui_kit::{
     UIActivityViewController, UIApplication, UIApplicationDidEnterBackgroundNotification,
     UIApplicationDidReceiveMemoryWarningNotification, UIBezierPath, UIColor, UIControlEvents, UIRectCorner,
@@ -279,7 +281,12 @@ impl ContentHost {
         self.right.set(right);
         self.bottom.set(bottom);
         let b = self.root.bounds();
-        *self.holes.borrow_mut() = crate::sanitize_holes(&holes, b.size.width, b.size.height);
+        let holes = crate::sanitize_holes(&holes, b.size.width, b.size.height);
+        // The cut-outs glide (with the frames) only between sets of the
+        // same shape; e.g. the sidebar's pop-over and toggle tab, which the
+        // chrome always reports, on- or off-screen.
+        let glide = animate && holes.len() == self.holes.borrow().len();
+        *self.holes.borrow_mut() = holes;
         let grew = self.content_frame().size.width > before + 0.5;
         let moves: Vec<(Retained<UIView>, CGRect)> =
             self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()))).collect();
@@ -287,7 +294,7 @@ impl ContentHost {
             let holes = self.holes.borrow().clone();
             let block = RcBlock::new(move || {
                 for (view, frame) in &moves {
-                    place_view(view, *frame, &holes);
+                    place_view(view, *frame, &holes, glide);
                 }
             });
             UIView::animateWithDuration_animations(0.25, &block, self.mtm);
@@ -310,7 +317,7 @@ impl ContentHost {
     /// Sets a container's frame (and its web view's, which normally follows
     /// by autoresizing) and cuts the holes out of it.
     fn place(&self, view: &UIView, frame: CGRect) {
-        place_view(view, frame, &self.holes.borrow());
+        place_view(view, frame, &self.holes.borrow(), false);
     }
 
     /// Replaces everything injected (user scripts, view modes with per-tab
@@ -692,7 +699,7 @@ impl ContentHost {
         web.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), frame.size));
 
         container.addSubview(&web);
-        apply_mask(&container, &self.holes.borrow());
+        apply_mask(&container, &self.holes.borrow(), false);
         set_dark(&web, self.injections.view_for(tab).dark);
         self.root.addSubview(&container);
         injection::install(mtm, &controller, self.scripts_for(tab));
@@ -823,55 +830,62 @@ impl Drop for ContentHost {
 }
 
 /// Sets a container's frame and its web view's, and cuts `holes` out.
-fn place_view(view: &UIView, frame: CGRect, holes: &[Hole]) {
+fn place_view(view: &UIView, frame: CGRect, holes: &[Hole], animate: bool) {
     view.setFrame(frame);
     for sub in view.subviews().iter() {
         sub.setFrame(view.bounds());
     }
-    apply_mask(view, holes);
+    apply_mask(view, holes, animate);
 }
 
-/// Masks `view` (a direct subview of the root view) so the holes that
-/// intersect it are not drawn; no mask when none does. Holes never overlap
-/// (`sanitize_holes` merges them), as the even-odd fill requires.
-fn apply_mask(view: &UIView, holes: &[Hole]) {
+/// Masks `view` (a direct subview of the root view) so the holes are not
+/// drawn; no mask when there are none. Holes never overlap
+/// (`sanitize_holes` merges them), as the even-odd fill requires. The mask
+/// layer is kept, so with `animate` its path moves to the new holes over
+/// 0.25 s, ease-in-out like the chrome's CSS slide (Core Animation
+/// interpolates paths of the same shape; callers animate only when the
+/// number of holes is unchanged). Otherwise the change is immediate.
+fn apply_mask(view: &UIView, holes: &[Hole], animate: bool) {
     let f = view.frame();
     let b = view.bounds();
-    let local: Vec<(CGRect, f64, u8)> = holes
-        .iter()
-        .map(|h| (CGRect::new(CGPoint::new(h.x - f.origin.x, h.y - f.origin.y), CGSize::new(h.w, h.h)), h.r, h.corners))
-        .filter(|(r, _, _)| {
-            r.origin.x < b.size.width
-                && r.origin.y < b.size.height
-                && r.origin.x + r.size.width > 0.0
-                && r.origin.y + r.size.height > 0.0
-        })
-        .collect();
     let layer = view.layer();
-    if local.is_empty() {
+    if holes.is_empty() {
         unsafe { layer.setMask(None) };
         return;
     }
     let path = UIBezierPath::bezierPathWithRect(b);
-    for (rect, radius, corners) in &local {
-        let hole = if *corners == crate::ALL_CORNERS {
-            UIBezierPath::bezierPathWithRoundedRect_cornerRadius(*rect, *radius)
+    for h in holes {
+        let rect = CGRect::new(CGPoint::new(h.x - f.origin.x, h.y - f.origin.y), CGSize::new(h.w, h.h));
+        let hole = if h.corners == crate::ALL_CORNERS {
+            UIBezierPath::bezierPathWithRoundedRect_cornerRadius(rect, h.r)
         } else {
             UIBezierPath::bezierPathWithRoundedRect_byRoundingCorners_cornerRadii(
-                *rect,
-                UIRectCorner(*corners as usize),
-                CGSize::new(*radius, *radius),
+                rect,
+                UIRectCorner(h.corners as usize),
+                CGSize::new(h.r, h.r),
             )
         };
         path.appendPath(&hole);
     }
-    let mask = CAShapeLayer::layer();
+    let existing = layer.mask().and_then(|m| m.downcast::<CAShapeLayer>().ok());
+    let animate = animate && existing.is_some();
+    let mask = existing.unwrap_or_else(CAShapeLayer::layer);
+    CATransaction::begin();
+    if animate {
+        CATransaction::setAnimationDuration(0.25);
+        CATransaction::setAnimationTimingFunction(Some(&CAMediaTimingFunction::functionWithName(unsafe {
+            kCAMediaTimingFunctionEaseInEaseOut
+        })));
+    } else {
+        CATransaction::setDisableActions(true);
+    }
     mask.setFrame(b);
     mask.setPath(Some(&path.CGPath()));
     unsafe {
         mask.setFillRule(kCAFillRuleEvenOdd);
         layer.setMask(Some(&mask));
     }
+    CATransaction::commit();
 }
 
 /// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`

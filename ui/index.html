@@ -52,10 +52,13 @@
       <button id="vm-tab" role="menuitem"></button>
     </div>
     <div id="sidebar-resize" class="resize-edge" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
+    <!-- The sidebar's toggle, attached to its right edge (it moves with
+         the sidebar; while hidden it is all that shows, on the window's
+         left edge, cut out of the page like the pill). A line: attached
+         mode. An arrow: flyout mode (pointing at it shows the sidebar).
+         Right-click or long-press switches mode. -->
+    <button id="edge-tab" aria-controls="sidebar" title="Tabs"></button>
   </aside>
-  <!-- With the sidebar closed: a tab on the left edge (cut out of the
-       page, like the pill). Pointing at it shows the sidebar as a pop-over. -->
-  <button id="edge-tab" aria-label="Show or hide tabs" aria-controls="sidebar" title="Tabs"></button>
   <!-- Left edge of the right panel(s): drag to resize. -->
   <div id="right-resize" class="resize-edge" role="separator" aria-orientation="vertical" aria-label="Resize panel" hidden></div>
 
@@ -117,6 +120,7 @@
     </div>
   </header>
   <div id="safe-top" aria-hidden="true"></div>
+  <div id="safe-bottom" aria-hidden="true"></div>
 
   <!-- Shown only where no content view covers it (start page, notices,
        history). -->
@@ -174,6 +178,16 @@
             <div class="option-title">View modes</div>
             <div class="muted small">Black and white, and hiding images and video, are on at every launch; dark pages are off. Tap a mode button in the sidebar to change it for all tabs; long-press it to turn it off for the current tab only. A dot under a button means the mode is on (a ring: off for this tab). The headers view lists the page's headings beside it; the chat button beside it opens an AI chat about the page.</div>
           </div></div>
+          <div class="option">
+            <div>
+              <div class="option-title">Sidebar</div>
+              <div class="muted small">Attached: a column beside the page. Flyout: appears when you point at its tab.</div>
+            </div>
+            <div class="seg" role="group" aria-label="Sidebar mode">
+              <button data-sidebar-mode="attached" aria-pressed="true">Attached</button>
+              <button data-sidebar-mode="flyout" aria-pressed="false">Flyout</button>
+            </div>
+          </div>
           <div class="option"><div>
             <div class="option-title">Keyboard</div>
             <div class="muted small">Shortcuts are listed, and can be changed, under Keyboard. ⌘W asks first on a bookmark's tab (closing it removes the bookmark) and never closes a pinned site's tab.</div>

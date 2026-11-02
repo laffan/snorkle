@@ -123,19 +123,39 @@ pub const NO_MEDIA_CSS: &str = concat!(
 /// Attribute the pointer tracker puts on the media under the pointer.
 pub const REVEAL_ATTR: &str = "data-snorkle-reveal";
 
-/// Fixed style for dark mode. It takes effect only once [`DARK_DETECT_JS`]
-/// has found the page light and marked the root `snorkle-dark`: the page
-/// is inverted with its hues kept (`invert` + `hue-rotate(180deg)`), and
-/// images, video and embeds are inverted back so they look as they are
-/// (unless hide media is on: its gray boxes are simply darkened). With
-/// black and white also on, the root filter includes `grayscale` (the two
-/// styles would otherwise replace each other's `filter`).
+/// Fixed style for dark mode (main frame, document start).
+/// - Until [`DARK_DETECT_JS`] has looked at the page (root not yet
+///   `snorkle-dark-checked`), the page is dimmed to 20 % brightness, so a
+///   white page does not flash at full brightness while it loads.
+/// - A page found light (root `snorkle-dark`) is inverted with its hues
+///   kept (`invert` + `hue-rotate(180deg)`); with black and white also on,
+///   the root filter includes `grayscale` (the two styles would otherwise
+///   replace each other's `filter`).
+/// - Images, video and embeds are never shown inverted, and are dimmed
+///   (60 %) until pointed at, fading in over 0.3 s. With hide media on, its
+///   gray boxes are left to it, but what it reveals on hover is shown
+///   un-inverted on an inverted page.
 pub const DARK_CSS: &str = concat!(
+    "html.snorkle-dark-checked{transition:filter .2s ease-out}",
+    "html:not(.snorkle-dark-checked){filter:brightness(.2)!important}",
     "html.snorkle-dark{filter:invert(1) hue-rotate(180deg)!important;min-height:100%!important}",
     "html.snorkle-dark.snorkle-dark-bg{background-color:#fff!important}",
     "html.snorkle-dark:has(#__snorkle_grayscale){filter:invert(1) hue-rotate(180deg) grayscale(1)!important}",
-    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,picture,video,canvas,embed,object,iframe,svg image)",
-    "{filter:invert(1) hue-rotate(180deg)!important}"
+    // Visible media: not inverted, dimmed until hovered.
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image])",
+    "{filter:invert(1) hue-rotate(180deg) brightness(.6)!important;transition:filter .3s ease-out!important}",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):hover",
+    "{filter:invert(1) hue-rotate(180deg) brightness(1)!important}",
+    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image])",
+    "{filter:brightness(.6)!important;transition:filter .3s ease-out!important}",
+    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):hover",
+    "{filter:brightness(1)!important}",
+    // Hidden media on an inverted page: gray boxes; revealed un-inverted.
+    // Same filter functions in both states, so the reveal still fades.
+    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image])",
+    "{filter:invert(0) hue-rotate(0deg) grayscale(1) contrast(0) brightness(1.57)!important}",
+    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):is(:hover,[data-snorkle-reveal])",
+    "{filter:invert(1) hue-rotate(180deg) grayscale(1) contrast(1) brightness(1)!important}"
 );
 
 /// Decides whether the page is light (then marks the root `snorkle-dark`).
@@ -150,11 +170,11 @@ if(m[4]!==undefined&&parseFloat(m[4])<(m[4].slice(-1)==='%'?10:0.1))return null;
 function check(){var d=document.documentElement;if(!d)return;var root=lum(getComputedStyle(d).backgroundColor),l=root;\
 if(l===null&&document.body)l=lum(getComputedStyle(document.body).backgroundColor);\
 if(l===null){var cs=String(getComputedStyle(d).colorScheme||'');l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
-d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);}\
+d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');}\
 if(window.__snorkleDark){window.__snorkleDark.check();return;}\
 window.__snorkleDark={check:check};check();window.addEventListener('load',check);setTimeout(check,1500);})();";
 
-const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');}delete window.__snorkleDark;})();";
+const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}delete window.__snorkleDark;})();";
 
 /// Name of the headings message handler (client world only).
 pub const HEADINGS_HANDLER_NAME: &str = "snorkleHeadings";
@@ -568,6 +588,9 @@ mod tests {
         assert!(inj[2].source.contains("snorkle-dark") && inj[2].at == InjectAt::DocumentStart);
         assert!(inj[3].source.contains("classList.toggle('snorkle-dark'") && inj[3].at == InjectAt::DocumentEnd);
         assert!(DARK_CSS.contains(":has(#__snorkle_grayscale)") && DARK_CSS.contains(":not(:has(#__snorkle_no_images))"));
+        assert!(DARK_CSS.contains("html:not(.snorkle-dark-checked){filter:brightness(.2)"), "dim while loading");
+        assert!(DARK_DETECT_JS.contains("classList.add('snorkle-dark-checked')"), "the check ends the dim");
+        assert!(!DARK_CSS.contains("picture"), "img inside picture would be filtered twice");
         let off = apply_js(ViewModes { dark: false, ..m }, &HeadingRules::new());
         assert!(off.contains(DARK_STOP_JS));
         assert!(!ViewModes::default().dark);

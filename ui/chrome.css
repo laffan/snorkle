@@ -63,57 +63,65 @@ input, textarea { font: inherit; color: var(--fg); -webkit-user-select: text; us
   background: transparent; pointer-events: none;
 }
 #chrome > * { pointer-events: auto; }
-body.sidebar-closed #chrome, body.narrow #chrome { padding-left: max(12px, env(safe-area-inset-left)); }
+body:not(.sb-docked) #chrome { padding-left: max(12px, env(safe-area-inset-left)); }
 #safe-top { position: fixed; top: 0; left: 0; width: 0; height: env(safe-area-inset-top); pointer-events: none; }
+#safe-bottom { position: fixed; bottom: 0; left: 0; width: 0; height: env(safe-area-inset-bottom); pointer-events: none; }
 
 /* ---- sidebar ---------------------------------------------------------- */
+/* Two modes, set on <body> by chrome.js: attached (a full-height column
+   beside the page) or flyout (`sb-flyout`: inset, rounded, over the page);
+   `sb-hidden` slides it out. The toggle tab is a child, so it always moves
+   with it. One transition list covers every change (slide, reshape); the
+   page and its cut-outs follow natively over the same 0.25 s. */
 #sidebar {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 20;
   width: calc(var(--sidebar-w) + env(safe-area-inset-left));
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
   background: var(--side);
   display: flex; flex-direction: column;
-  /* One transition list for every state change: closed ↔ pop-over ↔
-     docked slide and reshape together (the page follows natively over the
-     same 0.25 s), and the half-opacity effect fades. Keep it in one place:
-     a later `transition` (e.g. for opacity alone) would drop the slide. */
   transform: translateX(0); border-radius: 0; box-shadow: 0 0 0 transparent;
   transition: transform .25s ease-in-out, top .25s ease-in-out, bottom .25s ease-in-out,
-    border-radius .25s ease-in-out, box-shadow .25s ease-in-out, opacity .15s;
+    border-radius .25s ease-in-out, box-shadow .25s ease-in-out;
 }
-body.sidebar-closed #sidebar { transform: translateX(-100%); }
-/* Pop-over from the left-edge tab (sidebar closed): inset top and bottom,
-   rounded on the right, over the page (cut out of it like the pill). */
-body.peek #sidebar {
+body.sb-hidden #sidebar { transform: translateX(-100%); }
+body.sb-flyout #sidebar {
   top: calc(20px + env(safe-area-inset-top)); bottom: calc(20px + env(safe-area-inset-bottom));
-  padding: 0 0 0 env(safe-area-inset-left); border-radius: 0 14px 14px 0; overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, .28); opacity: 1 !important;
+  padding: 0 0 0 env(safe-area-inset-left); border-radius: 0 14px 14px 0;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .28);
 }
-body.peek #sidebar-resize { display: none; }
-/* The sidebar's toggle: a tab on its right edge that slides with it (on
-   the window's left edge while the sidebar is closed). */
+body.sb-flyout.sb-hidden #sidebar { box-shadow: 0 0 0 transparent; }
+body.sb-flyout #side-bottom { border-bottom-right-radius: 14px; }
+body.sb-flyout #sidebar-resize { display: none; }
+body.narrow #sidebar { box-shadow: 0 0 24px rgba(0, 0, 0, .25); }
+body.narrow.sb-hidden #sidebar { box-shadow: 0 0 0 transparent; }
 #edge-tab {
-  position: fixed; left: 0; top: 50%; z-index: 21; transition: left .25s ease-in-out; width: 14px; height: 76px; margin-top: -38px; padding: 0;
+  position: absolute; right: -14px; top: 50%; z-index: 3; width: 14px; height: 76px; margin-top: -38px; padding: 0;
   background: var(--bar); border: 1px solid var(--line); border-left: 0; border-radius: 0 10px 10px 0;
   box-shadow: 2px 0 10px rgba(0, 0, 0, .12);
 }
+/* Attached: a vertical line. */
 #edge-tab::after {
   content: ""; position: absolute; left: 5px; top: 50%; width: 3px; height: 26px; margin-top: -13px;
   border-radius: 2px; background: var(--muted); opacity: .6; transition: opacity .15s;
 }
+/* Flyout: a stemless arrow pointing at the page. */
+body.sb-flyout #edge-tab::after {
+  left: 2px; width: 7px; height: 7px; margin-top: -4.5px; border-radius: 1px; background: none;
+  border: solid var(--muted); border-width: 2px 2px 0 0; transform: rotate(45deg);
+}
 #edge-tab:hover::after { opacity: 1; }
-body:not(.sidebar-closed) #edge-tab { left: calc(var(--sidebar-w) + env(safe-area-inset-left)); }
-body.resizing #edge-tab { transition: none; }
-body.narrow #sidebar { box-shadow: 0 0 24px rgba(0, 0, 0, .25); }
-/* With a pointer (trackpad, mouse), the sidebar and the URL bar recede to
-   half opacity until the pointer is over them, something in them has focus,
-   or one of their menus or a drag is in progress. Touch-only devices have
-   no hover, so there they stay fully visible. */
+/* With a pointer (trackpad, mouse), the attached sidebar's contents and
+   the URL bar recede to half opacity until the pointer is over them,
+   something in them has focus, or one of their menus or a drag is in
+   progress (the panel itself and its toggle stay opaque). Touch-only
+   devices have no hover, so there they stay fully visible. */
 @media (any-hover: hover) {
-  body:not(.narrow) #sidebar { opacity: .5; }
+  body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #side-bottom) { opacity: .5; transition: opacity .15s; }
   #toolbar { opacity: .5; transition: opacity .15s; }
-  body:not(.narrow) #sidebar:hover, body:not(.narrow) #sidebar:focus-within, #toolbar:hover, #toolbar:focus-within,
-  body.dragging #sidebar, body.resizing #sidebar, body.menu-open #sidebar, body.menu-open #toolbar { opacity: 1; }
+  body:not(.narrow) #sidebar:hover :is(#side-scroll, #side-bottom),
+  body:not(.narrow) #sidebar:focus-within :is(#side-scroll, #side-bottom),
+  body.dragging :is(#side-scroll, #side-bottom), body.resizing :is(#side-scroll, #side-bottom),
+  body.menu-open :is(#side-scroll, #side-bottom), #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
 }
 body.resizing #sidebar { transition: none; }
 #side-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px 12px; }

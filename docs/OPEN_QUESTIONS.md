@@ -343,4 +343,16 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     (`shortcut …`), to find out on device. Also reported: with the chat open, hovering the
     toggle "flies out an entire new tab"; not reproduced, assumed to be the pop-over opening
     on a passing pointer.
+60. **[verify] Sidebar rewrite (2026-11-02).** Attached and flyout modes as specified by the owner
+    (⌘\ rules: attached hidden → show; attached shown → hide; flyout hidden or shown → attached,
+    shown). The page cut-outs now glide with the slide; this relies on Core Animation
+    interpolating the mask path, which only works while the holes keep their shape (count and
+    corners). A toast or popup appearing mid-slide changes the set and the mask jumps to the end
+    state. If the URL pill would overlap the flyout (narrow but not "narrow" windows), the two
+    holes merge into one rectangle. Hover-to-show depends on the chrome receiving pointer events
+    at the window edge (see 56).
+61. **[verify] Dark mode load dim.** The page stays at 20% brightness from document start until the
+    detector runs at document end; pages that take long to reach DOMContentLoaded stay dim that
+    long. Media are dimmed until hovered; media under overlays (video players) are not undimmed by
+    pointing unless hide media's pointer tracker is running.
 

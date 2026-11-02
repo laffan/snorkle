@@ -397,26 +397,24 @@ impl Hole {
 /// Most holes the chrome may cut at once.
 pub const MAX_HOLES: usize = 8;
 
-/// Validates holes reported by the chrome: finite, inside a `width` ×
-/// `height` window, non-empty, at most [`MAX_HOLES`], and merged where
-/// they overlap (the mask's even-odd fill would otherwise draw the overlap).
+/// Validates holes reported by the chrome: finite, within reach of a
+/// `width` × `height` window (a hole may wait just off-screen, e.g. the
+/// hidden sidebar pop-over's, so it can slide in), non-empty, at most
+/// [`MAX_HOLES`], and merged where they overlap (the mask's even-odd fill
+/// would otherwise draw the overlap). Holes that only touch stay separate.
 pub fn sanitize_holes(raw: &[Hole], width: f64, height: f64) -> Vec<Hole> {
+    let reach = 2.0 * width.max(height).max(1.0);
     let mut out: Vec<Hole> = Vec::new();
     for h in raw.iter().take(MAX_HOLES) {
-        if ![h.x, h.y, h.w, h.h, h.r].iter().all(|v| v.is_finite()) {
+        if ![h.x, h.y, h.w, h.h, h.r].iter().all(|v| v.is_finite()) || h.w < 1.0 || h.h < 1.0 {
             continue;
         }
-        let x0 = h.x.clamp(0.0, width.max(0.0));
-        let y0 = h.y.clamp(0.0, height.max(0.0));
-        let x1 = (h.x + h.w).clamp(0.0, width.max(0.0));
-        let y1 = (h.y + h.h).clamp(0.0, height.max(0.0));
-        if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+        if h.x.abs() > reach || h.y.abs() > reach || h.w > reach || h.h > reach {
             continue;
         }
         let corners = if h.corners & ALL_CORNERS == 0 { ALL_CORNERS } else { h.corners & ALL_CORNERS };
-        let mut hole = Hole { x: x0, y: y0, w: x1 - x0, h: y1 - y0, r: 0.0, corners };
-        hole.r = h.r.clamp(0.0, hole.w.min(hole.h) / 2.0);
-        // Merge with every hole it touches (repeat: a merge can grow into others).
+        let mut hole = Hole { x: h.x, y: h.y, w: h.w, h: h.h, r: h.r.clamp(0.0, h.w.min(h.h) / 2.0), corners };
+        // Merge with every hole it overlaps (a merge can grow into others).
         while let Some(i) = out.iter().position(|o| o.overlaps(&hole)) {
             let o = out.remove(i);
             let (x0, y0) = (o.x.min(hole.x), o.y.min(hole.y));
@@ -473,8 +471,9 @@ mod tests {
             1000.0,
         );
         assert_eq!(out, vec![h(10.0, 900.0, 400.0, 46.0, 23.0)]);
-        let clipped = sanitize_holes(&[h(-50.0, 980.0, 100.0, 100.0, 99.0)], 1000.0, 1000.0);
-        assert_eq!(clipped, vec![h(0.0, 980.0, 50.0, 20.0, 10.0)], "clamped to the window, radius too");
+        let off = sanitize_holes(&[h(-300.0, 20.0, 264.0, 900.0, 99.0)], 1000.0, 1000.0);
+        assert_eq!(off, vec![h(-300.0, 20.0, 264.0, 900.0, 99.0)], "may wait off-screen (radius ≤ half the side)");
+        assert!(sanitize_holes(&[h(-5000.0, 0.0, 10.0, 10.0, 0.0)], 1000.0, 1000.0).is_empty(), "out of reach");
         let merged = sanitize_holes(&[h(0.0, 0.0, 10.0, 10.0, 4.0), h(5.0, 5.0, 10.0, 10.0, 2.0)], 100.0, 100.0);
         assert_eq!(merged, vec![h(0.0, 0.0, 15.0, 15.0, 2.0)]);
         let many: Vec<Hole> = (0..20).map(|i| h(i as f64 * 20.0, 0.0, 10.0, 10.0, 0.0)).collect();

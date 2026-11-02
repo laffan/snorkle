@@ -29,7 +29,6 @@
   // the chat stay on, and come back with the next ⌘⇧\).
   let rightHidden = false;
   // The sidebar shown as a pop-over from the left-edge tab (sidebar closed).
-  let peek = false;
   let findOpen = false; // ⌘F bar
   let confirmAction = null; // { tab, run } while a confirmation is shown
   let bookmarks = [];
@@ -748,7 +747,12 @@
   const MIN_SIDEBAR = 200;
   const MAX_SIDEBAR = 420;
   let narrow = window.innerWidth < NARROW_PX;
-  let sidebarOpen = loadSidebarPref();
+  // The sidebar has two modes (remembered): `attached`, a full-height
+  // column beside the page that the toggle shows and hides, and `flyout`,
+  // hidden until the pointer rests on the toggle tab and gone again when it
+  // leaves. In narrow windows it slides over the page (mode ignored).
+  let sidebarMode = 'attached';
+  let sidebarShown = true;
 
   function pref(key) {
     try { return localStorage.getItem(key); } catch (e) { return null; }
@@ -757,10 +761,18 @@
     try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ }
   }
 
-  function loadSidebarPref() {
-    const v = pref('sidebarOpen');
-    if (v !== null) return v === '1' && !narrow;
-    return !narrow;
+  function loadSidebarPrefs() {
+    sidebarMode = pref('sidebarMode') === 'flyout' ? 'flyout' : 'attached';
+    sidebarShown = !narrow && sidebarMode === 'attached' && pref('sidebarOpen') !== '0';
+  }
+  loadSidebarPrefs();
+
+  // The page starts to the sidebar's right (attached and shown, wide window).
+  function sidebarDocked() {
+    return !narrow && sidebarMode === 'attached' && sidebarShown;
+  }
+  function flyoutMode() {
+    return !narrow && sidebarMode === 'flyout';
   }
 
   function clampWidth(w) {
@@ -771,27 +783,58 @@
     document.documentElement.style.setProperty('--sidebar-w', clampWidth(w) + 'px');
   }
 
-  function setSidebar(open) {
-    clearTimeout(peekTimer);
+  // The one place the sidebar's state changes. Everything else (⌘\, the
+  // toggle, hover, Settings, narrow windows) calls this.
+  function setSidebarState(mode, shown) {
+    clearTimeout(flyTimer);
     clearTimeout(hoverTimer);
-    sidebarOpen = open;
-    peek = false;
-    if (!narrow) setPref('sidebarOpen', open ? '1' : '0');
-    closeMenu();
-    applySidebar(true);
+    const changed = mode !== sidebarMode || shown !== sidebarShown;
+    sidebarMode = mode;
+    sidebarShown = shown;
+    if (!narrow) {
+      setPref('sidebarMode', mode);
+      if (mode === 'attached') setPref('sidebarOpen', shown ? '1' : '0');
+    }
+    if (!shown) closeMenu();
+    renderSidebarMode();
+    if (changed) applySidebar(true);
   }
 
-  // `animate`: the page slides with the sidebar (the host animates the
-  // content frames over the same 0.25 s as the CSS slide).
+  // Show or hide, keeping the mode.
+  function setSidebar(open) {
+    setSidebarState(sidebarMode, open);
+  }
+
+  // ⌘\ / ⌘S / clicking the toggle: attached → show or hide; flyout (hidden
+  // or showing) → attached and shown.
+  function toggleSidebar() {
+    if (narrow || sidebarMode === 'attached') setSidebarState(sidebarMode, !sidebarShown);
+    else setSidebarState('attached', true);
+  }
+
+  // `animate`: the page and its cut-outs slide with the sidebar (the host
+  // animates them over the same 0.25 s as the CSS).
   function applySidebar(animate) {
-    document.body.classList.toggle('narrow', narrow);
-    document.body.classList.toggle('sidebar-closed', !sidebarOpen && !peek);
-    document.body.classList.toggle('peek', peek);
-    $('sidebar').setAttribute('aria-hidden', String(!sidebarOpen && !peek));
-    $('edge-tab').setAttribute('aria-expanded', String(sidebarOpen));
-    $('edge-tab').setAttribute('aria-label', sidebarOpen ? 'Hide tabs' : 'Show tabs');
+    const b = document.body.classList;
+    b.toggle('narrow', narrow);
+    b.toggle('sb-flyout', flyoutMode());
+    b.toggle('sb-hidden', !sidebarShown);
+    b.toggle('sb-docked', sidebarDocked());
+    $('sidebar').setAttribute('aria-hidden', String(!sidebarShown));
+    const tab = $('edge-tab');
+    tab.setAttribute('aria-expanded', String(sidebarShown));
+    tab.setAttribute('aria-label', flyoutMode() ? 'Tabs (flyout; click to attach)' : sidebarShown ? 'Hide tabs' : 'Show tabs');
     reportLayout({ animate: !!animate });
   }
+
+  function renderSidebarMode() {
+    document.querySelectorAll('[data-sidebar-mode]').forEach((b) =>
+      b.setAttribute('aria-pressed', String(b.dataset.sidebarMode === sidebarMode)));
+  }
+  document.querySelectorAll('[data-sidebar-mode]').forEach((b) => b.addEventListener('click', () => {
+    const mode = b.dataset.sidebarMode;
+    setSidebarState(mode, mode === 'attached');
+  }));
 
   // Resizing: the content view follows the edge, one layout report per
   // animation frame.
@@ -861,51 +904,64 @@
   // pointer) shows the sidebar as a pop-over over the page, inset 20 pt top
   // and bottom; it goes away when the pointer leaves it. In narrow windows
   // the tab opens the usual overlaid sidebar instead.
-  // The pop-over and the docked sidebar are one panel in two states: from
-  // the pop-over, the toggle pins it (it reshapes in place while the page
-  // slides over); closing slides it out with the tab. The sidebar and its
-  // toggle tab are one hover region, so moving from one to the other never
-  // closes the pop-over. Pointing at the tab opens the pop-over only after
-  // a short pause, so a pointer passing by the edge does not.
-  let peekTimer = 0;
+  // ---- toggle tab and flyout ----------------------------------------------
+  //
+  // The tab is part of the sidebar (it moves with it). In flyout mode,
+  // resting the pointer on it for a moment shows the sidebar; leaving the
+  // sidebar (tab included) hides it again. Clicking the tab follows ⌘\.
+  // Without a pointer, a first tap shows the flyout and a second attaches
+  // it. Right-click or long-press switches mode.
+  let flyTimer = 0;
   let hoverTimer = 0;
   const HOVER_INTENT_MS = 160;
   const LEAVE_MS = 280;
-  function setPeek(on) {
-    clearTimeout(peekTimer);
-    clearTimeout(hoverTimer);
-    if (on === peek || (on && (sidebarOpen || narrow))) return;
-    peek = on;
-    if (!on) closeMenu();
-    applySidebar();
-  }
-  function peekBusy() {
+  let tabPointer = 'mouse';
+  function sidebarBusy() {
     return menuOpen || !$('vm-pop').hidden || !!dragState || !!resize;
   }
-  function inPeekRegion(node) {
-    return !!node && ($('sidebar').contains(node) || node === $('edge-tab'));
+  function hideFlyoutSoon() {
+    clearTimeout(flyTimer);
+    flyTimer = setTimeout(() => {
+      if (flyoutMode() && sidebarShown && !sidebarBusy()) setSidebarState('flyout', false);
+    }, LEAVE_MS);
   }
-  function leavePeek() {
-    clearTimeout(peekTimer);
-    peekTimer = setTimeout(() => { if (peek && !peekBusy()) setPeek(false); }, LEAVE_MS);
+  function switchSidebarMode() {
+    if (narrow) return;
+    if (sidebarMode === 'attached') setSidebarState('flyout', false);
+    else setSidebarState('attached', true);
   }
-  $('edge-tab').addEventListener('pointerenter', (ev) => {
-    clearTimeout(peekTimer);
-    if (ev.pointerType !== 'mouse' || narrow || sidebarOpen || peek) return;
+  const tabEl = $('edge-tab');
+  tabEl.addEventListener('pointerenter', (ev) => {
+    clearTimeout(flyTimer);
+    if (ev.pointerType !== 'mouse' || !flyoutMode() || sidebarShown) return;
     clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => setPeek(true), HOVER_INTENT_MS);
+    hoverTimer = setTimeout(() => setSidebarState('flyout', true), HOVER_INTENT_MS);
   });
-  // The toggle: pins the pop-over, or opens or closes the sidebar.
-  $('edge-tab').addEventListener('click', () => setSidebar(!sidebarOpen));
-  $('sidebar').addEventListener('pointerenter', () => clearTimeout(peekTimer));
-  for (const node of [$('sidebar'), $('edge-tab')]) {
-    node.addEventListener('pointerleave', (ev) => {
-      if (node === $('edge-tab')) clearTimeout(hoverTimer);
-      if (peek && ev.pointerType === 'mouse' && !inPeekRegion(ev.relatedTarget)) leavePeek();
-    });
-  }
+  tabEl.addEventListener('pointerleave', () => clearTimeout(hoverTimer));
+  let tabPress = null;
+  tabEl.addEventListener('pointerdown', (ev) => {
+    tabPointer = ev.pointerType || 'mouse';
+    clearTimeout(tabPress && tabPress.timer);
+    if (ev.pointerType !== 'mouse') tabPress = { fired: false, timer: setTimeout(() => { tabPress.fired = true; switchSidebarMode(); }, 550) };
+  });
+  const endTabPress = () => { if (tabPress) clearTimeout(tabPress.timer); };
+  tabEl.addEventListener('pointerup', endTabPress);
+  tabEl.addEventListener('pointercancel', endTabPress);
+  tabEl.addEventListener('contextmenu', (ev) => { ev.preventDefault(); switchSidebarMode(); });
+  tabEl.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (tabPress && tabPress.fired) { tabPress = null; return; }
+    clearTimeout(hoverTimer);
+    // No hover without a pointer: the first tap shows the flyout.
+    if (flyoutMode() && !sidebarShown && tabPointer !== 'mouse') { setSidebarState('flyout', true); return; }
+    toggleSidebar();
+  });
+  $('sidebar').addEventListener('pointerenter', () => clearTimeout(flyTimer));
+  $('sidebar').addEventListener('pointerleave', (ev) => {
+    if (ev.pointerType === 'mouse' && flyoutMode() && sidebarShown) hideFlyoutSoon();
+  });
   // The pointer may leave the chrome's web view straight onto the page.
-  document.addEventListener('mouseout', (ev) => { if (peek && !ev.relatedTarget) leavePeek(); });
+  document.addEventListener('mouseout', (ev) => { if (!ev.relatedTarget && flyoutMode() && sidebarShown) hideFlyoutSoon(); });
 
   // ---- menu, settings, history ----------------------------------------------
 
@@ -1288,7 +1344,7 @@
   function reportLayout(opts) {
     // Use the sidebar's layout width (unaffected by the slide transform) so
     // the content area moves once, to its final position.
-    const left = sidebarOpen && !narrow ? Math.ceil($('sidebar').offsetWidth) : 0;
+    const left = sidebarDocked() ? Math.ceil($('sidebar').offsetWidth) : 0;
     // Pages start below the status bar and run to the bottom of the window;
     // the URL pill floats over them.
     const top = Math.ceil($('safe-top').getBoundingClientRect().height);
@@ -1296,7 +1352,7 @@
     // beside the page (shrinking the content area), float over it as a
     // hole (the pill, its popup, toasts: the page is cut out there), or set
     // `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarOpen);
+    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarShown);
     // Docked right panels (site scripts; or the headers outline and the
     // chat, one above the other when both are open) take the right of the
     // content area, full height, at the width the user dragged.
@@ -1378,17 +1434,32 @@
       const h = hole(e, 15);
       if (h) out.push(h);
     }
-    // Layout boxes, not the on-screen ones: the slide may still be running.
-    const s = $('sidebar');
-    if (peek) {
-      // Flush with the window's left edge, rounded on the right.
-      out.push({ x: 0, y: s.offsetTop - 1, w: s.offsetWidth + 1, h: s.offsetHeight + 2, r: 15, c: 10 });
-    }
-    // The toggle tab, on the sidebar's right edge (or the window's edge).
-    const e = $('edge-tab');
-    const ex = (sidebarOpen && !narrow) || peek ? s.offsetWidth : 0;
-    if (!(narrow && sidebarOpen)) out.push({ x: ex, y: e.offsetTop - 1, w: e.offsetWidth + 1, h: e.offsetHeight + 2, r: 11, c: 10 });
+    out.push(...sidebarHoles());
     return out;
+  }
+
+  // The sidebar's two cut-outs, always reported (so the host can slide
+  // them): the panel, where the flyout is or will be (off-screen while
+  // hidden; when attached it lies left of the page and cuts nothing), and
+  // the toggle tab on its right edge. Computed from the target state, not
+  // the on-screen boxes, which may still be sliding.
+  const FLY_INSET = 20;
+  const TAB_H = 76;
+  function sidebarHoles() {
+    if (narrow) {
+      if (sidebarShown) return [];
+      return [{ x: 0, y: Math.round((window.innerHeight - TAB_H) / 2) - 1, w: 15, h: TAB_H + 2, r: 11, c: 10 }];
+    }
+    const w = $('sidebar').offsetWidth;
+    const fly = sidebarMode === 'flyout';
+    const top = fly ? FLY_INSET + $('safe-top').offsetHeight : 0;
+    const height = window.innerHeight - top - (fly ? FLY_INSET + $('safe-bottom').offsetHeight : 0);
+    const panelX = sidebarShown ? -1 : -(w + 3);
+    const tabX = sidebarShown ? w : 0;
+    return [
+      { x: panelX, y: top - 1, w: w + 1, h: height + 2, r: 15, c: 10 },
+      { x: tabX, y: Math.round(top + (height - TAB_H) / 2) - 1, w: 15, h: TAB_H + 2, r: 11, c: 10 },
+    ];
   }
 
   // The panels docked on the right of the content area: site scripts while
@@ -2230,7 +2301,7 @@
     } else if (name === 'close_tab') {
       closeTabShortcut();
     } else if (name === 'toggle_sidebar') {
-      setSidebar(!sidebarOpen);
+      toggleSidebar();
     } else if (name === 'toggle_right') {
       toggleRight();
     } else if (name === 'bookmark') {
@@ -2690,10 +2761,8 @@
     if (menuOpen && !$('menu-pop').contains(ev.target) && ev.target !== $('menu')) closeMenu();
     if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
     if (!$('actions-pop').hidden && !$('actions').contains(ev.target)) setActions(false);
-    if (narrow && sidebarOpen && !$('sidebar').contains(ev.target) && ev.target !== $('edge-tab')) {
-      setSidebar(false);
-    }
-    if (peek && !$('sidebar').contains(ev.target) && ev.target !== $('edge-tab')) setPeek(false);
+    // Taps outside close the overlaid sidebar (narrow) and the flyout.
+    if ((narrow || flyoutMode()) && sidebarShown && !$('sidebar').contains(ev.target)) setSidebar(false);
     if (confirmAction && !$('confirm-pop').contains(ev.target)) closeConfirm();
   });
   document.addEventListener('keydown', (ev) => {
@@ -2701,7 +2770,7 @@
     if (paletteOpen) closePalette();
     else if (confirmAction) closeConfirm();
     else if (findOpen) closeFind();
-    else if (peek) setPeek(false);
+    else if (flyoutMode() && sidebarShown) setSidebar(false);
     else if (!$('actions-pop').hidden) setActions(false);
     else if (menuOpen) closeMenu();
     else if (modalOpen) setModal(false);
@@ -2743,16 +2812,16 @@
     const nowNarrow = window.innerWidth < NARROW_PX;
     if (nowNarrow !== narrow) {
       narrow = nowNarrow;
-      sidebarOpen = nowNarrow ? false : loadSidebarPref();
+      loadSidebarPrefs();
     }
     setSidebarWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 264);
     applyChat();
     $('scripts-pop').classList.toggle('dock', scriptsOpen && !narrow);
-    if (narrow && peek) peek = false;
     applySidebar();
   });
   const savedWidth = parseFloat(pref('sidebarWidth') || '');
   if (savedWidth) setSidebarWidth(savedWidth);
+  renderSidebarMode();
   applySidebar();
   renderBookmarks();
   renderPins();
