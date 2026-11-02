@@ -33,7 +33,6 @@ pub const COMMANDS: &[&str] = &[
     "get_headings",
     "scroll_to_heading",
     "find_in_page",
-    "count_in_page",
     "end_find",
     "focus_chrome",
     "share_page",

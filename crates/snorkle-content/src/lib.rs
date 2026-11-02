@@ -104,6 +104,9 @@ pub enum Shortcut {
     ToggleImages,
     /// Find in page.
     Find,
+    /// Next / previous match of the find bar (opens it if closed).
+    FindNext,
+    FindPrevious,
     /// The n-th item in the sidebar (pins, bookmarks, then tabs).
     Item(u8),
 }
@@ -144,6 +147,8 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
     def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", 0, Shortcut::Bookmark),
     def("close_tab", ShortcutMenu::Close, "Close Tab", "w", 0, Shortcut::CloseTab),
     def("find", ShortcutMenu::Find, "Find on Page", "f", 0, Shortcut::Find),
+    def("find_next", ShortcutMenu::Find, "Find Next", "g", 0, Shortcut::FindNext),
+    def("find_prev", ShortcutMenu::Find, "Find Previous", "g", MOD_SHIFT, Shortcut::FindPrevious),
     def("toggle_sidebar", ShortcutMenu::View, "Show or Hide Sidebar", "\\", 0, Shortcut::ToggleSidebar),
     def("toggle_right", ShortcutMenu::View, "Toggle Right Panel", "\\", MOD_SHIFT, Shortcut::ToggleRightPanel),
     def("toggle_images", ShortcutMenu::View, "Show or Hide Images", "i", 0, Shortcut::ToggleImages),
@@ -178,6 +183,8 @@ impl Shortcut {
             Shortcut::Bookmark => "bookmark".into(),
             Shortcut::ToggleImages => "toggle_images".into(),
             Shortcut::Find => "find".into(),
+            Shortcut::FindNext => "find_next".into(),
+            Shortcut::FindPrevious => "find_prev".into(),
             Shortcut::Item(n) => format!("item:{n}"),
         }
     }
@@ -361,8 +368,6 @@ pub type RulesDone = Box<dyn FnOnce(Result<usize, String>) + Send>;
 /// Completion of a page-text read (AI chat): the script's string result,
 /// page-controlled and bounded to [`MAX_PAGE_TEXT_BYTES`], or `None`.
 pub type TextDone = Box<dyn FnOnce(Option<String>) + Send>;
-/// Completion of a find in page: whether a match was found.
-pub type FindDone = Box<dyn FnOnce(bool) + Send>;
 /// Largest page-text result read back from a page.
 pub const MAX_PAGE_TEXT_BYTES: usize = snorkle_core::ai::MAX_PAGE_REPORT;
 

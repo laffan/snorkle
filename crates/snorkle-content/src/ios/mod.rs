@@ -61,7 +61,7 @@ use objc2_ui_kit::{
     UIUserInterfaceStyle, UIViewController,
 };
 use objc2_web_kit::{
-    WKContentMode, WKFindConfiguration, WKFindResult, WKInactiveSchedulingPolicy, WKUserContentController,
+    WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController,
     WKWebViewConfiguration, WKWebsiteDataStore, WKWebsiteDataTypeCookies, WKWebsiteDataTypeDiskCache,
     WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeFileSystem, WKWebsiteDataTypeIndexedDBDatabases,
     WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeMediaKeys, WKWebsiteDataTypeMemoryCache,
@@ -445,36 +445,17 @@ impl ContentHost {
         }
     }
 
-    /// Find in page (⌘F): WebKit selects and scrolls to the next (or
-    /// previous) match of `query`, wrapping; `done` gets whether one was
-    /// found, on the main thread.
-    pub fn find(&mut self, tab: TabId, query: String, backwards: bool, done: crate::FindDone) {
-        let Some(v) = self.views.get(&tab) else { return done(false) };
-        unsafe {
-            let config = WKFindConfiguration::new(self.mtm);
-            config.setBackwards(backwards);
-            config.setWraps(true);
-            config.setCaseSensitive(false);
-            let done = Cell::new(Some(done));
-            let block = RcBlock::new(move |result: NonNull<WKFindResult>| {
-                if let Some(done) = done.take() {
-                    done(result.as_ref().matchFound());
-                }
-            });
-            v.web.findString_withConfiguration_completionHandler(&NSString::from_str(&query), Some(&config), &block);
-        }
-    }
-
-    /// Counts matches of `query` for the find bar's label (channel C18;
-    /// `snorkle_core::find::parse_count` accepts digits only).
-    pub fn count_matches(&mut self, tab: TabId, query: String, done: crate::TextDone) {
+    /// Find in page (⌘F): the constant `find::find_js` highlights the
+    /// matches of `query`, scrolls to the current one and returns its
+    /// position, "index/total" (channel C18; `find::parse_position`).
+    pub fn find(&mut self, tab: TabId, query: String, step: snorkle_core::find::FindStep, done: crate::TextDone) {
         match self.views.get(&tab) {
-            Some(v) => injection::read_now(self.mtm, &v.web, &snorkle_core::find::count_js(&query), done),
+            Some(v) => injection::read_now(self.mtm, &v.web, &snorkle_core::find::find_js(&query, step), done),
             None => done(None),
         }
     }
 
-    /// Clears the selection a find left on the page.
+    /// Removes the find highlights (closing the find bar).
     pub fn end_find(&mut self, tab: TabId) {
         if let Some(v) = self.views.get(&tab) {
             injection::run_now(self.mtm, &v.web, snorkle_core::find::CLEAR_JS);

@@ -224,8 +224,12 @@ The same holes carry the other chrome that floats over the page: the find bar (�
 the top of the pill (its hole ends where the pill's begins and has only its top corners rounded,
 since overlapping holes are merged into their bounding rectangle); the confirmation ⌘W shows on a
 bookmark's tab; and, with the sidebar closed, a tab on the left edge and the sidebar pop-over it
-opens (§5b). Find uses WebKit's own `findString:withConfiguration:` (selects and scrolls to each
-match, wrapping) plus a match count read back from a constant script (C18).
+opens (§5b). Find runs a constant script in the page's client world (`find::find_js`) that finds
+the matches (case-insensitive, within single text nodes), highlights them with the CSS Custom
+Highlight API (every match at 50%, the current one at 100%), scrolls to the current one and
+returns its position, "3/12" (C18). Nothing is selected, so the selection menu stays away.
+↩ / ⇧↩ in the bar and ⌘G / ⌘⇧G anywhere step through the matches, wrapping (⌘G opens the bar
+if it is closed).
 
 Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are key commands vended by the app delegate
 (`keyCommands`, added to tao's class at runtime), the last responder in every chain, so they
@@ -234,7 +238,8 @@ items any more (as menu items they stopped working, apparently from the menu sys
 validation and key-equivalent conflicts, e.g. ⌘I with Format → Italic); the menu bar only loses
 the system's Close and Find. Recording a binding is native too: while recording, the app delegate
 offers every accepted ⌘ combination and Escape and reports the one pressed. Shortcuts: ⌘T new tab, ⌘W close tab (a
-pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘S or
+pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘G /
+⌘⇧G next / previous match, ⌘S or
 ⌘\ sidebar, ⌘⇧\ right panels, ⌘D bookmark (on a bookmark's tab: un-bookmark), ⌘I images,
 ⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or ⌘-click its toggle):
 **attached**, a full-height column beside the page that the toggle shows and hides, and

@@ -2327,6 +2327,10 @@
       bookmarkShortcut();
     } else if (name === 'find') {
       openFind();
+    } else if (name === 'find_next' || name === 'find_prev') {
+      // ⌘G / ⌘⇧G: step through the matches; open the bar if it is closed.
+      if (findOpen && find.query) findStep(name === 'find_prev');
+      else openFind();
     } else if (name === 'toggle_images') {
       toggleMode('hide_media');
     } else if (name.startsWith('item:')) {
@@ -2414,8 +2418,10 @@
 
   // ---- find on page (⌘F) ------------------------------------------------------
   //
-  // WebKit's own find selects and scrolls to each match; a separate count
-  // (digits only) gives "3 of 12". The bar sits on top of the pill.
+  // A script in the page highlights every match (50 %) and the current one
+  // (100 %) without selecting anything, scrolls to the current one and
+  // returns "3/12" (digits only). ⌘G / ⌘⇧G and ↩ / ⇧↩ step through them.
+  // The bar sits on top of the pill.
   let find = { tab: null, query: '', total: null, index: 0, timer: 0, seq: 0 };
 
   function openFind() {
@@ -2452,9 +2458,19 @@
     $('find-prev').disabled = $('find-next').disabled = !q || find.total === 0;
   }
 
-  // A new query: count, then select the first match.
+  // Applies a position from the page ({index, total}, or null when the
+  // page did not answer).
+  function findResult(seq, pos) {
+    if (seq !== find.seq) return;
+    if (pos) { find.index = pos.index; find.total = pos.total; }
+    else if (find.total === null) find.total = 0;
+    renderFind();
+  }
+
+  // A new query: highlight its matches, the first one in view current.
   function findQuery(q) {
     const t = activeTab();
+    if (find.tab !== null && find.query && !q) invoke('end_find', { tab: find.tab });
     find.query = q;
     find.total = null;
     find.index = 0;
@@ -2462,30 +2478,18 @@
     renderFind();
     if (!q || !t || !t.url) { if (q) { find.total = 0; renderFind(); } return; }
     find.tab = t.id;
-    T.core.invoke('count_in_page', { tab: t.id, query: q }).then((n) => {
-      if (seq !== find.seq) return;
-      find.total = n === null || n === undefined ? find.total : n;
-      return T.core.invoke('find_in_page', { tab: t.id, query: q, backwards: false }).then((found) => {
-        if (seq !== find.seq) return;
-        if (!found) find.total = 0;
-        else { find.index = 1; if (!find.total) find.total = 1; }
-        renderFind();
-        $('find-input').focus(); // WebKit may move focus to the page
-      });
-    }).catch((e) => toast(String(e)));
+    T.core.invoke('find_in_page', { tab: t.id, query: q, step: 'start' })
+      .then((pos) => findResult(seq, pos))
+      .catch((e) => toast(String(e)));
   }
 
   function findStep(backwards) {
     const t = activeTab();
     if (!t || !find.query || !find.total) return;
     const seq = find.seq;
-    T.core.invoke('find_in_page', { tab: t.id, query: find.query, backwards }).then((found) => {
-      if (seq !== find.seq || !found) return;
-      const n = find.total;
-      find.index = backwards ? (find.index <= 1 ? n : find.index - 1) : (find.index >= n ? 1 : find.index + 1);
-      renderFind();
-      $('find-input').focus();
-    }).catch((e) => toast(String(e)));
+    T.core.invoke('find_in_page', { tab: t.id, query: find.query, step: backwards ? 'prev' : 'next' })
+      .then((pos) => findResult(seq, pos))
+      .catch((e) => toast(String(e)));
   }
 
   $('find-input').addEventListener('input', () => {
@@ -2496,7 +2500,6 @@
   $('find-input').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') { ev.preventDefault(); findStep(ev.shiftKey); }
     else if (ev.key === 'Escape') { ev.preventDefault(); closeFind(); }
-    else if (ev.metaKey && ev.key.toLowerCase() === 'g') { ev.preventDefault(); findStep(ev.shiftKey); }
   });
   $('find-prev').addEventListener('click', () => findStep(true));
   $('find-next').addEventListener('click', () => findStep(false));

@@ -39,7 +39,6 @@
     "allow-set-tab-headers",
     "allow-get-headings",
     "allow-find-in-page",
-    "allow-count-in-page",
     "allow-end-find",
     "allow-focus-chrome",
     "allow-share-page",

@@ -60,7 +60,6 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::get_headings,
         commands::scroll_to_heading,
         commands::find_in_page,
-        commands::count_in_page,
         commands::end_find,
         commands::focus_chrome,
         commands::share_page,

@@ -388,16 +388,25 @@ impl Browser {
 
     /// Pairs `dragged` with `target` (target left, dragged right) and
     /// focuses `dragged`. Both get live web views. Any pair either tab was
-    /// in ends. Tabs of different profiles are never paired.
+    /// in ends. Tabs of different profiles, and popup sheets, are never
+    /// paired; a popup tab whose opener is outside the pair only with a
+    /// budget of at least 3 live views (its opener stays live as well).
     pub fn split(&mut self, dragged: TabId, target: TabId, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
         // Both panes need live web views; never exceed the memory budget.
         if dragged == target || self.budget.max_live < 2 {
             return out;
         }
-        match (self.tab(dragged), self.tab(target)) {
-            (Some(d), Some(t)) if d.profile == t.profile => {}
+        let (d_opener, t_opener) = match (self.tab(dragged), self.tab(target)) {
+            // Popup sheets are not tabs (not listed, never paired).
+            (Some(d), Some(t)) if d.profile == t.profile && !d.sheet && !t.sheet => (d.opener, t.opener),
             _ => return out,
+        };
+        // While a pane that is a popup is active, its opener is kept live
+        // too (`is_protected`): three views, so only within a budget of 3.
+        let outside_opener = [d_opener, t_opener].iter().flatten().any(|o| *o != dragged && *o != target);
+        if outside_opener && self.budget.max_live < 3 {
+            return out;
         }
         self.splits.retain(|s| ![s.left, s.right].iter().any(|t| *t == dragged || *t == target));
         self.splits.push(SplitView { left: target, right: dragged });

@@ -432,43 +432,26 @@ pub fn set_tab_headers(s: S<'_>, tab: u64, on: bool) -> ViewModesState {
     view_modes_state(&s)
 }
 
-/// Find in page (⌘F): WebKit selects and scrolls to the next (or previous)
-/// match, wrapping. Returns whether a match was found.
+/// Find in page: highlights the matches of `query` (`step`: start, next or
+/// prev) and returns the current match's position, or `None` if the page
+/// did not answer (channel C18, `find::parse_position`).
 #[tauri::command]
-pub async fn find_in_page(tab: u64, query: String, backwards: bool) -> Result<bool, String> {
-    let Some(query) = snorkle_core::find::validate_query(&query) else { return Ok(false) };
+pub async fn find_in_page(
+    tab: u64,
+    query: String,
+    step: snorkle_core::find::FindStep,
+) -> Result<Option<snorkle_core::find::FindPosition>, String> {
+    let Some(query) = snorkle_core::find::validate_query(&query) else {
+        return Ok(Some(snorkle_core::find::FindPosition { index: 0, total: 0 }));
+    };
     let (tx, rx) = std::sync::mpsc::channel();
     snorkle_content::dispatch_main(move || {
-        with_host(|h| {
-            h.find(
-                TabId(tab),
-                query,
-                backwards,
-                Box::new(move |found| {
-                    let _ = tx.send(found);
-                }),
-            )
-        })
-    });
-    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(4)).unwrap_or(false))
-        .await
-        .map_err(|_| "Find failed.".to_string())
-}
-
-/// Number of matches of `query` on the tab's page (case-insensitive, in
-/// its visible text; channel C18, digits only), or `None` if the page did
-/// not answer.
-#[tauri::command]
-pub async fn count_in_page(tab: u64, query: String) -> Result<Option<u32>, String> {
-    let Some(query) = snorkle_core::find::validate_query(&query) else { return Ok(Some(0)) };
-    let (tx, rx) = std::sync::mpsc::channel();
-    snorkle_content::dispatch_main(move || {
-        with_host(|h| h.count_matches(TabId(tab), query, Box::new(move |t| drop(tx.send(t)))))
+        with_host(|h| h.find(TabId(tab), query, step, Box::new(move |t| drop(tx.send(t)))))
     });
     let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(4)))
         .await
         .map_err(|_| "Find failed.".to_string())?;
-    Ok(text.ok().flatten().and_then(|t| snorkle_core::find::parse_count(&t)))
+    Ok(text.ok().flatten().and_then(|t| snorkle_core::find::parse_position(&t)))
 }
 
 /// Gives the chrome's web view keyboard focus (after a shortcut, a page or

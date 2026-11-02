@@ -293,11 +293,15 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     target menu is looked up before it is edited, and the build runs inside
     `objc2::exception::catch`: on an exception the menu bar keeps the system's menus, the shortcuts
     fall back to the content containers' key commands, and `[snorkle] menu: …` is logged.
-55. **[verify] Find in page.** `findString:withConfiguration:` on iOS: whether it highlights the
-    match visibly (it selects it), whether it moves focus out of the find field (the chrome
-    refocuses it after each step), and that the count (visible text, case-insensitive, collapsed
-    whitespace) agrees with WebKit's matches; "2 of 7" is tracked by counting steps, so it can
-    drift when they disagree. Closing the bar clears the selection.
+55. **[verify] Find in page** (rewritten 2026-11-02: highlights instead of WebKit's selecting
+    `findString:`). Assumed: `CSS.highlights` set from the isolated client world paints in the
+    page (WebKit keeps one highlight registry per document; the JS map is per world); Highlight
+    API needs Safari 17.2+, so iPadOS 26 has it. Without it the script still counts and scrolls,
+    but nothing is highlighted. Limits: a match split across elements (`<b>`, links) is not
+    found; text in closed shadow roots and iframes is not searched; matches are found again
+    when the page replaced their text, otherwise kept, so text added after the search is missed
+    until the query changes. The highlight colour is fixed (orange-yellow; light gray in black
+    and white).
 56. **[verify] Sidebar pop-over.** Closing it when the pointer leaves relies on the chrome's web
     view getting `pointerleave`/`mouseout` when the pointer moves from a hole onto a page view.
     If it does not, the pop-over stays until a tap outside or Escape.
