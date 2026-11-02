@@ -772,6 +772,8 @@
   }
 
   function setSidebar(open) {
+    clearTimeout(peekTimer);
+    clearTimeout(hoverTimer);
     sidebarOpen = open;
     peek = false;
     if (!narrow) setPref('sidebarOpen', open ? '1' : '0');
@@ -859,9 +861,19 @@
   // pointer) shows the sidebar as a pop-over over the page, inset 20 pt top
   // and bottom; it goes away when the pointer leaves it. In narrow windows
   // the tab opens the usual overlaid sidebar instead.
+  // The pop-over and the docked sidebar are one panel in two states: from
+  // the pop-over, the toggle pins it (it reshapes in place while the page
+  // slides over); closing slides it out with the tab. The sidebar and its
+  // toggle tab are one hover region, so moving from one to the other never
+  // closes the pop-over. Pointing at the tab opens the pop-over only after
+  // a short pause, so a pointer passing by the edge does not.
   let peekTimer = 0;
+  let hoverTimer = 0;
+  const HOVER_INTENT_MS = 160;
+  const LEAVE_MS = 280;
   function setPeek(on) {
     clearTimeout(peekTimer);
+    clearTimeout(hoverTimer);
     if (on === peek || (on && (sidebarOpen || narrow))) return;
     peek = on;
     if (!on) closeMenu();
@@ -870,16 +882,28 @@
   function peekBusy() {
     return menuOpen || !$('vm-pop').hidden || !!dragState || !!resize;
   }
+  function inPeekRegion(node) {
+    return !!node && ($('sidebar').contains(node) || node === $('edge-tab'));
+  }
   function leavePeek() {
     clearTimeout(peekTimer);
-    peekTimer = setTimeout(() => { if (peek && !peekBusy()) setPeek(false); }, 280);
+    peekTimer = setTimeout(() => { if (peek && !peekBusy()) setPeek(false); }, LEAVE_MS);
   }
-  $('edge-tab').addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse' && !narrow) setPeek(true); });
-  // The tab rides on the sidebar's right edge: it opens and closes the
-  // sidebar (pointing at it while closed shows the pop-over first).
+  $('edge-tab').addEventListener('pointerenter', (ev) => {
+    clearTimeout(peekTimer);
+    if (ev.pointerType !== 'mouse' || narrow || sidebarOpen || peek) return;
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => setPeek(true), HOVER_INTENT_MS);
+  });
+  // The toggle: pins the pop-over, or opens or closes the sidebar.
   $('edge-tab').addEventListener('click', () => setSidebar(!sidebarOpen));
   $('sidebar').addEventListener('pointerenter', () => clearTimeout(peekTimer));
-  $('sidebar').addEventListener('pointerleave', (ev) => { if (peek && ev.pointerType === 'mouse') leavePeek(); });
+  for (const node of [$('sidebar'), $('edge-tab')]) {
+    node.addEventListener('pointerleave', (ev) => {
+      if (node === $('edge-tab')) clearTimeout(hoverTimer);
+      if (peek && ev.pointerType === 'mouse' && !inPeekRegion(ev.relatedTarget)) leavePeek();
+    });
+  }
   // The pointer may leave the chrome's web view straight onto the page.
   document.addEventListener('mouseout', (ev) => { if (peek && !ev.relatedTarget) leavePeek(); });
 
@@ -2411,6 +2435,11 @@
     BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.',
     Slash: '/', Minus: '-', Equal: '=', Backquote: '`',
   };
+  // When `code` is missing: the unshifted key of a shifted character (US).
+  const SHIFTED = {
+    '|': '\\', '{': '[', '}': ']', ':': ';', '"': "'", '<': ',', '>': '.', '?': '/', '_': '-', '+': '=', '~': '`',
+    '!': '1', '@': '2', '#': '3', '$': '4', '%': '5', '^': '6', '&': '7', '*': '8', '(': '9', ')': '0',
+  };
   let shortcutList = [];
   let recordingKey = null; // id of the shortcut being rebound
 
@@ -2421,7 +2450,7 @@
     if (/^Key[A-Z]$/.test(ev.code)) key = ev.code.slice(3).toLowerCase();
     else if (/^Digit[0-9]$/.test(ev.code)) key = ev.code.slice(5);
     else if (CODE_KEYS[ev.code]) key = CODE_KEYS[ev.code];
-    else if (ev.key && ev.key.length === 1) key = ev.key.toLowerCase();
+    else if (ev.key && ev.key.length === 1) key = SHIFTED[ev.key] || ev.key.toLowerCase();
     if (!key) return null;
     const mods = (ev.shiftKey ? MOD_SHIFT : 0) | (ev.altKey ? MOD_ALT : 0) | (ev.ctrlKey ? MOD_CTRL : 0);
     return { key, mods };
@@ -2561,6 +2590,8 @@
     T.core.invoke('read_selection', { tab }).then((text) => {
       if (!text) { hideSelection(); return; }
       selection = { tab, text };
+      const ask = useChoice('ask');
+      $('sel-ask').textContent = ask ? `Ask ${ask.name}` : 'Ask AI';
       showSelection(tab, rect);
     }).catch(() => hideSelection());
   });

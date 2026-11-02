@@ -73,7 +73,13 @@ body.sidebar-closed #chrome, body.narrow #chrome { padding-left: max(12px, env(s
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
   background: var(--side);
   display: flex; flex-direction: column;
-  transform: translateX(0); transition: transform .25s ease-in-out;
+  /* One transition list for every state change: closed ↔ pop-over ↔
+     docked slide and reshape together (the page follows natively over the
+     same 0.25 s), and the half-opacity effect fades. Keep it in one place:
+     a later `transition` (e.g. for opacity alone) would drop the slide. */
+  transform: translateX(0); border-radius: 0; box-shadow: 0 0 0 transparent;
+  transition: transform .25s ease-in-out, top .25s ease-in-out, bottom .25s ease-in-out,
+    border-radius .25s ease-in-out, box-shadow .25s ease-in-out, opacity .15s;
 }
 body.sidebar-closed #sidebar { transform: translateX(-100%); }
 /* Pop-over from the left-edge tab (sidebar closed): inset top and bottom,
@@ -81,7 +87,7 @@ body.sidebar-closed #sidebar { transform: translateX(-100%); }
 body.peek #sidebar {
   top: calc(20px + env(safe-area-inset-top)); bottom: calc(20px + env(safe-area-inset-bottom));
   padding: 0 0 0 env(safe-area-inset-left); border-radius: 0 14px 14px 0; overflow: hidden;
-  border: 1px solid var(--line); border-left: 0; box-shadow: 0 12px 40px rgba(0, 0, 0, .28); opacity: 1 !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .28); opacity: 1 !important;
 }
 body.peek #sidebar-resize { display: none; }
 /* The sidebar's toggle: a tab on its right edge that slides with it (on
@@ -104,7 +110,8 @@ body.narrow #sidebar { box-shadow: 0 0 24px rgba(0, 0, 0, .25); }
    or one of their menus or a drag is in progress. Touch-only devices have
    no hover, so there they stay fully visible. */
 @media (any-hover: hover) {
-  body:not(.narrow) #sidebar, #toolbar { opacity: .5; transition: opacity .15s; }
+  body:not(.narrow) #sidebar { opacity: .5; }
+  #toolbar { opacity: .5; transition: opacity .15s; }
   body:not(.narrow) #sidebar:hover, body:not(.narrow) #sidebar:focus-within, #toolbar:hover, #toolbar:focus-within,
   body.dragging #sidebar, body.resizing #sidebar, body.menu-open #sidebar, body.menu-open #toolbar { opacity: 1; }
 }

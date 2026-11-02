@@ -134,36 +134,55 @@ unsafe extern "C-unwind" fn build_menu(_this: *mut AnyObject, _cmd: Sel, builder
     // UIKit built, and fall back to the content containers' key commands.
     let built = objc2::exception::catch(std::panic::AssertUnwindSafe(|| build(mtm, builder)));
     INSTALLED.with(|i| i.set(built.is_ok()));
-    if let Err(e) = built {
-        let reason = e.map(|e| format!("{e:?}")).unwrap_or_default();
-        eprintln!("[snorkle] menu: shortcuts not added to the menu bar: {reason}");
-    }
+    let note = match built {
+        Ok(menus) => format!(
+            "menu: shortcuts in the menu bar ({menus}){}",
+            if suspended() { ", suspended while recording a key" } else { "" }
+        ),
+        Err(e) => {
+            let reason = e.map(|e| format!("{e:?}")).unwrap_or_default();
+            format!("menu: shortcuts NOT in the menu bar (page key commands instead): {reason}")
+        }
+    };
+    eprintln!("[snorkle] {note}");
+    EVENTS.with(|e| {
+        if let Some(events) = e.borrow().as_ref() {
+            events.note(&note);
+        }
+    });
 }
 
 /// Edits the menu. Each target menu is looked up first: menus differ
 /// between iPadOS versions, and a missing one is skipped.
-fn build(mtm: MainThreadMarker, builder: &ProtocolObject<dyn UIMenuBuilder>) {
+/// Returns which menus were changed.
+fn build(mtm: MainThreadMarker, builder: &ProtocolObject<dyn UIMenuBuilder>) -> String {
     let has = |id: &UIMenuIdentifier| builder.menuForIdentifier(id).is_some();
+    let mut done: Vec<&str> = Vec::new();
     unsafe {
         if has(UIMenuFile) {
             let file = inline_menu(mtm, "app.snorkle.file", "", ShortcutMenu::File);
             builder.insertChildMenu_atStartOfMenuForIdentifier(&file, UIMenuFile);
+            done.push("File");
         }
         if has(UIMenuClose) {
             let close = inline_menu(mtm, "app.snorkle.close-tab", "", ShortcutMenu::Close);
             builder.replaceMenuForIdentifier_withMenu(UIMenuClose, &close);
+            done.push("Close");
         }
         if has(UIMenuFind) {
             let find = inline_menu(mtm, "app.snorkle.find", "", ShortcutMenu::Find);
             builder.replaceMenuForIdentifier_withMenu(UIMenuFind, &find);
+            done.push("Find");
         }
         if has(UIMenuView) {
             let view = inline_menu(mtm, "app.snorkle.view", "", ShortcutMenu::View);
             builder.insertChildMenu_atStartOfMenuForIdentifier(&view, UIMenuView);
             let tabs = inline_menu(mtm, "app.snorkle.tabs", "Tabs", ShortcutMenu::Tabs);
             builder.insertSiblingMenu_afterMenuForIdentifier(&tabs, UIMenuView);
+            done.push("View, Tabs");
         }
     }
+    if done.is_empty() { "no target menus found".into() } else { done.join(", ") }
 }
 
 unsafe extern "C-unwind" fn perform(_this: *mut AnyObject, _cmd: Sel, sender: *mut AnyObject) {

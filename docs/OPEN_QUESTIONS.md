@@ -331,4 +331,16 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     (c) **[decide]** The chat archive keeps up to 60 chats with up to 48,000 characters of page
     text each, in the app container (data protection as for other files), until deleted; there is
     no "delete all" yet. Private-tab chats are never stored.
+59. **[verify] Sidebar and shortcuts (2026-11-02).** Reported on device: shortcuts stopped working;
+    the sidebar snapped open from the pop-over; pinning the pop-over replayed the opening. The
+    snap was a CSS rule (half opacity with a pointer) replacing the sidebar's `transition`, so
+    only opacity animated; one transition list now covers slide, reshape and opacity. Pinning
+    replayed because moving from the pop-over onto its toggle tab (outside the sidebar) counted
+    as leaving; the tab and sidebar are now one hover region, and the pop-over opens only after
+    160 ms on the tab. The shortcut failure was not reproduced (the chrome's handling works in a
+    desktop browser; the native path did not change); the in-app console now logs whether the
+    menu-bar shortcuts were installed (`menu: …`) and each shortcut the native side receives
+    (`shortcut …`), to find out on device. Also reported: with the chat open, hovering the
+    toggle "flies out an entire new tab"; not reproduced, assumed to be the pop-over opening
+    on a passing pointer.
 

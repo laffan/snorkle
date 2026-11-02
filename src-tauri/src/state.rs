@@ -427,7 +427,11 @@ impl ContentEvents for Events {
             self.shared.toast(&format!("{host} tried to show a dialog. Dialogs are not supported yet."));
         }
     }
+    fn note(&self, text: &str) {
+        self.shared.log(console::Level::Info, None, text);
+    }
     fn shortcut(&self, shortcut: snorkle_content::Shortcut) {
+        self.shared.log(console::Level::Debug, None, &format!("shortcut {}", shortcut.name()));
         (self.shared.emit)(ChromeEvent::Shortcut(&shortcut.name()));
     }
     fn focus_requested(&self, tab: TabId) {

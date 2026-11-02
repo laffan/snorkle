@@ -271,6 +271,8 @@ pub trait ContentEvents: 'static {
     /// The selection watcher reported where the selection is (a JSON
     /// string, page-influenced; `tab` comes from WebKit).
     fn selection(&self, tab: Option<TabId>, body: String);
+    /// A note for the in-app console (native diagnostics, no page data).
+    fn note(&self, _text: &str) {}
     fn memory_warning(&self);
     fn did_enter_background(&self);
 }
