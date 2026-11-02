@@ -486,7 +486,9 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 #chat-archive[aria-pressed="true"] { background: var(--fg); color: var(--bar); }
 .option { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
 .option > div { flex: 1; }
+.option > .seg { flex: 0 0 auto; }
 .option-title { font-weight: 600; }
+.credits { margin-top: 20px; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 13px; color: var(--muted); }
 .field input, .field textarea {
   width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--field); padding: 8px 10px; font-size: 15px;

@@ -100,6 +100,7 @@ struct Data {
     ai_usage: Vec<AiUsageEvent>,
     pins: Vec<Bookmark>,
     chats: Vec<ChatRecord>,
+    launch_modes: crate::viewmodes::LaunchModes,
 }
 
 /// Chat archive: one file per chat in this directory.
@@ -168,6 +169,8 @@ const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
 const USER_SCRIPTS_FILE: &str = "user-scripts.json";
 const HEADING_RULES_FILE: &str = "heading-rules.json";
 const AI_USAGE_FILE: &str = "ai-usage.json";
+/// View modes each launch starts with (Settings → General).
+const LAUNCH_MODES_FILE: &str = "view-modes.json";
 /// AI requests remembered for the usage table (oldest dropped first).
 pub const MAX_AI_USAGE_EVENTS: usize = 20_000;
 
@@ -255,9 +258,20 @@ impl Store {
         let excess = ai_usage.len().saturating_sub(MAX_AI_USAGE_EVENTS);
         ai_usage.drain(..excess);
         let chats = load_chats(&dir.join(CHATS_DIR));
+        let launch_modes = load_or_reset(&dir.join(LAUNCH_MODES_FILE));
         Ok(Store {
             dir,
-            inner: Mutex::new(Data { history, bookmarks, adblock_allowed, user_scripts, heading_rules, ai_usage, pins, chats }),
+            inner: Mutex::new(Data {
+                history,
+                bookmarks,
+                adblock_allowed,
+                user_scripts,
+                heading_rules,
+                ai_usage,
+                pins,
+                chats,
+                launch_modes,
+            }),
         })
     }
 
@@ -506,6 +520,30 @@ impl Store {
     }
 
     /// Detected heading rules per site ("Detect Headers").
+    /// The view modes each launch starts with.
+    pub fn launch_modes(&self) -> crate::viewmodes::LaunchModes {
+        self.data().launch_modes
+    }
+
+    /// Changes one launch default and stores them. Returns the result.
+    pub fn set_launch_mode(
+        &self,
+        mode: crate::viewmodes::Kind,
+        on: bool,
+    ) -> std::io::Result<crate::viewmodes::LaunchModes> {
+        let (modes, snapshot) = {
+            let mut d = self.data();
+            let before = d.launch_modes;
+            d.launch_modes.set(mode, on);
+            if d.launch_modes == before {
+                return Ok(before);
+            }
+            (d.launch_modes, serde_json::to_vec(&d.launch_modes)?)
+        };
+        atomic_write(&self.dir.join(LAUNCH_MODES_FILE), &snapshot)?;
+        Ok(modes)
+    }
+
     pub fn heading_rules(&self) -> HeadingRules {
         self.data().heading_rules.clone()
     }
@@ -887,6 +925,28 @@ mod tests {
         assert_eq!(s.user_scripts().len(), 1, "tampered entries are dropped on load");
         s.delete_user_script("ok.example").unwrap();
         assert!(s.user_scripts().is_empty());
+    }
+
+    #[test]
+    fn launch_modes_are_stored() {
+        use crate::viewmodes::{Kind, LaunchModes};
+        let dir = tmpdir("launch-modes");
+        {
+            let s = Store::open(&dir).unwrap();
+            assert_eq!(s.launch_modes(), LaunchModes::default());
+            s.set_launch_mode(Kind::Dark, true).unwrap();
+            s.set_launch_mode(Kind::HideMedia, false).unwrap();
+            // The headers view has no launch default.
+            assert_eq!(s.set_launch_mode(Kind::Headers, true).unwrap().modes().headers, false);
+        }
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.launch_modes(), LaunchModes { desaturate: true, hide_media: false, dark: true });
+        assert!(!s.launch_modes().modes().headers);
+        // A partial file keeps the defaults for what it lacks.
+        fs::write(dir.join(LAUNCH_MODES_FILE), br#"{"dark":true}"#).unwrap();
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.launch_modes(), LaunchModes { desaturate: true, hide_media: true, dark: true });
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

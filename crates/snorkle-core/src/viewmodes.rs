@@ -39,8 +39,43 @@ impl Kind {
     pub const ALL: [Kind; 4] = [Kind::Desaturate, Kind::HideMedia, Kind::Headers, Kind::Dark];
 }
 
-/// Which view modes are on (app-wide, or effective for one tab).
-/// Session-only: every launch starts with desaturate and hide media on.
+/// The app-wide view modes each launch starts with (Settings → General),
+/// stored. Dark is also remembered when its toolbar button is pressed; the
+/// buttons for black and white and hide media change the current session
+/// only. The headers view is per tab and never starts on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LaunchModes {
+    pub desaturate: bool,
+    pub hide_media: bool,
+    pub dark: bool,
+}
+
+impl Default for LaunchModes {
+    fn default() -> Self {
+        LaunchModes { desaturate: true, hide_media: true, dark: false }
+    }
+}
+
+impl LaunchModes {
+    /// The app-wide modes a launch starts with.
+    pub fn modes(self) -> ViewModes {
+        ViewModes { desaturate: self.desaturate, hide_media: self.hide_media, headers: false, dark: self.dark }
+    }
+
+    /// Sets one default. The headers view has none (ignored).
+    pub fn set(&mut self, k: Kind, on: bool) {
+        match k {
+            Kind::Desaturate => self.desaturate = on,
+            Kind::HideMedia => self.hide_media = on,
+            Kind::Dark => self.dark = on,
+            Kind::Headers => {}
+        }
+    }
+}
+
+/// Which view modes are on (app-wide, or effective for one tab). Each
+/// launch starts from the stored [`LaunchModes`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewModes {

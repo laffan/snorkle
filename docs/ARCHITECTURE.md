@@ -165,7 +165,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   the panel shows them as foldable sections. Detect Headers sends each candidate's enclosing
   section element and whether it is uppercase, and asks the model for section labels first. The style modes use the same
   mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
-  **Dark** (off by default; moon button) makes content web views prefer a dark appearance
+  **Dark** (off by default; moon button; remembered across launches) makes content web views prefer a dark appearance
   (`overrideUserInterfaceStyle`), so sites with their own dark theme use it; a constant detector
   then checks the page's background (root, body, else the canvas) and, if it is light, marks the
   root so a constant style inverts the page with hues kept (`invert(1) hue-rotate(180deg)`).
@@ -179,8 +179,11 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   pointer (`elementsFromPoint`, plus video boxes by geometry). CSS background images are
   dropped, and videos are paused when they start unless pointed at. The hide-media style runs in every frame and re-attaches itself if
   a page removes it. The palette button shows colour and the images button shows images and
-  video. Both are session-only (`Shared::view_modes`, not persisted), so every launch starts
-  that way. Hidden `<img>` and `<video>` sources still download (hover needs them); CSS
+  video. Each launch starts from the stored launch modes (`viewmodes::LaunchModes`,
+  `view-modes.json`), set in Settings → General (defaults: black and white and hide media on,
+  dark off). The palette and images buttons change the current session only; the moon button
+  also stores the new dark setting, so dark mode is remembered. "Disable for this tab" choices
+  are saved with the session (`SessionTab.exempt`). Hidden `<img>` and `<video>` sources still download (hover needs them); CSS
   background images do not.
 - **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
   tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects

@@ -40,6 +40,9 @@ fn wall_ms() -> u64 {
 pub enum StorageJob {
     History { url: String, title: String },
     Session(Session),
+    /// Write a pending session now (the app is going to the background,
+    /// where iOS may suspend or end it).
+    Flush,
 }
 
 /// Chrome notifications. `State` carries the full chrome state (small: one
@@ -70,10 +73,12 @@ pub struct Shared {
     pub store: Option<Arc<Store>>,
     storage_tx: Option<Mutex<Sender<StorageJob>>>,
     pub(crate) emit: Emitter,
-    /// App-wide view modes. In memory only, so every launch starts with
-    /// the defaults (black and white, media hidden).
+    /// App-wide view modes. Each launch starts from the stored launch
+    /// modes (Settings → General); dark is stored when toggled, the others
+    /// change for the session only.
     pub view_modes: Mutex<ViewModes>,
-    /// Tabs exempted from view modes ("Disable for this tab"). In memory only.
+    /// Tabs exempted from view modes ("Disable for this tab"). Mirrors the
+    /// core's `Tab::view_exempt`, which is saved with the session.
     pub view_exempt: Mutex<HashMap<TabId, BTreeSet<viewmodes::Kind>>>,
     /// Latest outline per tab (headers view).
     pub headings: Mutex<HashMap<TabId, Vec<Heading>>>,
@@ -95,13 +100,14 @@ pub struct Shared {
 impl Shared {
     pub fn new(browser: Browser, store: Option<Store>, emit: Emitter) -> Arc<Self> {
         let store = store.map(Arc::new);
+        let modes = store.as_ref().map(|s| s.launch_modes().modes()).unwrap_or_default();
         let storage_tx = store.clone().map(|s| Mutex::new(spawn_storage_worker(s)));
         Arc::new(Shared {
             browser: Mutex::new(browser),
             store,
             storage_tx,
             emit,
-            view_modes: Mutex::default(),
+            view_modes: Mutex::new(modes),
             view_exempt: Mutex::default(),
             headings: Mutex::default(),
             headers_tabs: Mutex::default(),
@@ -274,6 +280,9 @@ impl Shared {
     }
 }
 
+/// Longest a session snapshot waits before it is written.
+const SESSION_DELAY: Duration = Duration::from_millis(400);
+
 /// Storage worker: history appends are written as they come; session
 /// snapshots are coalesced (only the newest within a short window is
 /// written), since every commit produces one.
@@ -282,33 +291,44 @@ fn spawn_storage_worker(store: Arc<Store>) -> Sender<StorageJob> {
     std::thread::Builder::new()
         .name("snorkle-storage".into())
         .spawn(move || {
-            let mut pending: Option<Session> = None;
+            // Session snapshots are coalesced: the latest one is written at
+            // most 400 ms after the first one that arrived since the last
+            // write. A fixed deadline, so a steady stream of jobs (a busy
+            // page's navigations and history) cannot postpone it forever.
+            let mut pending: Option<(Session, Instant)> = None;
             loop {
-                let job = if pending.is_some() {
-                    match rx.recv_timeout(Duration::from_millis(400)) {
+                let job = match &pending {
+                    Some((_, due)) => match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
                         Ok(j) => Some(j),
                         Err(RecvTimeoutError::Timeout) => None,
                         Err(RecvTimeoutError::Disconnected) => break,
-                    }
-                } else {
-                    match rx.recv() {
+                    },
+                    None => match rx.recv() {
                         Ok(j) => Some(j),
                         Err(_) => break,
-                    }
+                    },
                 };
                 match job {
                     Some(StorageJob::History { url, title }) => {
                         let _ = store.add_history(&url, &title, wall_ms());
                     }
-                    Some(StorageJob::Session(s)) => pending = Some(s),
-                    None => {
-                        if let Some(s) = pending.take() {
+                    Some(StorageJob::Session(s)) => {
+                        let due = pending.take().map(|(_, d)| d).unwrap_or_else(|| Instant::now() + SESSION_DELAY);
+                        pending = Some((s, due));
+                    }
+                    Some(StorageJob::Flush) | None => {
+                        if let Some((s, _)) = pending.take() {
                             let _ = store.save_session(&s);
                         }
                     }
                 }
+                if pending.as_ref().is_some_and(|(_, due)| *due <= Instant::now()) {
+                    if let Some((s, _)) = pending.take() {
+                        let _ = store.save_session(&s);
+                    }
+                }
             }
-            if let Some(s) = pending.take() {
+            if let Some((s, _)) = pending.take() {
                 let _ = store.save_session(&s);
             }
         })
@@ -475,6 +495,7 @@ impl ContentEvents for Events {
     }
     fn did_enter_background(&self) {
         self.apply(|b| b.tick(now_ms()));
+        self.shared.storage(StorageJob::Flush);
     }
 }
 

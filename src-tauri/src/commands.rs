@@ -357,6 +357,8 @@ pub fn unsplit(s: S<'_>, tab: u64) {
 #[derive(Serialize)]
 pub struct ViewModesState {
     modes: ViewModes,
+    /// What each launch starts with (Settings → General).
+    launch: viewmodes::LaunchModes,
     /// Tab id → modes that tab is exempted from.
     exempt: std::collections::HashMap<u64, Vec<viewmodes::Kind>>,
     /// Tabs with the headers view on.
@@ -367,7 +369,8 @@ fn view_modes_state(s: &S<'_>) -> ViewModesState {
     let exempt =
         s.exempt().iter().filter(|(_, k)| !k.is_empty()).map(|(t, k)| (t.0, k.iter().copied().collect())).collect();
     let headers_tabs = s.headers_tabs().iter().map(|t| t.0).collect();
-    ViewModesState { modes: s.view_modes(), exempt, headers_tabs }
+    let launch = s.store.as_ref().map(|st| st.launch_modes()).unwrap_or_default();
+    ViewModesState { modes: s.view_modes(), launch, exempt, headers_tabs }
 }
 
 /// Applies view-mode changes to every page at once, and drops outlines of
@@ -387,12 +390,36 @@ pub fn get_view_mode(s: S<'_>) -> ViewModesState {
     view_modes_state(&s)
 }
 
-/// Turns a view mode on or off app-wide, applied immediately. Not persisted.
+/// Turns a view mode on or off app-wide, applied immediately. Dark is
+/// remembered for the next launch; the others last for this session.
 #[tauri::command]
 pub fn set_view_mode(s: S<'_>, mode: viewmodes::Kind, on: bool) -> ViewModesState {
     s.view_modes.lock().unwrap_or_else(|e| e.into_inner()).set(mode, on);
+    if mode == viewmodes::Kind::Dark {
+        store_launch_mode(&s, mode, on);
+    }
     apply_view_modes(&s);
     view_modes_state(&s)
+}
+
+/// Settings → General: what a view mode starts as at every launch. Also
+/// applied now, app-wide, so the setting takes effect when it is changed.
+#[tauri::command]
+pub fn set_launch_mode(s: S<'_>, mode: viewmodes::Kind, on: bool) -> ViewModesState {
+    if mode != viewmodes::Kind::Headers {
+        store_launch_mode(&s, mode, on);
+        s.view_modes.lock().unwrap_or_else(|e| e.into_inner()).set(mode, on);
+        apply_view_modes(&s);
+    }
+    view_modes_state(&s)
+}
+
+fn store_launch_mode(s: &S<'_>, mode: viewmodes::Kind, on: bool) {
+    if let Some(store) = s.store.as_ref() {
+        if let Err(e) = store.set_launch_mode(mode, on) {
+            s.log(snorkle_core::console::Level::Warn, None, &format!("view modes not saved: {e}"));
+        }
+    }
 }
 
 /// "Disable for this tab": exempts (or stops exempting) one tab from a

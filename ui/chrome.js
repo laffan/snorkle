@@ -36,7 +36,11 @@
   const MAX_PINS = 4;
   // View modes (session-only, kept in Rust): app-wide on/off, and tabs
   // exempted from a mode ("Disable for this tab").
-  let viewModes = { modes: { desaturate: true, hide_media: true, headers: false, dark: false }, exempt: {} };
+  let viewModes = {
+    modes: { desaturate: true, hide_media: true, headers: false, dark: false },
+    launch: { desaturate: true, hide_media: true, dark: false },
+    exempt: {},
+  };
   let headingsByTab = new Map();
   let scripts = [];
   let editingDomain = null; // domain of the script open in the editor, or '' for new
@@ -548,10 +552,17 @@
 
   // ---- drag and drop ------------------------------------------------------
   //
-  // Long-press (or mouse press) then move. Tab → bookmarks bar: bookmark it
-  // at that position. Tab → another tab: split view. A tab of a split pair
-  // → anywhere off its pair: unsplit. Bookmark → bookmarks bar: reorder. A
-  // move before the long-press fires is a scroll.
+  // Touch: long-press, then move; a move before the long-press fires is a
+  // scroll. Mouse and trackpad: press and move (no delay, as on a desktop).
+  // Tab → bookmarks bar: bookmark it at that position. Tab → another tab:
+  // split view. A tab of a split pair → anywhere off its pair: unsplit.
+  // Bookmark → bookmarks bar: reorder.
+  //
+  // Mouse drags used to start on a 120 ms timer even without movement, and
+  // every ended drag swallowed the click. A click held a little longer, or
+  // whose pointerup reached the chrome late because the app's main thread
+  // was busy with a heavy page, then did nothing. Now a drag that never
+  // moved lets its click through.
 
   const DRAG_DELAY_MS = 280;
   const MOVE_TOLERANCE_PX = 8;
@@ -561,8 +572,8 @@
   function armDrag(ev, node, item) {
     if (ev.button > 0 || ev.target.closest('.close, .unpin')) return;
     cancelPending();
-    const delay = ev.pointerType === 'mouse' ? 120 : DRAG_DELAY_MS;
-    pendingDrag = { node, item, x: ev.clientX, y: ev.clientY, timer: setTimeout(startDrag, delay) };
+    const mouse = ev.pointerType === 'mouse';
+    pendingDrag = { node, item, mouse, x: ev.clientX, y: ev.clientY, timer: mouse ? null : setTimeout(startDrag, DRAG_DELAY_MS) };
   }
 
   function cancelPending() {
@@ -583,7 +594,7 @@
     document.body.appendChild(ghost);
     p.node.classList.add('drag-src');
     document.body.classList.add('dragging');
-    dragState = { item: p.item, node: p.node, ghost, dx: p.x - rect.left, dy: p.y - rect.top, target: null };
+    dragState = { item: p.item, node: p.node, ghost, x: p.x, y: p.y, dx: p.x - rect.left, dy: p.y - rect.top, target: null, moved: false };
     showDropZone(p.item);
   }
 
@@ -668,8 +679,11 @@
     d.ghost.remove();
     d.node.classList.remove('drag-src');
     showDropFeedback(null);
-    suppressClick = true;
-    setTimeout(() => { suppressClick = false; }, 0);
+    // Only a drag that moved replaces the click (see above).
+    if (d.moved) {
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 0);
+    }
     const t = d.target;
     if (!commit || !t) return;
     if (d.item.kind === 'tab' && t.kind === 'tab') {
@@ -700,9 +714,11 @@
 
   function dragMoveTo(x, y) {
     if (pendingDrag && Math.hypot(x - pendingDrag.x, y - pendingDrag.y) > MOVE_TOLERANCE_PX) {
-      cancelPending(); // the user is scrolling
+      if (pendingDrag.mouse) startDrag(); // pressed and moved: a drag
+      else cancelPending(); // touch: the user is scrolling
     }
     if (!dragState) return;
+    if (!dragState.moved && Math.hypot(x - dragState.x, y - dragState.y) > MOVE_TOLERANCE_PX) dragState.moved = true;
     dragState.ghost.style.left = x - dragState.dx + 'px';
     dragState.ghost.style.top = y - dragState.dy + 'px';
     dragState.target = dropTargetAt(x, y);
@@ -1542,6 +1558,10 @@
       btn.setAttribute('aria-pressed', String(pressed));
       btn.title = exempt ? `${b.name}: off for this tab (long-press to change)` : `${b.name} (long-press for this tab)`;
     }
+    // Settings → General: what each mode starts as at launch.
+    const launch = viewModes.launch || {};
+    document.querySelectorAll('[data-launch-mode]').forEach((b) =>
+      b.setAttribute('aria-pressed', String(!!launch[b.dataset.launchMode] === (b.dataset.on === 'true'))));
     const h = $('headers');
     const on = headersOn(tab);
     h.classList.toggle('on', on);
@@ -1576,6 +1596,10 @@
   function toggleMode(mode) {
     applyViewModes(T.core.invoke('set_view_mode', { mode, on: !viewModes.modes[mode] }));
   }
+
+  document.querySelectorAll('[data-launch-mode]').forEach((b) => b.addEventListener('click', () => {
+    applyViewModes(T.core.invoke('set_launch_mode', { mode: b.dataset.launchMode, on: b.dataset.on === 'true' }));
+  }));
 
   // Long press (or right click) on a view-mode button.
   let vmPress = null;

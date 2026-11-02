@@ -174,10 +174,38 @@
           <button id="modal-close" class="button">Done</button>
         </div>
         <section data-panel="general">
-          <div class="option"><div>
-            <div class="option-title">View modes</div>
-            <div class="muted small">Black and white, and hiding images and video, are on at every launch; dark pages are off. Tap a mode button in the sidebar to change it for all tabs; long-press it to turn it off for the current tab only. A dot under a button means the mode is on (a ring: off for this tab). The headers view lists the page's headings beside it; the chat button beside it opens an AI chat about the page.</div>
-          </div></div>
+          <h3 class="settings-sub">At launch</h3>
+          <div class="option">
+            <div>
+              <div class="option-title">Black and white</div>
+              <div class="muted small">The palette button changes it until the app is closed.</div>
+            </div>
+            <div class="seg" role="group" aria-label="Black and white at launch">
+              <button data-launch-mode="desaturate" data-on="true" aria-pressed="false">On</button>
+              <button data-launch-mode="desaturate" data-on="false" aria-pressed="false">Off</button>
+            </div>
+          </div>
+          <div class="option">
+            <div>
+              <div class="option-title">Hide images and video</div>
+              <div class="muted small">The images button changes it until the app is closed.</div>
+            </div>
+            <div class="seg" role="group" aria-label="Hide images and video at launch">
+              <button data-launch-mode="hide_media" data-on="true" aria-pressed="false">On</button>
+              <button data-launch-mode="hide_media" data-on="false" aria-pressed="false">Off</button>
+            </div>
+          </div>
+          <div class="option">
+            <div>
+              <div class="option-title">Dark pages</div>
+              <div class="muted small">Remembered: the moon button changes this setting too.</div>
+            </div>
+            <div class="seg" role="group" aria-label="Dark pages at launch">
+              <button data-launch-mode="dark" data-on="true" aria-pressed="false">On</button>
+              <button data-launch-mode="dark" data-on="false" aria-pressed="false">Off</button>
+            </div>
+          </div>
+          <h3 class="settings-sub">Layout</h3>
           <div class="option">
             <div>
               <div class="option-title">Sidebar</div>
@@ -188,14 +216,7 @@
               <button data-sidebar-mode="flyout" aria-pressed="false">Flyout</button>
             </div>
           </div>
-          <div class="option"><div>
-            <div class="option-title">Keyboard</div>
-            <div class="muted small">Shortcuts are listed, and can be changed, under Keyboard. ⌘W asks first on a bookmark's tab (closing it removes the bookmark) and never closes a pinned site's tab.</div>
-          </div></div>
-          <div class="option"><div>
-            <div class="option-title">Ad and tracker blocking</div>
-            <div class="muted small">Uses EasyList and EasyPrivacy by The EasyList authors (easylist.to), licensed CC BY-SA 3.0. Turn it off for one site with the Ads button in the toolbar.</div>
-          </div></div>
+          <p class="muted small credits">Ad and tracker blocking uses EasyList and EasyPrivacy by The EasyList authors (easylist.to), licensed CC BY-SA 3.0.</p>
         </section>
         <section data-panel="ai" hidden>
           <p class="muted small">Connect your own API account to use AI for site scripts, Detect Headers and page chat. Keys are kept in the iOS Keychain on this device only and are never shown again. Requests go directly to the provider. Site scripts send the site's domain, its script and what you type; Detect Headers sends short snippets of the page's headline-like text; each chat message sends the page's address, title, visible text and selection.</p>

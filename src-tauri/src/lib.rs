@@ -55,6 +55,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::unsplit,
         commands::get_view_mode,
         commands::set_view_mode,
+        commands::set_launch_mode,
         commands::set_tab_view_exempt,
         commands::set_tab_headers,
         commands::get_headings,
@@ -196,9 +197,21 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     let effects = shared.browser().restore_session(&session, state::now_ms());
     // Per-tab view-mode exemptions come back with the session; scripts are
     // set (with them) before the restored views are created.
-    for (tab, kinds) in shared.browser().view_exemptions() {
+    let exemptions = shared.browser().view_exemptions();
+    let restored: Vec<String> = exemptions.iter().map(|(t, k)| format!("tab {} {k:?}", t.0)).collect();
+    for (tab, kinds) in exemptions {
         shared.exempt().insert(tab, kinds.into_iter().collect());
     }
+    let launch = shared.view_modes();
+    shared.log(
+        snorkle_core::console::Level::Info,
+        None,
+        &format!(
+            "session: {} tabs restored; view modes {launch:?}; off per tab: {}",
+            session.tabs.len(),
+            if restored.is_empty() { "none".to_string() } else { restored.join(", ") }
+        ),
+    );
     scripts::apply(&shared, false);
     shared.run(effects);
     let pending = std::mem::take(&mut *PENDING_LINKS.lock().unwrap_or_else(|e| e.into_inner()));
