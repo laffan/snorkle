@@ -218,23 +218,28 @@ bookmark's tab; and, with the sidebar closed, a tab on the left edge and the sid
 opens (§5b). Find uses WebKit's own `findString:withConfiguration:` (selects and scrolls to each
 match, wrapping) plus a match count read back from a constant script (C18).
 
-Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are commands of the app's main menu, so they
-work whatever has focus, including nothing (sidebar hidden, no page): ⌘T new tab, ⌘W close tab (a
+Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are key commands vended by the app delegate
+(`keyCommands`, added to tao's class at runtime), the last responder in every chain, so they
+work whatever has focus, including nothing (sidebar hidden, no page). They are not menu-bar
+items any more (as menu items they stopped working, apparently from the menu system's
+validation and key-equivalent conflicts, e.g. ⌘I with Format → Italic); the menu bar only loses
+the system's Close and Find. Recording a binding is native too: while recording, the app delegate
+offers every accepted ⌘ combination and Escape and reports the one pressed. Shortcuts: ⌘T new tab, ⌘W close tab (a
 pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘S or
 ⌘\ sidebar, ⌘⇧\ right panels, ⌘D bookmark (on a bookmark's tab: un-bookmark), ⌘I images,
-⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or right-click / long-press its toggle):
+⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or ⌘-click its toggle):
 **attached**, a full-height column beside the page that the toggle shows and hides, and
-**flyout**, hidden until the pointer rests on the toggle (160 ms) and hidden again 280 ms after it
-leaves the sidebar. ⌘\ (and ⌘S, and clicking the toggle) shows or hides an attached sidebar, and
+**flyout**, shown as soon as the pointer reaches the toggle and hidden 150 ms after it leaves
+the sidebar. ⌘\ (and clicking the toggle) shows or hides an attached sidebar, and
 turns a flyout, hidden or showing, into an attached, shown sidebar. The toggle tab is a child of
 the sidebar on its right edge, so it always moves with it (a line in attached mode, an arrow in
 flyout mode). All state changes go through `setSidebarState`. The chrome always reports two
 sidebar holes, the panel (off-screen while hidden; left of the page while attached) and the tab,
-so the set of holes keeps its shape and the host animates the mask path with the CSS slide
-(`apply_mask` keeps its `CAShapeLayer`; `CATransaction`, 0.25 s ease-in-out) together with the
-page frames (`set_chrome_layout` `animate`, `UIView.animateWithDuration`). Settings → Keyboard rebinds them: the chrome keeps the user's bindings and
-sends them at launch (`set_shortcuts`, validated, clashes refused); the menu is rebuilt, and
-while a key is being recorded the shortcuts are suspended so the keys reach the chrome. The
+so the set of holes keeps its shape and the host animates the mask path with an explicit
+`CABasicAnimation` (0.25 s ease-in-out, back-dated by the time since the chrome started its CSS
+slide, `set_chrome_layout` `animateSince`, so both move together), together with the page
+frames (`UIView.animateWithDuration`). Settings → Keyboard rebinds them: the chrome keeps the user's bindings and
+sends them at launch (`set_shortcuts`, validated, clashes refused). The
 chrome's own keydown handler uses the same bindings when it has focus; a shortcut arriving twice
 within 60 ms is run once. An input the chrome opens from a shortcut (palette, find, chat) first
 asks the host to make the chrome's web view first responder (`focus_chrome`).

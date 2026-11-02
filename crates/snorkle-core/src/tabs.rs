@@ -149,6 +149,9 @@ pub struct Tab {
     /// tab is not listed with the other tabs; the pin or bookmark is shown
     /// as selected instead, and opening it again returns to this tab.
     pub launcher: Option<String>,
+    /// View modes turned off for this tab ("Disable for this tab"); saved
+    /// with the session.
+    pub view_exempt: Vec<crate::viewmodes::Kind>,
 }
 
 impl Tab {
@@ -173,6 +176,7 @@ impl Tab {
             crash_times_ms: Vec::new(),
             opener: None,
             sheet: false,
+            view_exempt: Vec::new(),
             launcher: None,
         }
     }

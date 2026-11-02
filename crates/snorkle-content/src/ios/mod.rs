@@ -49,8 +49,10 @@ use objc2_foundation::{
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSSet, NSString,
     NSURLRequest, NSURL, NSUUID,
 };
+use objc2_core_graphics::CGPath;
 use objc2_quartz_core::{
-    kCAFillRuleEvenOdd, kCAMediaTimingFunctionEaseInEaseOut, CAMediaTimingFunction, CAShapeLayer, CATransaction,
+    kCAFillRuleEvenOdd, kCAMediaTimingFunctionEaseInEaseOut, CABasicAnimation, CACurrentMediaTime,
+    CAMediaTiming, CAMediaTimingFunction, CAShapeLayer, CATransaction,
 };
 use objc2_ui_kit::{
     UIActivityViewController, UIApplication, UIApplicationDidEnterBackgroundNotification,
@@ -274,7 +276,9 @@ impl ContentHost {
     /// the content area (see the module docs).
     /// With `animate`, the page frames move over 0.25 s (the sidebar's
     /// slide in the chrome takes as long).
-    pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64, holes: Vec<Hole>, animate: bool) {
+    /// `animate`: seconds since the chrome began its slide (`None`: move
+    /// at once).
+    pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64, holes: Vec<Hole>, animate: Option<f64>) {
         let before = self.content_frame().size.width;
         self.top.set(top);
         self.left.set(left);
@@ -285,19 +289,19 @@ impl ContentHost {
         // The cut-outs glide (with the frames) only between sets of the
         // same shape; e.g. the sidebar's pop-over and toggle tab, which the
         // chrome always reports, on- or off-screen.
-        let glide = animate && holes.len() == self.holes.borrow().len();
+        let glide = animate.filter(|_| holes.len() == self.holes.borrow().len());
         *self.holes.borrow_mut() = holes;
         let grew = self.content_frame().size.width > before + 0.5;
         let moves: Vec<(Retained<UIView>, CGRect)> =
             self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()))).collect();
-        if animate {
+        if let Some(lag) = animate {
             let holes = self.holes.borrow().clone();
             let block = RcBlock::new(move || {
                 for (view, frame) in &moves {
                     place_view(view, *frame, &holes, glide);
                 }
             });
-            UIView::animateWithDuration_animations(0.25, &block, self.mtm);
+            UIView::animateWithDuration_animations((GLIDE_SECONDS - lag).max(0.05), &block, self.mtm);
         } else {
             for (view, frame) in &moves {
                 self.place(view, *frame);
@@ -317,7 +321,7 @@ impl ContentHost {
     /// Sets a container's frame (and its web view's, which normally follows
     /// by autoresizing) and cuts the holes out of it.
     fn place(&self, view: &UIView, frame: CGRect) {
-        place_view(view, frame, &self.holes.borrow(), false);
+        place_view(view, frame, &self.holes.borrow(), None);
     }
 
     /// Replaces everything injected (user scripts, view modes with per-tab
@@ -699,7 +703,7 @@ impl ContentHost {
         web.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), frame.size));
 
         container.addSubview(&web);
-        apply_mask(&container, &self.holes.borrow(), false);
+        apply_mask(&container, &self.holes.borrow(), None);
         set_dark(&web, self.injections.view_for(tab).dark);
         self.root.addSubview(&container);
         injection::install(mtm, &controller, self.scripts_for(tab));
@@ -830,22 +834,26 @@ impl Drop for ContentHost {
 }
 
 /// Sets a container's frame and its web view's, and cuts `holes` out.
-fn place_view(view: &UIView, frame: CGRect, holes: &[Hole], animate: bool) {
+fn place_view(view: &UIView, frame: CGRect, holes: &[Hole], glide: Option<f64>) {
     view.setFrame(frame);
     for sub in view.subviews().iter() {
         sub.setFrame(view.bounds());
     }
-    apply_mask(view, holes, animate);
+    apply_mask(view, holes, glide);
 }
 
 /// Masks `view` (a direct subview of the root view) so the holes are not
 /// drawn; no mask when there are none. Holes never overlap
-/// (`sanitize_holes` merges them), as the even-odd fill requires. The mask
-/// layer is kept, so with `animate` its path moves to the new holes over
-/// 0.25 s, ease-in-out like the chrome's CSS slide (Core Animation
-/// interpolates paths of the same shape; callers animate only when the
-/// number of holes is unchanged). Otherwise the change is immediate.
-fn apply_mask(view: &UIView, holes: &[Hole], animate: bool) {
+/// (`sanitize_holes` merges them), as the even-odd fill requires.
+///
+/// With `glide` (seconds since the chrome started its 0.25 s CSS slide),
+/// the mask's path animates from the old holes to the new ones with an
+/// explicit animation, ease-in-out, begun that long ago so it lines up with
+/// the chrome's slide despite the IPC delay. (An implicit layer action is
+/// not used: inside a `UIView` animation block it may be suppressed, and
+/// then the cut-outs jump while the sidebar slides.) Callers glide only
+/// when the number of holes is unchanged, so both paths have the same shape.
+fn apply_mask(view: &UIView, holes: &[Hole], glide: Option<f64>) {
     let f = view.frame();
     let b = view.bounds();
     let layer = view.layer();
@@ -867,26 +875,38 @@ fn apply_mask(view: &UIView, holes: &[Hole], animate: bool) {
         };
         path.appendPath(&hole);
     }
+    let new_path = path.CGPath();
     let existing = layer.mask().and_then(|m| m.downcast::<CAShapeLayer>().ok());
-    let animate = animate && existing.is_some();
+    let old_path = existing.as_ref().and_then(|m| m.path());
     let mask = existing.unwrap_or_else(CAShapeLayer::layer);
     CATransaction::begin();
-    if animate {
-        CATransaction::setAnimationDuration(0.25);
-        CATransaction::setAnimationTimingFunction(Some(&CAMediaTimingFunction::functionWithName(unsafe {
-            kCAMediaTimingFunctionEaseInEaseOut
-        })));
-    } else {
-        CATransaction::setDisableActions(true);
-    }
+    CATransaction::setDisableActions(true);
     mask.setFrame(b);
-    mask.setPath(Some(&path.CGPath()));
+    mask.setPath(Some(&new_path));
     unsafe {
         mask.setFillRule(kCAFillRuleEvenOdd);
         layer.setMask(Some(&mask));
     }
     CATransaction::commit();
+    if let (Some(lag), Some(old)) = (glide, old_path) {
+        let anim = CABasicAnimation::animationWithKeyPath(Some(&NSString::from_str("path")));
+        // CGPath is toll-free bridged: a valid Objective-C object.
+        let as_obj = |p: &CGPath| unsafe { &*(p as *const CGPath as *const AnyObject) };
+        unsafe {
+            anim.setFromValue(Some(as_obj(&old)));
+            anim.setToValue(Some(as_obj(&new_path)));
+        }
+        anim.setDuration(GLIDE_SECONDS);
+        anim.setBeginTime(CACurrentMediaTime() - lag.clamp(0.0, GLIDE_SECONDS));
+        anim.setTimingFunction(Some(&CAMediaTimingFunction::functionWithName(unsafe {
+            kCAMediaTimingFunctionEaseInEaseOut
+        })));
+        mask.addAnimation_forKey(&anim, Some(&NSString::from_str("snorkleGlide")));
+    }
 }
+
+/// Length of the chrome's sidebar slide (CSS `.25s ease-in-out`).
+const GLIDE_SECONDS: f64 = 0.25;
 
 /// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
 /// and the default canvas); otherwise the system's.

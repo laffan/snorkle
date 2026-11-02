@@ -144,8 +144,7 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
     def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", 0, Shortcut::Bookmark),
     def("close_tab", ShortcutMenu::Close, "Close Tab", "w", 0, Shortcut::CloseTab),
     def("find", ShortcutMenu::Find, "Find on Page", "f", 0, Shortcut::Find),
-    def("toggle_sidebar", ShortcutMenu::View, "Show or Hide Sidebar", "s", 0, Shortcut::ToggleSidebar),
-    def("toggle_sidebar_alt", ShortcutMenu::View, "Toggle Sidebar", "\\", 0, Shortcut::ToggleSidebar),
+    def("toggle_sidebar", ShortcutMenu::View, "Show or Hide Sidebar", "\\", 0, Shortcut::ToggleSidebar),
     def("toggle_right", ShortcutMenu::View, "Toggle Right Panel", "\\", MOD_SHIFT, Shortcut::ToggleRightPanel),
     def("toggle_images", ShortcutMenu::View, "Show or Hide Images", "i", 0, Shortcut::ToggleImages),
     def("item_1", ShortcutMenu::Tabs, "Go to Item 1", "1", 0, Shortcut::Item(1)),
@@ -273,6 +272,9 @@ pub trait ContentEvents: 'static {
     fn selection(&self, tab: Option<TabId>, body: String);
     /// A note for the in-app console (native diagnostics, no page data).
     fn note(&self, _text: &str) {}
+    /// The shortcut editor's recording: the ⌘ combination pressed (key,
+    /// `MOD_*` bits), or `None` for Escape.
+    fn key_recorded(&self, _key: Option<(String, u8)>) {}
     fn memory_warning(&self);
     fn did_enter_background(&self);
 }

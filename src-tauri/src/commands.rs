@@ -151,9 +151,16 @@ pub fn set_chrome_layout(
     bottom: f64,
     overlay: bool,
     holes: Vec<HoleArg>,
-    animate: Option<bool>,
+    animate_since: Option<f64>,
 ) {
-    let animate = animate.unwrap_or(false);
+    // Seconds since the chrome began its slide (so the host can line up).
+    let animate = animate_since.filter(|t| t.is_finite()).map(|since| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .unwrap_or(since);
+        ((now - since) / 1000.0).clamp(0.0, 0.25)
+    });
     let holes: Vec<snorkle_content::Hole> = holes
         .into_iter()
         .take(snorkle_content::MAX_HOLES)
@@ -389,18 +396,22 @@ pub fn set_view_mode(s: S<'_>, mode: viewmodes::Kind, on: bool) -> ViewModesStat
 }
 
 /// "Disable for this tab": exempts (or stops exempting) one tab from a
-/// view mode. Not persisted.
+/// view mode. Saved with the session (non-private tabs).
 #[tauri::command]
 pub fn set_tab_view_exempt(s: S<'_>, tab: u64, mode: viewmodes::Kind, exempt: bool) -> ViewModesState {
     let tab = TabId(tab);
     if s.browser().tab(tab).is_some() {
-        let mut map = s.exempt();
-        let set = map.entry(tab).or_default();
-        if exempt {
-            set.insert(mode);
-        } else {
-            set.remove(&mode);
-        }
+        let kinds: Vec<viewmodes::Kind> = {
+            let mut map = s.exempt();
+            let set = map.entry(tab).or_default();
+            if exempt {
+                set.insert(mode);
+            } else {
+                set.remove(&mode);
+            }
+            set.iter().copied().collect()
+        };
+        with_browser(&s, |b| b.set_view_exempt(tab, &kinds));
     }
     apply_view_modes(&s);
     view_modes_state(&s)

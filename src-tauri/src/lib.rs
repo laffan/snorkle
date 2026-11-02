@@ -193,8 +193,13 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     // Injected scripts first, so restored views are created with them.
     let capture = shared.capturing();
     snorkle_content::dispatch_main(move || state::with_host(|h| h.set_console_capture(capture)));
-    scripts::apply(&shared, false);
     let effects = shared.browser().restore_session(&session, state::now_ms());
+    // Per-tab view-mode exemptions come back with the session; scripts are
+    // set (with them) before the restored views are created.
+    for (tab, kinds) in shared.browser().view_exemptions() {
+        shared.exempt().insert(tab, kinds.into_iter().collect());
+    }
+    scripts::apply(&shared, false);
     shared.run(effects);
     let pending = std::mem::take(&mut *PENDING_LINKS.lock().unwrap_or_else(|e| e.into_inner()));
     open_links(&shared, pending);

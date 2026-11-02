@@ -268,6 +268,26 @@ fn new_window_fallback_inherits_profile() {
 }
 
 #[test]
+fn view_exemptions_are_saved_with_the_session() {
+    use snorkle_core::viewmodes::Kind;
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(t, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, t, "https://a.example/");
+    let out = b.set_view_exempt(t, &[Kind::HideMedia, Kind::Desaturate, Kind::HideMedia, Kind::Headers]);
+    assert!(out.iter().any(|e| matches!(e, Effect::PersistSession(_))));
+    let session = b.session();
+    assert_eq!(session.tabs[0].exempt, vec![Kind::Desaturate, Kind::HideMedia], "sorted, unique, no headers");
+    let mut b2 = browser(4);
+    b2.restore_session(&session, 0);
+    let ex = b2.view_exemptions();
+    assert_eq!(ex.len(), 1);
+    assert_eq!(ex[0].1, vec![Kind::Desaturate, Kind::HideMedia]);
+    let (p, _) = b.new_tab(Profile::Private, 1);
+    assert!(b.set_view_exempt(p, &[Kind::Dark]).is_empty(), "private tabs are never saved");
+}
+
+#[test]
 fn bookmarking_moves_the_tab() {
     let mut b = browser(4);
     let (t, _) = b.new_tab(Profile::Default, 0);
@@ -395,7 +415,7 @@ fn session_restore_is_lazy() {
     let mut b = browser(4);
     let s = Session {
         tabs: (0..10)
-            .map(|i| SessionTab { url: format!("https://s{i}.example/"), title: String::new(), launcher: None })
+            .map(|i| SessionTab { url: format!("https://s{i}.example/"), title: String::new(), launcher: None, exempt: vec![] })
             .collect(),
         active: Some(3),
     };

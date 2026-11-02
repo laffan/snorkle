@@ -355,4 +355,15 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     detector runs at document end; pages that take long to reach DOMContentLoaded stay dim that
     long. Media are dimmed until hovered; media under overlays (video players) are not undimmed by
     pointing unless hide media's pointer tracker is running.
+62. **[verify] Shortcuts moved to the app delegate (2026-11-02).** Reported: ⌘\, ⌘⇧\ and ⌘T dead
+    since the shortcut editor (round 4), and recording stuck at "Press keys…". Round 4 made the
+    menu bar rebuild with the shortcuts at launch and added ⌘I, which the system's Format menu
+    also uses; the exact failure was not observed (no device here). Shortcuts are now responder
+    key commands of the app delegate, and recording uses native key commands. Check: every
+    shortcut works with a page, the chrome, or nothing focused; recording finishes; the
+    console shows `keys: shortcuts offered by the app delegate`. Whether responder key
+    commands win over a menu-bar item with the same keys (⌘I and Italic in text fields) is
+    unverified. ⌘S was removed (⌘\ remains).
+63. **[verify] View-mode exemptions are saved with the session** (`SessionTab.exempt`), restored
+    before the restored views are created; not for private tabs.
 

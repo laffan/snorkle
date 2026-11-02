@@ -814,12 +814,14 @@
 
   // `animate`: the page and its cut-outs slide with the sidebar (the host
   // animates them over the same 0.25 s as the CSS).
+  let slideStartedAt = 0;
   function applySidebar(animate) {
     const b = document.body.classList;
     b.toggle('narrow', narrow);
     b.toggle('sb-flyout', flyoutMode());
     b.toggle('sb-hidden', !sidebarShown);
     b.toggle('sb-docked', sidebarDocked());
+    if (animate) slideStartedAt = Date.now();
     $('sidebar').setAttribute('aria-hidden', String(!sidebarShown));
     const tab = $('edge-tab');
     tab.setAttribute('aria-expanded', String(sidebarShown));
@@ -907,14 +909,13 @@
   // ---- toggle tab and flyout ----------------------------------------------
   //
   // The tab is part of the sidebar (it moves with it). In flyout mode,
-  // resting the pointer on it for a moment shows the sidebar; leaving the
-  // sidebar (tab included) hides it again. Clicking the tab follows ⌘\.
-  // Without a pointer, a first tap shows the flyout and a second attaches
-  // it. Right-click or long-press switches mode.
+  // pointing at it shows the sidebar at once; leaving the sidebar (tab
+  // included) hides it again. Clicking the tab follows ⌘\. Without a
+  // pointer, a first tap shows the flyout and a second attaches it.
+  // ⌘-click switches mode.
   let flyTimer = 0;
   let hoverTimer = 0;
-  const HOVER_INTENT_MS = 160;
-  const LEAVE_MS = 280;
+  const LEAVE_MS = 150;
   let tabPointer = 'mouse';
   function sidebarBusy() {
     return menuOpen || !$('vm-pop').hidden || !!dragState || !!resize;
@@ -933,25 +934,12 @@
   const tabEl = $('edge-tab');
   tabEl.addEventListener('pointerenter', (ev) => {
     clearTimeout(flyTimer);
-    if (ev.pointerType !== 'mouse' || !flyoutMode() || sidebarShown) return;
-    clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => setSidebarState('flyout', true), HOVER_INTENT_MS);
+    if (ev.pointerType === 'mouse' && flyoutMode() && !sidebarShown) setSidebarState('flyout', true);
   });
-  tabEl.addEventListener('pointerleave', () => clearTimeout(hoverTimer));
-  let tabPress = null;
-  tabEl.addEventListener('pointerdown', (ev) => {
-    tabPointer = ev.pointerType || 'mouse';
-    clearTimeout(tabPress && tabPress.timer);
-    if (ev.pointerType !== 'mouse') tabPress = { fired: false, timer: setTimeout(() => { tabPress.fired = true; switchSidebarMode(); }, 550) };
-  });
-  const endTabPress = () => { if (tabPress) clearTimeout(tabPress.timer); };
-  tabEl.addEventListener('pointerup', endTabPress);
-  tabEl.addEventListener('pointercancel', endTabPress);
-  tabEl.addEventListener('contextmenu', (ev) => { ev.preventDefault(); switchSidebarMode(); });
+  tabEl.addEventListener('pointerdown', (ev) => { tabPointer = ev.pointerType || 'mouse'; });
   tabEl.addEventListener('click', (ev) => {
     ev.stopPropagation();
-    if (tabPress && tabPress.fired) { tabPress = null; return; }
-    clearTimeout(hoverTimer);
+    if (ev.metaKey) { switchSidebarMode(); return; }
     // No hover without a pointer: the first tap shows the flyout.
     if (flyoutMode() && !sidebarShown && tabPointer !== 'mouse') { setSidebarState('flyout', true); return; }
     toggleSidebar();
@@ -1401,7 +1389,9 @@
     const key = JSON.stringify([top, left, right, bottom, overlay, holes]);
     if (key === lastLayout) return;
     lastLayout = key;
-    invoke('set_chrome_layout', { top, left, right, bottom, overlay, holes, animate: !!(opts && opts.animate) });
+    // When the sidebar slides, the host animates the page and its cut-outs
+    // to match, starting from when the CSS transition did.
+    invoke('set_chrome_layout', { top, left, right, bottom, overlay, holes, animateSince: opts && opts.animate ? slideStartedAt : null });
   }
 
   // Chrome that floats over the page: the pill, its popup, toasts and
@@ -2293,6 +2283,15 @@
   // and this page's own keydown, depending on what has focus).
   let lastShortcut = { name: '', at: 0 };
   function runShortcut(name) {
+    // The shortcut editor's recording, done natively (record:<mods>:<key>).
+    if (name.startsWith('record:')) {
+      if (!recordingKey) return;
+      if (name === 'record:cancel') { stopRecording(''); return; }
+      const rest = name.slice(7);
+      const i = rest.indexOf(':');
+      finishRecording(rest.slice(i + 1), Number(rest.slice(0, i)) || 0);
+      return;
+    }
     const now = performance.now();
     if (name === lastShortcut.name && now - lastShortcut.at < 60) return;
     lastShortcut = { name, at: now };
@@ -2585,18 +2584,29 @@
     if (!ev.metaKey) { keysMsg('Hold ⌘ with the key.'); return; }
     const pressed = keyOf(ev);
     if (!pressed) { keysMsg('That key can’t be used.'); return; }
+    finishRecording(pressed.key, pressed.mods);
+  }, true);
+
+  // Saves the recorded combination for the shortcut being changed (from the
+  // native recording, or this page's keydown where ⌘ keys reach it).
+  function finishRecording(key, mods) {
     const id = recordingKey;
-    const next = savedBindings().filter((b) => b.id !== id).concat([{ id, key: pressed.key, mods: pressed.mods }]);
+    if (!id) return;
+    const next = savedBindings().filter((b) => b.id !== id).concat([{ id, key, mods }]);
     T.core.invoke('set_shortcuts', { bindings: next, suspend: false })
       .then((list) => {
         shortcutList = list;
         setPref('shortcuts', JSON.stringify(next));
         recordingKey = null;
         renderKeys();
-        keysMsg(`Saved: ${comboLabel(pressed.key, pressed.mods)}.`);
+        keysMsg(`Saved: ${comboLabel(key, mods)}.`);
       })
-      .catch((e) => keysMsg(String(e)));
-  }, true);
+      .catch((e) => {
+        keysMsg(String(e));
+        // Still recording: let the host offer the combinations again.
+        applyBindings(savedBindings(), true).catch(() => {});
+      });
+  }
 
   $('keys-reset').addEventListener('click', () => {
     recordingKey = null;

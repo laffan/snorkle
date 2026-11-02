@@ -68,6 +68,9 @@ pub struct SessionTab {
     /// The pin or bookmark (by URL) this tab belongs to, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launcher: Option<String>,
+    /// View modes turned off for this tab ("Disable for this tab").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exempt: Vec<crate::viewmodes::Kind>,
 }
 
 /// Returns the normalised URL string if `s` is an http(s) URL.
@@ -1001,8 +1004,8 @@ mod tests {
         let s = Store::open(&dir).unwrap();
         let sess = Session {
             tabs: vec![
-                SessionTab { url: "https://a.example/".into(), title: "a".into(), launcher: None },
-                SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None },
+                SessionTab { url: "https://a.example/".into(), title: "a".into(), launcher: None, exempt: vec![] },
+                SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None, exempt: vec![] },
             ],
             active: Some(1),
         };

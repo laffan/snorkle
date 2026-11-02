@@ -374,7 +374,10 @@ impl ContentEvents for Events {
         if let Some(t) = tab {
             let inherited = self.shared.exempt().get(&opener).cloned();
             if let Some(set) = inherited {
+                let kinds: Vec<_> = set.iter().copied().collect();
                 self.shared.exempt().insert(t, set);
+                let effects = self.shared.browser().set_view_exempt(t, &kinds);
+                self.shared.run(effects);
                 crate::scripts::apply(&self.shared, false);
             }
         }
@@ -426,6 +429,13 @@ impl ContentEvents for Events {
             let host = snorkle_core::text::sanitize_page_text(&origin_host, 80);
             self.shared.toast(&format!("{host} tried to show a dialog. Dialogs are not supported yet."));
         }
+    }
+    fn key_recorded(&self, key: Option<(String, u8)>) {
+        let name = match key {
+            Some((k, mods)) => format!("record:{mods}:{k}"),
+            None => "record:cancel".to_string(),
+        };
+        (self.shared.emit)(ChromeEvent::Shortcut(&name));
     }
     fn note(&self, text: &str) {
         self.shared.log(console::Level::Info, None, text);

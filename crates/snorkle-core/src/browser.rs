@@ -298,6 +298,7 @@ impl Browser {
             tab.committed_url = Some(url);
             tab.title = sanitize_page_text(&st.title, MAX_PAGE_TEXT_CHARS);
             tab.launcher = st.launcher.as_deref().and_then(crate::storage::storable_url);
+            tab.view_exempt = clean_exempt(&st.exempt);
             self.tabs.push(tab);
             ids.push(id);
         }
@@ -545,6 +546,24 @@ impl Browser {
             t.launcher = Some(key.to_string());
         }
         (true, vec![Effect::PersistSession(self.session()), Effect::NotifyChrome])
+    }
+
+    /// The view modes turned off for a tab ("Disable for this tab"). Saved
+    /// with the session (not for private tabs, which are never saved).
+    pub fn set_view_exempt(&mut self, id: TabId, kinds: &[crate::viewmodes::Kind]) -> Vec<Effect> {
+        let kinds = clean_exempt(kinds);
+        let Some(t) = self.tab_mut(id) else { return Vec::new() };
+        if t.view_exempt == kinds {
+            return Vec::new();
+        }
+        t.view_exempt = kinds;
+        let private = t.is_private();
+        if private { Vec::new() } else { vec![Effect::PersistSession(self.session())] }
+    }
+
+    /// Tabs with view-mode exemptions (restored from the session).
+    pub fn view_exemptions(&self) -> Vec<(TabId, Vec<crate::viewmodes::Kind>)> {
+        self.tabs.iter().filter(|t| !t.view_exempt.is_empty()).map(|t| (t.id, t.view_exempt.clone())).collect()
     }
 
     /// The pin or bookmark `key` was removed: its tab becomes an ordinary
@@ -1232,6 +1251,7 @@ impl Browser {
             tabs: persistable
                 .iter()
                 .map(|t| SessionTab {
+                    exempt: t.view_exempt.clone(),
                     launcher: t.launcher.clone(),
                     url: t.committed_url.as_ref().map(|u| u.to_string()).unwrap_or_default(),
                     title: t.title.clone(),
@@ -1331,4 +1351,13 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
         sheet_over: t.opener.filter(|_| t.sheet),
         launcher: t.launcher.clone(),
     }
+}
+
+/// Exemptions as stored: sorted, unique, and only for app-wide modes (the
+/// headers view is its own per-tab switch).
+fn clean_exempt(kinds: &[crate::viewmodes::Kind]) -> Vec<crate::viewmodes::Kind> {
+    let mut v: Vec<_> = kinds.iter().copied().filter(|k| *k != crate::viewmodes::Kind::Headers).collect();
+    v.sort();
+    v.dedup();
+    v
 }
