@@ -123,7 +123,7 @@ filter lists (none shipped yet), extensions (non-goal), sync (non-goal).
 | Invalid certificates | A2 | No trust override path exists in code. Certificate errors on explicit https are not bypassable. | – |
 | Popups / tabnabbing | A1 | `javaScriptCanOpenWindowsAutomatically = false`. `createWebView` runs the navigation policy, then returns a popup web view built from WebKit's configuration, shown as a tab. WebKit applies `noopener` to `target=_blank` links. The address bar shows each tab's own committed URL. | A popup can navigate its opener (needed for OAuth). That is visible in the address bar, but could still fool an inattentive user. |
 | Opening other apps (`tel:`, `itms-apps:` …) | A1 | Main frame only, with a gesture-classified navigation, and always behind a chrome confirmation prompt. | Gesture detection relies on `WKNavigationType` (OPEN_QUESTIONS #7). |
-| Drive-by downloads | A1 | Not supported: download navigations and non-renderable responses are cancelled. | – |
+| Drive-by downloads | A1 | Since 2026-11-03 downloads are supported (§5h): main frame only, `policy::may_download` (http/https without credentials, the page's own `blob:`/`data:`), at most 5 per tab per minute and 20 at once. Files land in the app's staging folder under an app-chosen, cleaned name; nothing is opened or run; they leave only when the user saves or shares them. macOS marks them quarantined. | A page can still start a download without a click (an attachment response); the rate limit and the visible list bound it. Disk use is not capped. |
 | Memory-pressure DoS (crash loops) | A1 | Live-view budget, background TTL, discard on memory warning, bounded auto-reload after WebContent termination (2 per 60 s, then a "page keeps crashing" notice). | Budgets unvalidated on hardware (OPEN_QUESTIONS #3). |
 | Private-mode leakage | A1/A4 | Separate non-persistent store, never written to history/session/bookmarks (enforced in core and fuzzed), store wiped on last private tab close, exceptions cleared. | WebKit-internal caches outside the data store, if any (OPEN_QUESTIONS #9). |
 | Data at rest | A4 | `NSFileProtectionComplete`. No credentials stored by the app; credentials only via iOS Keychain/AutoFill (§6). | – |
@@ -388,6 +388,27 @@ appear). Selecting text on a page shows a small menu above it, cut out of the pa
 dictionary). A watcher in the page's client world reports where the selection is (C19); the text
 is read when the menu appears (C20).
 
+## 5h. Downloads (2026-11-03)
+
+A main-frame response WebKit cannot show, or one the server marks `Content-Disposition:
+attachment`, and a click on a link with a `download` attribute become a `WKDownload` when
+`ContentEvents::may_download` allows it (§3); in subframes they are cancelled. The download
+delegate (`snorkle-content/src/webkit/downloads.rs`) asks the app where to write: the app picks
+`downloads/<id>/<name>` in the profile folder (`storage::Store::new_download`; the suggested name is
+reduced to one cleaned path component, `clean_download_name`). Redirects are followed only to URLs
+the policy accepts; authentication gets the system's default handling. Progress is read twice a
+second (`NSProgress`) and sent to the chrome (`downloads` event); the menu button shows a pulsing
+dot and the menu item a count while downloads run, and a toast says when one starts and ends.
+
+Menu → Downloads lists them, newest first: progress while running (Cancel), and for finished files
+Save to Files… (iPadOS, the Files export picker) or Save… (macOS, a save panel; the copy keeps the
+quarantine mark), Share… and × (deletes the file). Clear deletes every finished or failed one.
+Finished downloads of non-private tabs are recorded in `downloads.json` and kept until deleted;
+failed and cancelled ones keep a record without a file. Private-tab downloads are listed for the
+session only and deleted (cancelled if running) when the private session ends. Folders without a
+record (interrupted downloads, earlier private ones) are deleted when the app starts. A
+`target=_blank` link that turns out to be a download leaves its new tab empty.
+
 ## 5e. Docked panels
 
 Native page views sit above the chrome's webview, so the chrome cannot draw over a page except
@@ -445,7 +466,7 @@ errors/warnings, this tab only. Copy puts the visible entries on the clipboard.
 ## 5b. Chrome layout
 
 Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T) opens an Arc-style command palette centred over the content area (which is hidden while it is open): typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per
-page, loaded when the palette opens), and the last row searches or goes to the text in a new tab; no tab exists until a row is chosen. The bottom bar holds the menu (New Tab, New Private Tab, History, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
+page, loaded when the palette opens), and the last row searches or goes to the text in a new tab; no tab exists until a row is chosen. The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both

@@ -473,6 +473,29 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .history-list li.selected .check { background: var(--fg); border-color: var(--fg); box-shadow: 0 0 0 3px var(--field) inset; }
 .history-list mark, .page-copy-body mark { background: var(--fg); color: var(--bar); border-radius: 2px; }
 #panel.selecting .history-list li.visit { user-select: none; -webkit-user-select: none; }
+/* Downloads: one row per file, with a progress bar while it runs. */
+.downloads-note { margin: 0 0 8px; }
+.downloads-list li.dl { padding: 10px 4px; gap: 10px; }
+.downloads-list .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.downloads-list .t { font-weight: 600; }
+.downloads-list .meta { font-size: 13px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.downloads-list .meta.err { color: var(--danger); }
+.downloads-list .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 3px; }
+.downloads-list .bar > i { display: block; height: 100%; width: 0; background: var(--fg); border-radius: 2px; transition: width .4s linear; }
+.downloads-list .bar.indeterminate > i { width: 30%; animation: dl-slide 1.2s ease-in-out infinite; }
+@keyframes dl-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.downloads-list .acts { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; }
+.downloads-list .acts .button { padding: 7px 12px; }
+.downloads-list .acts .x { width: 30px; height: 30px; border-radius: 8px; color: var(--muted); font-size: 18px; }
+.downloads-list .acts .x:hover { background: var(--field); color: var(--fg); }
+/* The menu button marks running downloads. */
+#menu { position: relative; }
+#menu.busy::after {
+  content: ""; position: absolute; right: 2px; top: 2px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--fg); box-shadow: 0 0 0 2px var(--side); animation: dl-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dl-pulse { 50% { opacity: .35; } }
+
 /* The saved text of a page. */
 .modal.page-copy { width: min(760px, 100%); height: min(86vh, 100%); display: flex; flex-direction: column; }
 .modal.page-copy .modal-head h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

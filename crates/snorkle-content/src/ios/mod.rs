@@ -485,33 +485,48 @@ impl ContentHost {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join(download_name(url, mime));
         std::fs::write(&path, &data).map_err(|e| e.to_string())?;
+        if action == ImageAction::Download {
+            self.export_file(&path)
+        } else {
+            self.share_file(&path, from)
+        }
+    }
+
+    /// Opens the Files export picker for a copy of `path` (a downloaded or
+    /// fetched file in the app's own folders).
+    pub fn export_file(&mut self, path: &std::path::Path) -> Result<(), String> {
         let file = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
-        let top = self.top_controller().ok_or("The image could not be shown.")?;
-        let source = rect(from);
+        let top = self.top_controller().ok_or("The file could not be shown.")?;
+        let urls = NSArray::from_retained_slice(&[file]);
+        let picker =
+            UIDocumentPickerViewController::initForExportingURLs_asCopy(UIDocumentPickerViewController::alloc(self.mtm), &urls, true);
+        top.presentViewController_animated_completion(&picker, true, None);
+        Ok(())
+    }
+
+    /// The share sheet for the file at `path`, as a popover from `from`
+    /// (window points).
+    pub fn share_file(&mut self, path: &std::path::Path, from: (f64, f64, f64, f64)) -> Result<(), String> {
+        let file = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        let top = self.top_controller().ok_or("The file could not be shown.")?;
         unsafe {
-            if action == ImageAction::Download {
-                let urls = NSArray::from_retained_slice(&[file]);
-                let picker = UIDocumentPickerViewController::initForExportingURLs_asCopy(
-                    UIDocumentPickerViewController::alloc(self.mtm),
-                    &urls,
-                    true,
-                );
-                top.presentViewController_animated_completion(&picker, true, None);
-            } else {
-                let items: Retained<NSArray> =
-                    NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(file))]);
-                let vc = UIActivityViewController::initWithActivityItems_applicationActivities(
-                    UIActivityViewController::alloc(self.mtm),
-                    &items,
-                    None,
-                );
-                let Some(pop) = vc.popoverPresentationController() else { return Err("The share sheet is unavailable.".into()) };
-                pop.setSourceView(Some(&self.root));
-                pop.setSourceRect(source);
-                top.presentViewController_animated_completion(&vc, true, None);
-            }
+            let items: Retained<NSArray> = NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(file))]);
+            let vc = UIActivityViewController::initWithActivityItems_applicationActivities(
+                UIActivityViewController::alloc(self.mtm),
+                &items,
+                None,
+            );
+            let Some(pop) = vc.popoverPresentationController() else { return Err("The share sheet is unavailable.".into()) };
+            pop.setSourceView(Some(&self.root));
+            pop.setSourceRect(rect(from));
+            top.presentViewController_animated_completion(&vc, true, None);
         }
         Ok(())
+    }
+
+    /// Cancels a running download.
+    pub fn cancel_download(&mut self, id: u64) {
+        crate::webkit::downloads::cancel(id);
     }
 
     /// Light, dark or the system's appearance for the whole window: the

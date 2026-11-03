@@ -330,6 +330,31 @@ pub trait ContentEvents: 'static {
     /// (throttled), and `None` once it leaves that strip or stops hovering.
     /// For the sidebar's edge tab, which shows only near the pointer.
     fn edge_pointer(&self, _at: Option<(f64, f64)>) {}
+    /// Whether a main-frame download of `url` may start in `tab`
+    /// (`policy::may_download`, and not too many at once). Downloads are
+    /// refused unless the app implements this.
+    fn may_download(&self, _tab: TabId, _url: &Url) -> bool {
+        false
+    }
+    /// A download is starting: its id and the path (in the app's staging
+    /// folder) to write it to, or `None` to refuse it. `source` is where it
+    /// comes from (WebKit's request URL), `suggested` the page's or
+    /// server's file name (untrusted), `expected` its announced size.
+    fn download_destination(
+        &self,
+        _tab: TabId,
+        _source: Option<Url>,
+        _suggested: String,
+        _mime: String,
+        _expected: Option<u64>,
+    ) -> Option<(u64, std::path::PathBuf)> {
+        None
+    }
+    /// Bytes received so far (about twice a second while it runs).
+    fn download_progress(&self, _id: u64, _received: u64, _expected: Option<u64>) {}
+    /// A download ended: complete (`None`), or failed or cancelled (a
+    /// message, sanitised).
+    fn download_finished(&self, _id: u64, _error: Option<String>) {}
     /// A note for the in-app console (native diagnostics, no page data).
     fn note(&self, _text: &str) {}
     /// The shortcut editor's recording: the ⌘ combination pressed (key,

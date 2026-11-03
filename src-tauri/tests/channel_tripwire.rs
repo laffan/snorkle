@@ -60,6 +60,11 @@ fn scan_allowing(dirs: &[&str], ext: &str, forbidden: &[&str], allowed: &[(&str,
 /// 2026-10-30: the page console hook and its message handler (C13).
 // Shared by the iPadOS and macOS hosts since 2026-11-03 (moved from `ios/`).
 const INJECTION_FILE: &str = "crates/snorkle-content/src/webkit/injection.rs";
+/// Owner request 2026-11-03: downloads (D1), confined to the download
+/// delegate and the navigation-policy hooks that hand WebKit's download
+/// to it.
+const DOWNLOADS_FILE: &str = "crates/snorkle-content/src/webkit/downloads.rs";
+const DELEGATES_FILE: &str = "crates/snorkle-content/src/webkit/delegates.rs";
 
 #[test]
 fn no_webkit_page_to_native_channels() {
@@ -94,6 +99,9 @@ fn no_webkit_page_to_native_channels() {
             (INJECTION_FILE, "WKScriptMessageHandler"),
             (INJECTION_FILE, "addScriptMessageHandler"),
             (INJECTION_FILE, "pageWorld"),
+            // Owner request 2026-11-03: downloads into the app's staging folder (D1).
+            (DOWNLOADS_FILE, "WKDownload"),
+            (DELEGATES_FILE, "WKDownload"),
         ],
     );
 }

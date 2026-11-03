@@ -99,6 +99,17 @@ impl ContentHost {
 
     pub fn set_shortcuts(&mut self, _bindings: Vec<crate::KeyBinding>, _suspend: bool) {}
 
+    /// No downloads off iOS and macOS.
+    pub fn cancel_download(&mut self, _id: u64) {}
+
+    pub fn export_file(&mut self, _path: &std::path::Path) -> Result<(), String> {
+        Err("Files can be saved on iPadOS and macOS only (this is the desktop preview).".into())
+    }
+
+    pub fn share_file(&mut self, _path: &std::path::Path, _from: (f64, f64, f64, f64)) -> Result<(), String> {
+        Err("Files can be shared on iPadOS and macOS only (this is the desktop preview).".into())
+    }
+
     pub fn share(&mut self, _url: &str, _from: (f64, f64, f64, f64)) {}
 
     pub fn define(&mut self, _term: &str, _from: (f64, f64, f64, f64)) {}

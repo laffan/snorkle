@@ -52,6 +52,12 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::search_history,
         commands::get_page_text,
         commands::reopen_closed_tab,
+        commands::list_downloads,
+        commands::cancel_download,
+        commands::delete_download,
+        commands::clear_downloads,
+        commands::export_download,
+        commands::share_download,
         commands::toggle_site_adblock,
         commands::bookmark_tab,
         commands::move_bookmark,
@@ -184,6 +190,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::PinsChanged => handle.emit_to(CHROME_LABEL, "pins", ()),
             ChromeEvent::Console(entry) => handle.emit_to(CHROME_LABEL, "console", entry),
             ChromeEvent::ConsoleReset => handle.emit_to(CHROME_LABEL, "console_reset", ()),
+            ChromeEvent::Downloads(list) => handle.emit_to(CHROME_LABEL, "downloads", list),
             ChromeEvent::HeadingCurrent(tab, index) => {
                 handle.emit_to(CHROME_LABEL, "heading_current", serde_json::json!({ "tab": tab, "index": index }))
             }

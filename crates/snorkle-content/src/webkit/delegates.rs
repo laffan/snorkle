@@ -4,7 +4,9 @@
 //! native code. Every callback carries metadata produced by WebKit
 //! (URL, frame info, navigation type, NSError) rather than a page-chosen
 //! message, and forwards it to [`ContentEvents`] without interpretation.
-//! There is deliberately no `WKScriptMessageHandler` anywhere.
+//! There is deliberately no `WKScriptMessageHandler` anywhere. Downloads
+//! (2026-11-03): the policy callbacks may answer `.download`, handing the
+//! `WKDownload` to `downloads.rs` (channel D1).
 //!
 //! Security assumptions:
 //! - WebKit invokes these on the main thread (`MainThreadOnly` classes).
@@ -23,11 +25,11 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, NSObject};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{
-    NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
+    NSError, NSHTTPURLResponse, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
     NSURLSessionAuthChallengeDisposition, NSURL,
 };
 use objc2_web_kit::{
-    WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
+    WKDownload, WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
     WKNavigationResponse, WKNavigationResponsePolicy, WKNavigationType, WKPermissionDecision, WKSecurityOrigin,
     WKUIDelegate, WKWebViewConfiguration, WKWebpagePreferences, WKWindowFeatures,
 };
@@ -138,11 +140,40 @@ define_class!(
             response: &WKNavigationResponse,
             handler: &Block<dyn Fn(WKNavigationResponsePolicy)>,
         ) {
-            // Downloads are not supported yet: anything WebKit cannot render
-            // is cancelled rather than handed to a download path.
+            // A main-frame response WebKit cannot show, or that the server
+            // marks as an attachment, becomes a download (`downloads.rs`)
+            // when the app allows it; in a subframe it is cancelled.
             let can_show = unsafe { response.canShowMIMEType() };
-            let policy = if can_show { WKNavigationResponsePolicy::Allow } else { WKNavigationResponsePolicy::Cancel };
+            let r = unsafe { response.response() };
+            let attachment = r
+                .downcast_ref::<NSHTTPURLResponse>()
+                .and_then(|h| h.valueForHTTPHeaderField(&NSString::from_str("Content-Disposition")))
+                .is_some_and(|v| v.to_string().trim_start().to_ascii_lowercase().starts_with("attachment"));
+            let policy = if can_show && !attachment {
+                WKNavigationResponsePolicy::Allow
+            } else {
+                let i = self.ivars();
+                let url = r.URL().as_deref().and_then(to_url);
+                let main = unsafe { response.isForMainFrame() };
+                if main && url.is_some_and(|u| i.events.may_download(i.tab, &u)) {
+                    WKNavigationResponsePolicy::Download
+                } else {
+                    WKNavigationResponsePolicy::Cancel
+                }
+            };
             handler.call((policy,));
+        }
+
+        /// A link with a `download` attribute became a download.
+        #[unsafe(method(webView:navigationAction:didBecomeDownload:))]
+        fn action_download(&self, _web_view: &WKWebView, _action: &WKNavigationAction, download: &WKDownload) {
+            super::downloads::attach(download, self.ivars().tab, &self.ivars().events);
+        }
+
+        /// A response became a download (see `decide_response`).
+        #[unsafe(method(webView:navigationResponse:didBecomeDownload:))]
+        fn response_download(&self, _web_view: &WKWebView, _response: &WKNavigationResponse, download: &WKDownload) {
+            super::downloads::attach(download, self.ivars().tab, &self.ivars().events);
         }
 
         #[unsafe(method(webView:didStartProvisionalNavigation:))]
@@ -227,13 +258,20 @@ impl NavDelegate {
     }
 
     unsafe fn policy_for(&self, action: &WKNavigationAction) -> WKNavigationActionPolicy {
-        // Downloads are not supported yet.
-        if action.respondsToSelector(objc2::sel!(shouldPerformDownload)) && action.shouldPerformDownload() {
-            return WKNavigationActionPolicy::Cancel;
-        }
         let Some(url) = action.request().URL().as_deref().and_then(to_url) else {
             return WKNavigationActionPolicy::Cancel;
         };
+        // A link with a `download` attribute: a download (`downloads.rs`)
+        // if it was activated in the main frame (or targets a new window)
+        // and the app allows it; otherwise nothing.
+        if action.respondsToSelector(objc2::sel!(shouldPerformDownload)) && action.shouldPerformDownload() {
+            let main_or_new = action.targetFrame().is_none_or(|f| f.isMainFrame());
+            let i = self.ivars();
+            let ok = main_or_new
+                && action.navigationType() == WKNavigationType::LinkActivated
+                && i.events.may_download(i.tab, &url);
+            return if ok { WKNavigationActionPolicy::Download } else { WKNavigationActionPolicy::Cancel };
+        }
         // ⌘-click on a link (main frame, or a link that targets a new
         // window): open it in a background tab instead. The modifier flags
         // and navigation type come from WebKit (iOS 18.4+); a page cannot

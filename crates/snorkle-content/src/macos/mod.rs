@@ -53,7 +53,7 @@ use objc2_app_kit::{
 use objc2_foundation::{
     NSArray, NSAttributedString, NSBundle, NSComparisonResult, NSData, NSError, NSKeyValueObservingOptions,
     NSNotification, NSNotificationCenter, NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue,
-    NSPoint, NSRect, NSRectEdge, NSSize, NSString, NSURLRequest, NSURL, NSUUID,
+    NSFileManager, NSPoint, NSRect, NSRectEdge, NSSize, NSString, NSURLRequest, NSURL, NSUUID,
 };
 use objc2_quartz_core::CAMediaTimingFunction;
 pub(crate) use objc2_web_kit::WKWebView;
@@ -474,19 +474,12 @@ impl ContentHost {
                 }
             }
             ImageAction::Download => {
-                let panel = NSSavePanel::savePanel(self.mtm);
-                panel.setNameFieldStringValue(&NSString::from_str(&download_name(url, mime)));
-                let p = panel.clone();
-                let done = RcBlock::new(move |response: isize| {
-                    if response != NSModalResponseOK {
-                        return;
-                    }
-                    if let Some(path) = p.URL().and_then(|u| u.path()) {
-                        let _ = std::fs::write(path.to_string(), &data);
-                    }
-                });
-                panel.beginSheetModalForWindow_completionHandler(&self.window, &done);
-                Ok(())
+                let dir = std::env::temp_dir().join("snorkle-images");
+                let _ = std::fs::remove_dir_all(&dir);
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                let path = dir.join(download_name(url, mime));
+                std::fs::write(&path, &data).map_err(|e| e.to_string())?;
+                self.export_file(&path)
             }
             ImageAction::Share => {
                 let dir = std::env::temp_dir().join("snorkle-images");
@@ -494,11 +487,44 @@ impl ContentHost {
                 std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 let path = dir.join(download_name(url, mime));
                 std::fs::write(&path, &data).map_err(|e| e.to_string())?;
-                let file = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
-                self.show_sharing(Retained::into_super(Retained::into_super(file)), from);
-                Ok(())
+                self.share_file(&path, from)
             }
         }
+    }
+
+    /// Asks where to save a copy of `path` (a save-panel sheet on the
+    /// window) and copies it there with its attributes (the quarantine
+    /// mark of a download goes with it).
+    pub fn export_file(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "download".into());
+        let source = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        let panel = NSSavePanel::savePanel(self.mtm);
+        panel.setNameFieldStringValue(&NSString::from_str(&name));
+        let p = panel.clone();
+        let done = RcBlock::new(move |response: isize| {
+            if response != NSModalResponseOK {
+                return;
+            }
+            let Some(dest) = p.URL() else { return };
+            let fm = NSFileManager::defaultManager();
+            // The panel already asked whether to replace an existing file.
+            let _ = fm.removeItemAtURL_error(&dest);
+            let _ = fm.copyItemAtURL_toURL_error(&source, &dest);
+        });
+        panel.beginSheetModalForWindow_completionHandler(&self.window, &done);
+        Ok(())
+    }
+
+    /// The share menu for the file at `path`, pointing at `from`.
+    pub fn share_file(&mut self, path: &std::path::Path, from: (f64, f64, f64, f64)) -> Result<(), String> {
+        let file = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        self.show_sharing(Retained::into_super(Retained::into_super(file)), from);
+        Ok(())
+    }
+
+    /// Cancels a running download.
+    pub fn cancel_download(&mut self, id: u64) {
+        crate::webkit::downloads::cancel(id);
     }
 
     /// The share menu for one item, pointing at `from` (window points from

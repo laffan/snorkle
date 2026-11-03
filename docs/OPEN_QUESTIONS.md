@@ -107,8 +107,7 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     does not affect content views (they are not Tauri webviews), and policy blocks those hosts
     anyway. It matters only if a remote page were ever loaded into the chrome webview, which no
     code path does.
-21. **[gap] Downloads** are cancelled. Supporting them adds a file-system channel (`WKDownload`)
-    and needs a review. The tripwire test flags `WKDownload`.
+21. **Downloads** (supported since 2026-11-03, ARCHITECTURE §5h, channel D1; see 95–100).
 
 ## Product and functionality gaps
 
@@ -568,3 +567,26 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
 94. **[verify] History selection.** Shift-click on a row extends from the last row clicked in
     Select mode; on iPad, Shift needs a hardware keyboard (each tap otherwise toggles one row). The
     × replaces the time on hover and is always shown on touch-only devices.
+
+
+## Downloads (2026-11-03)
+
+95. **[verify] Download triggers.** Assumed: WebKit asks `decidePolicyForNavigationResponse` for
+    attachment and non-renderable main-frame responses, honours `.download`, then calls
+    `webView:navigationResponse:didBecomeDownload:`; links with `download` arrive with
+    `shouldPerformDownload` and `.linkActivated`. Blob and data downloads made by script
+    (`a.click()` on a generated link) depend on WebKit reporting them that way. Downloads from
+    subframes (some sites use a hidden iframe) are refused; **[decide]** whether to allow them.
+96. **[verify] Progress.** `WKDownload.progress` is assumed to count bytes
+    (`completedUnitCount`/`totalUnitCount`); servers without a length show an indeterminate bar.
+97. **[decide] Limits.** At most 5 downloads per tab per minute and 20 at once; there is no cap on
+    disk use, and finished files stay until deleted (also in device backups on iPadOS, since the
+    profile folder is backed up; marking `downloads/` as excluded from backup is one option).
+98. **[verify] Export.** iPadOS: the Files export picker copies the file (the staged copy stays
+    until deleted). macOS: a save-panel sheet, then `NSFileManager` copy (keeps the quarantine mark;
+    an existing file at the destination is replaced after the panel's own confirmation).
+99. **[verify] Popups.** A `target=_blank` download link opens a new tab that stays empty while the
+    file downloads; Safari closes such a tab. Resuming failed downloads is not supported (WebKit's
+    resume data is discarded); a download interrupted by quitting is deleted at the next launch.
+100. **[decide] Private downloads** are listed for the session and deleted (with their files) when
+    the last private tab closes, unless saved or shared before.

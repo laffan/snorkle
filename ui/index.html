@@ -47,6 +47,7 @@
       <button id="menu-new-private" role="menuitem">New Private Tab</button>
       <div class="menu-sep" role="separator"></div>
       <button id="menu-history" role="menuitem">History</button>
+      <button id="menu-downloads" role="menuitem">Downloads</button>
       <button id="menu-console" role="menuitem">Console</button>
       <button id="menu-settings" role="menuitem">Settings</button>
     </div>
@@ -180,6 +181,19 @@
         <button id="notice-secondary" class="button"></button>
         <button id="notice-primary" class="button primary"></button>
       </div>
+    </section>
+
+    <!-- Downloads: files stay in the app's own folder until the user saves
+         or shares them (Files on iPadOS, a save panel on macOS). -->
+    <section id="downloads" hidden>
+      <div class="panel-head">
+        <h1>Downloads</h1>
+        <span class="spacer"></span>
+        <button id="downloads-clear" class="button">Clear</button>
+        <button id="downloads-close" class="button">Done</button>
+      </div>
+      <p id="downloads-note" class="muted small downloads-note"></p>
+      <ul id="downloads-list" class="list downloads-list"></ul>
     </section>
 
     <section id="panel" hidden>

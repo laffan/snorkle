@@ -172,6 +172,24 @@ pub fn decide(req: &Request<'_>, http_exceptions: &HttpExceptions) -> Decision {
 
 /// `http://host[:80]/…` → `https://host/…`. Explicit non-default ports are
 /// kept (the fallback interstitial handles hosts that do not speak TLS).
+/// Whether a main-frame download of `url` may start (2026-11-03): web
+/// addresses (`http`/`https`) without credentials, and files a page made
+/// itself (`blob:`, `data:`; WebKit only lets a page download its own blob
+/// URLs). Never internal schemes or `file:`. Downloads from subframes are
+/// refused by the caller. A download only lands in the app's staging
+/// folder; nothing is opened or run.
+pub fn may_download(url: &Url) -> bool {
+    match url.scheme() {
+        "http" | "https" => {
+            url.username().is_empty()
+                && url.password().is_none()
+                && !url.host_str().is_some_and(|h| INTERNAL_HOSTS.contains(&h))
+        }
+        "blob" | "data" => true,
+        _ => false,
+    }
+}
+
 pub fn https_version(url: &Url) -> Option<Url> {
     let mut u = url.clone();
     let port = u.port();
@@ -180,6 +198,25 @@ pub fn https_version(url: &Url) -> Option<Url> {
         u.set_port(None).ok()?;
     }
     Some(u)
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    #[test]
+    fn downloads_only_from_web_and_page_made_urls() {
+        let ok = |s: &str| may_download(&Url::parse(s).unwrap());
+        assert!(ok("https://example.com/file.pdf"));
+        assert!(ok("http://example.com/file.zip"));
+        assert!(ok("blob:https://example.com/2c1e-44"));
+        assert!(ok("data:text/csv,a,b"));
+        assert!(!ok("https://user:pw@example.com/f"));
+        assert!(!ok("file:///etc/passwd"));
+        assert!(!ok("tauri://localhost/index.html"));
+        assert!(!ok("https://ipc.localhost/x"));
+        assert!(!ok("javascript:alert(1)"));
+    }
 }
 
 #[cfg(test)]

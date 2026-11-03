@@ -5,6 +5,7 @@
 //! from `crate::platform`.
 
 pub mod delegates;
+pub mod downloads;
 pub mod http;
 pub mod injection;
 pub mod keychain;

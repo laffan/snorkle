@@ -86,6 +86,59 @@ pub enum ChromeEvent<'a> {
     ImageMenu(TabId, Option<(&'a str, snorkle_core::selection::SelectionRect)>),
     /// Console entries were removed (cleared, or the private session ended).
     ConsoleReset,
+    /// The downloads list changed (started, progress, finished, removed).
+    Downloads(&'a [DownloadItem]),
+}
+
+/// One download, as the chrome lists it (Downloads panel).
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DownloadItem {
+    pub id: u64,
+    /// File name in the staging folder (cleaned; shown with textContent).
+    pub name: String,
+    /// Where it came from (http(s) only; `None`: a file the page made).
+    pub source: Option<snorkle_core::url_display::DisplayUrl>,
+    #[serde(skip)]
+    pub source_url: String,
+    pub mime: String,
+    pub received: u64,
+    pub expected: Option<u64>,
+    /// "active", "done", "failed" or "cancelled".
+    pub state: &'static str,
+    pub error: String,
+    pub private: bool,
+    pub started_ms: u64,
+    pub finished_ms: Option<u64>,
+}
+
+/// Most downloads running at once; more are refused.
+const MAX_ACTIVE_DOWNLOADS: usize = 20;
+/// Downloads one tab may start per minute (pages can start downloads
+/// without a click, e.g. through redirects); more are refused.
+const MAX_DOWNLOADS_PER_TAB_MINUTE: usize = 5;
+
+impl DownloadItem {
+    fn from_record(r: &snorkle_core::storage::DownloadRecord) -> Self {
+        use snorkle_core::storage::DownloadOutcome;
+        DownloadItem {
+            id: r.id,
+            name: r.name.clone(),
+            source: Url::parse(&r.source).ok().map(|u| snorkle_core::url_display::display(&u)),
+            source_url: r.source.clone(),
+            mime: r.mime.clone(),
+            received: r.bytes,
+            expected: Some(r.bytes),
+            state: match r.outcome {
+                DownloadOutcome::Done => "done",
+                DownloadOutcome::Failed => "failed",
+                DownloadOutcome::Cancelled => "cancelled",
+            },
+            error: r.error.clone(),
+            private: false,
+            started_ms: r.started_ms,
+            finished_ms: Some(r.finished_ms),
+        }
+    }
 }
 
 pub type Emitter = Box<dyn Fn(ChromeEvent<'_>) + Send + Sync>;
@@ -117,11 +170,20 @@ pub struct Shared {
     /// Whether the console records (and pages get the console hook). On by
     /// default in debug builds only.
     pub console_capture: AtomicBool,
+    /// Downloads, newest first: running ones, this session's private ones
+    /// and the stored finished ones.
+    pub downloads: Mutex<Vec<DownloadItem>>,
+    /// Downloads the user cancelled (reported as failed by WebKit).
+    pub cancelled_downloads: Mutex<HashSet<u64>>,
+    /// When each tab last started downloads (rate limit).
+    pub download_starts: Mutex<HashMap<TabId, Vec<Instant>>>,
 }
 
 impl Shared {
     pub fn new(browser: Browser, store: Option<Store>, emit: Emitter) -> Arc<Self> {
         let store = store.map(Arc::new);
+        let downloads: Vec<DownloadItem> =
+            store.as_ref().map(|st| st.downloads().iter().map(DownloadItem::from_record).collect()).unwrap_or_default();
         let modes = store.as_ref().map(|s| s.launch_modes().modes()).unwrap_or_default();
         let storage_tx = store.clone().map(|s| Mutex::new(spawn_storage_worker(s)));
         Arc::new(Shared {
@@ -138,7 +200,45 @@ impl Shared {
             shortcuts: Mutex::new(snorkle_content::effective_bindings(&[]).unwrap_or_default()),
             console: Mutex::default(),
             console_capture: AtomicBool::new(cfg!(debug_assertions)),
+            downloads: Mutex::new(downloads),
+            cancelled_downloads: Mutex::default(),
+            download_starts: Mutex::default(),
         })
+    }
+
+    pub fn downloads(&self) -> MutexGuard<'_, Vec<DownloadItem>> {
+        self.downloads.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Sends the downloads list to the chrome.
+    pub fn emit_downloads(&self) {
+        let list = self.downloads().clone();
+        (self.emit)(ChromeEvent::Downloads(&list));
+    }
+
+    /// The private session ended: its downloads are cancelled and their
+    /// files deleted (they were never listed in `downloads.json`).
+    fn drop_private_downloads(&self) {
+        let gone: Vec<(u64, bool)> = {
+            let mut d = self.downloads();
+            let gone = d.iter().filter(|x| x.private).map(|x| (x.id, x.state == "active")).collect();
+            d.retain(|x| !x.private);
+            gone
+        };
+        if gone.is_empty() {
+            return;
+        }
+        for (id, active) in &gone {
+            if *active {
+                let id = *id;
+                self.cancelled_downloads.lock().unwrap_or_else(|e| e.into_inner()).insert(id);
+                snorkle_content::dispatch_main(move || with_host(|h| h.cancel_download(id)));
+            }
+            if let Some(store) = &self.store {
+                let _ = store.delete_download(*id);
+            }
+        }
+        self.emit_downloads();
     }
 
     pub fn browser(&self) -> MutexGuard<'_, Browser> {
@@ -230,6 +330,7 @@ impl Shared {
                 }
                 Effect::PersistSession(s) => self.storage(StorageJob::Session(s)),
                 Effect::ReleasePrivateData => {
+                    self.drop_private_downloads();
                     self.console_log().drop_private();
                     (self.emit)(ChromeEvent::ConsoleReset);
                     host_effects.push(Effect::ReleasePrivateData);
@@ -654,6 +755,137 @@ impl ContentEvents for Events {
     }
     fn reload_requested(&self, tab: TabId) {
         self.apply(|b| b.reload(tab));
+    }
+    fn may_download(&self, tab: TabId, url: &Url) -> bool {
+        let shared = &self.shared;
+        if shared.store.is_none() || shared.browser().tab(tab).is_none() || !snorkle_core::policy::may_download(url) {
+            return false;
+        }
+        if shared.downloads().iter().filter(|d| d.state == "active").count() >= MAX_ACTIVE_DOWNLOADS {
+            shared.toast("Too many downloads at once. Wait for some to finish.");
+            return false;
+        }
+        let now = Instant::now();
+        let mut starts = shared.download_starts.lock().unwrap_or_else(|e| e.into_inner());
+        let recent = starts.entry(tab).or_default();
+        recent.retain(|t| now.duration_since(*t) < Duration::from_secs(60));
+        if recent.len() >= MAX_DOWNLOADS_PER_TAB_MINUTE {
+            drop(starts);
+            shared.log(console::Level::Warn, Some(tab), &format!("download refused (too many from this tab): {url}"));
+            shared.toast("This page is starting many downloads; further ones were blocked.");
+            return false;
+        }
+        recent.push(now);
+        true
+    }
+    fn download_destination(
+        &self,
+        tab: TabId,
+        source: Option<Url>,
+        suggested: String,
+        mime: String,
+        expected: Option<u64>,
+    ) -> Option<(u64, std::path::PathBuf)> {
+        let shared = &self.shared;
+        let store = shared.store.clone()?;
+        let private = shared.browser().tab(tab).is_none_or(|t| t.is_private());
+        let (id, name, path) = store.new_download(&suggested).ok()?;
+        let web = source.filter(|u| matches!(u.scheme(), "http" | "https"));
+        let item = DownloadItem {
+            id,
+            name: name.clone(),
+            source: web.as_ref().map(snorkle_core::url_display::display),
+            source_url: web.as_ref().map(|u| u.to_string()).unwrap_or_default(),
+            mime: snorkle_core::text::sanitize_page_text(&mime, 100),
+            received: 0,
+            expected,
+            state: "active",
+            error: String::new(),
+            private,
+            started_ms: wall_ms(),
+            finished_ms: None,
+        };
+        shared.downloads().insert(0, item);
+        shared.log(console::Level::Info, Some(tab), &format!("download {id} started: {name}"));
+        shared.toast(&format!("Downloading “{name}”…"));
+        shared.emit_downloads();
+        Some((id, path))
+    }
+    fn download_progress(&self, id: u64, received: u64, expected: Option<u64>) {
+        let changed = {
+            let mut d = self.shared.downloads();
+            match d.iter_mut().find(|x| x.id == id && x.state == "active") {
+                Some(x) if x.received != received || (expected.is_some() && x.expected != expected) => {
+                    x.received = received;
+                    if expected.is_some() {
+                        x.expected = expected;
+                    }
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.shared.emit_downloads();
+        }
+    }
+    fn download_finished(&self, id: u64, error: Option<String>) {
+        use snorkle_core::storage::{DownloadOutcome, DownloadRecord};
+        let shared = &self.shared;
+        let cancelled = shared.cancelled_downloads.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        let item = {
+            let mut d = shared.downloads();
+            let Some(x) = d.iter_mut().find(|x| x.id == id) else { return };
+            x.finished_ms = Some(wall_ms());
+            x.state = match (&error, cancelled) {
+                (None, _) => "done",
+                (Some(_), true) => "cancelled",
+                (Some(_), false) => "failed",
+            };
+            if x.state == "done" {
+                x.expected = Some(x.received.max(x.expected.unwrap_or(0)));
+            }
+            x.error = if x.state == "failed" { error.clone().unwrap_or_default() } else { String::new() };
+            x.clone()
+        };
+        if let Some(store) = &shared.store {
+            // A partial file is of no use; the folder goes.
+            if item.state != "done" {
+                let _ = store.delete_download(id);
+            }
+            if !item.private {
+                let size = store.download_path(id, &item.name).and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len());
+                let rec = DownloadRecord {
+                    id,
+                    name: item.name.clone(),
+                    source: item.source_url.clone(),
+                    mime: item.mime.clone(),
+                    bytes: size.unwrap_or(item.received),
+                    outcome: match item.state {
+                        "done" => DownloadOutcome::Done,
+                        "cancelled" => DownloadOutcome::Cancelled,
+                        _ => DownloadOutcome::Failed,
+                    },
+                    error: item.error.clone(),
+                    started_ms: item.started_ms,
+                    finished_ms: item.finished_ms.unwrap_or(0),
+                };
+                if let Some(bytes) = size {
+                    if let Some(x) = shared.downloads().iter_mut().find(|x| x.id == id) {
+                        x.received = bytes;
+                        x.expected = Some(bytes);
+                    }
+                }
+                let _ = store.record_download(rec);
+            }
+        }
+        shared.log(console::Level::Info, None, &format!("download {id} {}: {}", item.state, item.name));
+        match item.state {
+            "done" => shared.toast(&format!("Downloaded “{}”", item.name)),
+            "failed" => shared.toast(&format!("Download failed: {}", item.name)),
+            _ => {}
+        }
+        shared.emit_downloads();
     }
     fn memory_warning(&self) {
         self.apply(|b| b.on_memory_warning());

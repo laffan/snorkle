@@ -110,6 +110,77 @@ struct Data {
     offline: Vec<OfflineEntry>,
     /// Text of the most recently visited pages (index of `page-text/`).
     page_texts: Vec<PageTextEntry>,
+    /// Finished downloads kept in `downloads/` (non-private only).
+    downloads: Vec<DownloadRecord>,
+    /// The next download id (also in-progress and private ones).
+    next_download: u64,
+}
+
+/// Downloads (2026-11-03): each file is kept in the app's own folder,
+/// `downloads/<id>/<name>`, until the user saves it elsewhere or deletes
+/// it; `downloads.json` lists the finished ones of non-private tabs.
+/// Folders without a record (interrupted or private downloads) are
+/// deleted when the store opens.
+const DOWNLOADS_DIR: &str = "downloads";
+const DOWNLOADS_FILE: &str = "downloads.json";
+/// Finished downloads listed; the oldest records (and files) go first.
+pub const MAX_DOWNLOAD_RECORDS: usize = 500;
+/// Characters of a downloaded file's name kept.
+pub const MAX_DOWNLOAD_NAME_CHARS: usize = 120;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadOutcome {
+    Done,
+    Failed,
+    Cancelled,
+}
+
+/// A finished (or failed) download of a non-private tab.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownloadRecord {
+    pub id: u64,
+    /// File name, as cleaned by [`clean_download_name`].
+    pub name: String,
+    /// Where it came from: an http(s) URL, or empty (a file the page made).
+    pub source: String,
+    pub mime: String,
+    pub bytes: u64,
+    pub outcome: DownloadOutcome,
+    /// Why it failed, for the user (sanitised).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub error: String,
+    pub started_ms: u64,
+    pub finished_ms: u64,
+}
+
+/// A safe file name for a download from the name the server or page
+/// suggested: its last path component, without control, bidi or invisible
+/// characters, `:` and other characters file systems reject, leading dots
+/// and spaces; at most [`MAX_DOWNLOAD_NAME_CHARS`] (the extension kept);
+/// `download` if nothing is left. It is never a path.
+pub fn clean_download_name(suggested: &str) -> String {
+    let last = suggested.rsplit(['/', '\\']).next().unwrap_or("");
+    let cleaned: String = sanitize_page_text(last, 4 * MAX_DOWNLOAD_NAME_CHARS)
+        .chars()
+        .map(|c| if matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|') { '-' } else { c })
+        .collect();
+    let name = cleaned.trim().trim_start_matches(['.', ' ']).trim_end_matches(['.', ' ']).to_string();
+    let name = if name.chars().count() > MAX_DOWNLOAD_NAME_CHARS {
+        let (stem, ext) = match name.rfind('.') {
+            Some(i) if name.len() - i <= 12 && i > 0 => (&name[..i], &name[i..]),
+            _ => (name.as_str(), ""),
+        };
+        let keep = MAX_DOWNLOAD_NAME_CHARS - ext.chars().count();
+        format!("{}{ext}", stem.chars().take(keep).collect::<String>().trim_end())
+    } else {
+        name
+    };
+    if name.is_empty() {
+        "download".to_string()
+    } else {
+        name
+    }
 }
 
 /// Text copies of recently visited pages (history's "cached version"), in
@@ -381,6 +452,8 @@ impl Store {
             pins.iter().any(|p| p.url == u) || bookmarks.iter().any(|b| b.url == u)
         });
         let page_texts = load_page_texts(&dir.join(PAGE_TEXT_DIR), |u| history.iter().any(|h| h.url == u));
+        let downloads = load_downloads(&dir);
+        let next_download = downloads.iter().map(|d| d.id).max().unwrap_or(0) + 1;
         Ok(Store {
             dir,
             inner: Mutex::new(Data {
@@ -396,6 +469,8 @@ impl Store {
                 pin_emoji,
                 offline,
                 page_texts,
+                downloads,
+                next_download,
             }),
         })
     }
@@ -508,6 +583,67 @@ impl Store {
         }
         atomic_write(&dir.join(OFFLINE_INDEX), &index)?;
         Ok(true)
+    }
+
+    /// A new download's id and the path its file goes to (its folder is
+    /// created). `suggested` is cleaned ([`clean_download_name`]).
+    pub fn new_download(&self, suggested: &str) -> std::io::Result<(u64, String, PathBuf)> {
+        let id = {
+            let mut d = self.data();
+            let id = d.next_download;
+            d.next_download += 1;
+            id
+        };
+        let name = clean_download_name(suggested);
+        let folder = self.dir.join(DOWNLOADS_DIR).join(id.to_string());
+        fs::create_dir_all(&folder)?;
+        Ok((id, name.clone(), folder.join(name)))
+    }
+
+    /// Where download `id`'s file named `name` is (whether or not it exists).
+    pub fn download_path(&self, id: u64, name: &str) -> Option<PathBuf> {
+        (clean_download_name(name) == name).then(|| self.dir.join(DOWNLOADS_DIR).join(id.to_string()).join(name))
+    }
+
+    /// Finished downloads of non-private tabs, newest first.
+    pub fn downloads(&self) -> Vec<DownloadRecord> {
+        self.data().downloads.clone()
+    }
+
+    /// Records a finished download (newest first); beyond
+    /// [`MAX_DOWNLOAD_RECORDS`] the oldest are deleted with their files.
+    pub fn record_download(&self, mut rec: DownloadRecord) -> std::io::Result<()> {
+        rec.name = clean_download_name(&rec.name);
+        rec.source = storable_url(&rec.source).unwrap_or_default();
+        rec.mime = sanitize_page_text(&rec.mime, 100);
+        rec.error = sanitize_page_text(&rec.error, 200);
+        let (snapshot, evicted) = {
+            let mut d = self.data();
+            d.downloads.retain(|r| r.id != rec.id);
+            d.downloads.insert(0, rec);
+            let evicted: Vec<u64> = d.downloads.iter().skip(MAX_DOWNLOAD_RECORDS).map(|r| r.id).collect();
+            d.downloads.truncate(MAX_DOWNLOAD_RECORDS);
+            (serde_json::to_vec(&d.downloads)?, evicted)
+        };
+        for id in evicted {
+            let _ = fs::remove_dir_all(self.dir.join(DOWNLOADS_DIR).join(id.to_string()));
+        }
+        atomic_write(&self.dir.join(DOWNLOADS_FILE), &snapshot)
+    }
+
+    /// Deletes a download's file (and its record, if it has one).
+    pub fn delete_download(&self, id: u64) -> std::io::Result<()> {
+        let snapshot = {
+            let mut d = self.data();
+            let before = d.downloads.len();
+            d.downloads.retain(|r| r.id != id);
+            (d.downloads.len() != before).then(|| serde_json::to_vec(&d.downloads)).transpose()?
+        };
+        let _ = fs::remove_dir_all(self.dir.join(DOWNLOADS_DIR).join(id.to_string()));
+        match snapshot {
+            Some(s) => atomic_write(&self.dir.join(DOWNLOADS_FILE), &s),
+            None => Ok(()),
+        }
     }
 
     /// Size in bytes of each saved page text, by URL.
@@ -1171,6 +1307,31 @@ fn load_page_texts(dir: &Path, keep: impl Fn(&str) -> bool) -> Vec<PageTextEntry
     index
 }
 
+/// Reads the download records, keeping those with a clean name, unique id
+/// and an existing file; deletes every folder in `downloads/` without one.
+fn load_downloads(dir: &Path) -> Vec<DownloadRecord> {
+    let root = dir.join(DOWNLOADS_DIR);
+    let mut records: Vec<DownloadRecord> = load_or_reset(&dir.join(DOWNLOADS_FILE));
+    let mut seen = BTreeSet::new();
+    records.retain(|r| {
+        clean_download_name(&r.name) == r.name
+            && seen.insert(r.id)
+            && (r.outcome != DownloadOutcome::Done || root.join(r.id.to_string()).join(&r.name).is_file())
+    });
+    records.sort_by_key(|r| std::cmp::Reverse(r.finished_ms));
+    records.truncate(MAX_DOWNLOAD_RECORDS);
+    if let Ok(entries) = fs::read_dir(&root) {
+        for f in entries.flatten() {
+            let name = f.file_name().to_string_lossy().to_string();
+            let kept = records.iter().any(|r| r.id.to_string() == name && r.outcome == DownloadOutcome::Done);
+            if !kept {
+                let _ = fs::remove_dir_all(f.path());
+            }
+        }
+    }
+    records
+}
+
 /// Reads one saved page text, re-cleaned (a tampered file cannot carry
 /// markup-relevant control characters or more than the cap).
 fn read_page_text(path: &Path) -> Option<SavedPageText> {
@@ -1314,6 +1475,60 @@ mod tests {
         let s = Store::open(&dir).unwrap();
         assert_eq!(s.chats().len(), MAX_CHATS - 1);
         assert!(!dir.join(CHATS_DIR).join("c9.json").exists(), "corrupt chat files are removed");
+    }
+
+    #[test]
+    fn download_names_are_safe() {
+        assert_eq!(clean_download_name("report.pdf"), "report.pdf");
+        assert_eq!(clean_download_name("../../etc/passwd"), "passwd");
+        assert_eq!(clean_download_name("C:\\Users\\x\\evil.exe"), "evil.exe");
+        assert_eq!(clean_download_name(".hidden"), "hidden");
+        assert_eq!(clean_download_name("..."), "download");
+        assert_eq!(clean_download_name(""), "download");
+        assert_eq!(clean_download_name("a\u{202E}gpj.exe"), "agpj.exe", "bidi override removed");
+        assert_eq!(clean_download_name("x:y?.txt"), "x-y-.txt");
+        let long = format!("{}.tar.gz", "n".repeat(300));
+        let c = clean_download_name(&long);
+        assert_eq!(c.chars().count(), MAX_DOWNLOAD_NAME_CHARS);
+        assert!(c.ends_with(".gz"));
+    }
+
+    #[test]
+    fn downloads_are_recorded_and_swept() {
+        let dir = tmpdir("downloads");
+        let _ = fs::remove_dir_all(&dir);
+        let s = Store::open(&dir).unwrap();
+        let (a, name, path) = s.new_download("../a.pdf").unwrap();
+        assert_eq!(name, "a.pdf");
+        assert!(path.starts_with(dir.join(DOWNLOADS_DIR)));
+        fs::write(&path, b"pdf").unwrap();
+        let (b, _, bpath) = s.new_download("partial.zip").unwrap();
+        assert!(b > a);
+        fs::write(&bpath, b"half").unwrap();
+        let rec = DownloadRecord {
+            id: a,
+            name: name.clone(),
+            source: "https://example.com/a.pdf".into(),
+            mime: "application/pdf".into(),
+            bytes: 3,
+            outcome: DownloadOutcome::Done,
+            error: String::new(),
+            started_ms: 1,
+            finished_ms: 2,
+        };
+        s.record_download(rec.clone()).unwrap();
+        assert_eq!(s.download_path(a, &name), Some(path.clone()));
+        assert_eq!(s.download_path(a, "../x"), None);
+        drop(s);
+        // Reopened: the recorded file stays; the unrecorded (interrupted) one goes.
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.downloads(), vec![rec]);
+        assert!(path.is_file() && !bpath.exists());
+        let (c, _, _) = s.new_download("next").unwrap();
+        assert!(c > a, "recorded ids are not reused (an unrecorded one may be: its folder is gone)");
+        s.delete_download(a).unwrap();
+        assert!(s.downloads().is_empty() && !path.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

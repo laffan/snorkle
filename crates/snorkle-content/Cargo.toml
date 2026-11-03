@@ -25,6 +25,7 @@ objc2-foundation = { version = "=0.3.2", features = [
   "NSArray", "NSDate", "NSDictionary", "NSError", "NSKeyValueObserving", "NSNotification",
   "NSObject", "NSOperation", "NSProcessInfo", "NSSet", "NSString", "NSURL", "NSURLRequest",
   "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLSession", "NSURLRequest", "NSURLResponse", "NSUUID", "NSValue", "NSData",
+  "NSProgress", "NSTimer", "NSFileManager",
 ] }
 # Cutting the floating URL pill out of content views (layer mask).
 objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "CALayer", "CAShapeLayer", "CATransaction", "CAMediaTimingFunction", "CAAnimation", "CABase", "CAMediaTiming"] }
@@ -44,7 +45,7 @@ objc2-web-kit = { version = "=0.3.2", features = [
   "WKFindConfiguration", "WKFindResult", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences",
   "WKSecurityOrigin", "WKUIDelegate", "WKUserContentController", "WKWebViewConfiguration",
   "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
-  "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences",
+  "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences", "WKDownload", "WKDownloadDelegate",
 ] }
 
 # macOS: the same objc2 crates at the same versions (wry resolves them for
@@ -60,6 +61,7 @@ objc2-foundation = { version = "=0.3.2", features = [
   "NSArray", "NSAttributedString", "NSBundle", "NSDate", "NSDictionary", "NSError", "NSGeometry", "NSKeyValueObserving",
   "NSNotification", "NSObject", "NSOperation", "NSProcessInfo", "NSSet", "NSString", "NSURL", "NSURLRequest",
   "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLSession", "NSURLResponse", "NSUUID", "NSValue", "NSData",
+  "NSProgress", "NSTimer", "NSFileManager",
 ] }
 objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "CALayer", "CAShapeLayer", "CATransaction", "CAMediaTimingFunction", "CAAnimation", "CABase", "CAMediaTiming"] }
 objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["std", "CGPath", "CGColor"] }
@@ -75,5 +77,5 @@ objc2-web-kit = { version = "=0.3.2", features = [
   "WKFindConfiguration", "WKFindResult", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences",
   "WKSecurityOrigin", "WKUIDelegate", "WKUserContentController", "WKWebViewConfiguration",
   "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
-  "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences", "WKWebView",
+  "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences", "WKWebView", "WKDownload", "WKDownloadDelegate",
 ] }
