@@ -2246,6 +2246,9 @@
   // is chosen.
 
   let paletteRows = [];
+  // Recent history for the palette (newest first, one entry per URL),
+  // loaded when it opens.
+  let paletteHistory = [];
   let paletteSel = 0;
 
   // Subsequence match of `q` in `text`, scored: consecutive runs, word
@@ -2280,6 +2283,13 @@
     }
     for (const p of pins) out.push({ kind: 'Pinned', title: p.title || p.display.registrable, host: p.display.registrable, run: () => openLink(p.url) });
     for (const b of bookmarks) out.push({ kind: 'Bookmark', title: b.title || b.display.registrable, host: b.display.registrable, run: () => openLink(b.url) });
+    // History, after the rest; pages already pinned or bookmarked once.
+    const seen = new Set([...pins.map((p) => p.url), ...bookmarks.map((b) => b.url)]);
+    for (const h of paletteHistory) {
+      if (seen.has(h.url)) continue;
+      seen.add(h.url);
+      out.push({ kind: 'History', history: true, title: h.title || h.display.registrable, host: h.display.registrable, run: () => openLink(h.url) });
+    }
     return out;
   }
 
@@ -2288,6 +2298,7 @@
     const ql = q.toLowerCase();
     let rows;
     if (!ql) {
+      // Open tabs, pins and bookmarks first; recent history fills the rest.
       rows = paletteCandidates().slice(0, 8).map((c) => ({ ...c, hits: [] }));
     } else {
       rows = paletteCandidates()
@@ -2295,7 +2306,8 @@
           const m = fuzzy(ql, c.title);
           const mh = fuzzy(ql, c.host);
           const best = m && (!mh || m.score >= mh.score) ? m : mh;
-          return best && { ...c, score: best.score, hits: best === m ? best.hits : [] };
+          // History ranks just below an equally good tab or bookmark.
+          return best && { ...c, score: best.score - (c.history ? 0.5 : 0), hits: best === m ? best.hits : [] };
         })
         .filter(Boolean)
         .sort((a, b) => b.score - a.score)
@@ -2321,7 +2333,7 @@
       li.addEventListener('click', () => choosePalette(i));
       list.appendChild(li);
     });
-    if (!rows.length) list.appendChild(el('li', 'muted', 'No open tabs or bookmarks yet. Type an address or a search.'));
+    if (!rows.length) list.appendChild(el('li', 'muted', 'No open tabs, bookmarks or history yet. Type an address or a search.'));
   }
 
   function looksLikeAddress(q) {
@@ -2351,6 +2363,10 @@
     renderPalette();
     focusInput(input);
     reportLayout();
+    T.core.invoke('list_history', { limit: 500 }).then((items) => {
+      paletteHistory = items;
+      if (paletteOpen) renderPalette();
+    }).catch(() => {});
   }
 
   // Focuses an input the chrome opened from a shortcut. After a shortcut a

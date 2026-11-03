@@ -425,7 +425,10 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     taps, text selection (the menu uses pane width / `innerWidth`, so it should line up), find,
     pull to refresh and the fit-width check after a resize all behave; text stays sharp enough
     (WebKit draws at the view's own scale, then the compositor scales it). Popups open at 100%.
-    No keyboard shortcuts yet.
+    No keyboard shortcuts yet. Sites that size their content to the window cancel the effect by
+    design: Google Docs at its "Fit" zoom makes the page as wide as the window, so a wider
+    viewport just gets a larger page (reported 2026-11-03); a fixed Docs zoom (e.g. 100%) avoids
+    it.
 68. **[verify] Google Calendar and Drive freezing** (reported 2026-11-03, with ad blocking off).
     Not reproduced (no device). Most likely cause found: the in-app console's page hook (on by
     default in debug builds) ran `JSON.stringify` on every argument of every `console.*` call
