@@ -54,6 +54,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::split_tabs,
         commands::unsplit,
         commands::split_new,
+        commands::set_split_ratio,
         commands::get_view_mode,
         commands::set_view_mode,
         commands::set_launch_mode,

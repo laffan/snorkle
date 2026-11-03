@@ -129,6 +129,8 @@ pub struct ContentHost {
     left: Cell<f64>,
     right: Cell<f64>,
     bottom: Cell<f64>,
+    /// The first pane's share of a split (`Effect::SetSplitRatio`), 0.2–0.8.
+    split_ratio: Cell<f64>,
     views: HashMap<TabId, View>,
     /// `interactionState` of discarded tabs (in memory only).
     saved: HashMap<TabId, Retained<AnyObject>>,
@@ -232,6 +234,7 @@ impl ContentHost {
             left: Cell::new(0.0),
             right: Cell::new(0.0),
             bottom: Cell::new(0.0),
+            split_ratio: Cell::new(0.5),
             views: HashMap::new(),
             saved: HashMap::new(),
             default_store,
@@ -261,24 +264,31 @@ impl ContentHost {
         )
     }
 
-    /// Frame of one pane: the whole content area, or one half of it with a
-    /// 2 pt divider in split view (side by side, or one above the other).
+    /// Frame of one pane: the whole content area, or part of it in split
+    /// view (side by side, or one above the other): the first pane gets
+    /// `split_ratio` of the space less the 8 pt gap (floored), the second
+    /// the rest. The chrome draws the divider's handle in the gap, which no
+    /// page covers (`ui/chrome.js` `splitSizes` uses the same formula).
     fn pane_frame(&self, pane: Pane) -> CGRect {
         let area = self.content_frame();
-        const GAP: f64 = 2.0;
-        let half = ((area.size.width - GAP) / 2.0).floor().max(0.0);
-        let half_h = ((area.size.height - GAP) / 2.0).floor().max(0.0);
+        let r = self.split_ratio.get();
+        let sizes = |total: f64| {
+            let first = ((total - SPLIT_GAP) * r).floor().max(0.0);
+            (first, (total - SPLIT_GAP - first).max(0.0))
+        };
+        let (left_w, right_w) = sizes(area.size.width);
+        let (top_h, bottom_h) = sizes(area.size.height);
         match pane {
             Pane::Full => area,
-            Pane::Left => CGRect::new(area.origin, CGSize::new(half, area.size.height)),
+            Pane::Left => CGRect::new(area.origin, CGSize::new(left_w, area.size.height)),
             Pane::Right => CGRect::new(
-                CGPoint::new(area.origin.x + area.size.width - half, area.origin.y),
-                CGSize::new(half, area.size.height),
+                CGPoint::new(area.origin.x + area.size.width - right_w, area.origin.y),
+                CGSize::new(right_w, area.size.height),
             ),
-            Pane::Top => CGRect::new(area.origin, CGSize::new(area.size.width, half_h)),
+            Pane::Top => CGRect::new(area.origin, CGSize::new(area.size.width, top_h)),
             Pane::Bottom => CGRect::new(
-                CGPoint::new(area.origin.x, area.origin.y + area.size.height - half_h),
-                CGSize::new(area.size.width, half_h),
+                CGPoint::new(area.origin.x, area.origin.y + area.size.height - bottom_h),
+                CGSize::new(area.size.width, bottom_h),
             ),
             // Window-sized, centred, with a margin that leaves the page
             // underneath visible.
@@ -728,6 +738,12 @@ impl ContentHost {
                         load(&v.web, url);
                     }
                 }
+                Effect::SetSplitRatio(permille) => {
+                    self.split_ratio.set(f64::from((*permille).clamp(200, 800)) / 1000.0);
+                    for v in self.views.values().filter(|v| !v.container.isHidden()) {
+                        self.place(&v.container, self.pane_frame(v.pane.get()), v.scale.get());
+                    }
+                }
                 Effect::SetZoom { tab, percent } => {
                     if let Some(v) = self.views.get(tab) {
                         // The core only sends levels from 50 to 150 %.
@@ -974,6 +990,9 @@ impl Drop for ContentHost {
         }
     }
 }
+
+/// Gap between the panes of a split, where the chrome draws the divider.
+const SPLIT_GAP: f64 = 8.0;
 
 /// Sets a container's frame and its web view's, and cuts `holes` out.
 /// The web view gets the container's size divided by `scale` and a scale

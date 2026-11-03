@@ -27,6 +27,7 @@ pub const COMMANDS: &[&str] = &[
     "split_tabs",
     "unsplit",
     "split_new",
+    "set_split_ratio",
     "get_view_mode",
     "set_view_mode",
     "set_launch_mode",

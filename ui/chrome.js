@@ -1007,6 +1007,51 @@
     layoutQueued = true;
     requestAnimationFrame(() => { layoutQueued = false; reportLayout(); });
   }
+  // Split panes: the first pane gets `ratio` (permille) of the space less
+  // the gap, floored; the second the rest (as the host's `pane_frame`).
+  const SPLIT_GAP = 8;
+  function splitSizes(total, ratio) {
+    const first = Math.max(0, Math.floor((total - SPLIT_GAP) * (ratio || 500) / 1000));
+    return [first, Math.max(0, total - SPLIT_GAP - first)];
+  }
+  // Dragging the divider: the panes follow, one update per frame.
+  let splitDrag = null;
+  $('split-resize').addEventListener('pointerdown', (ev) => {
+    if (!state || !state.split) return;
+    ev.preventDefault();
+    $('split-resize').setPointerCapture(ev.pointerId);
+    const rows = state.split.orientation === 'rows';
+    splitDrag = { rows, ratio: state.split.ratio, queued: false };
+    document.body.classList.add('resizing-split');
+    document.body.classList.toggle('split-rows', rows);
+  });
+  $('split-resize').addEventListener('pointermove', (ev) => {
+    if (!splitDrag || !state || !state.split) return;
+    const b = contentBox;
+    const total = splitDrag.rows ? window.innerHeight - b.top - b.bottom : window.innerWidth - b.left - b.right;
+    const at = splitDrag.rows ? ev.clientY - b.top : ev.clientX - b.left;
+    const ratio = Math.round(Math.min(800, Math.max(200, ((at - SPLIT_GAP / 2) / Math.max(1, total - SPLIT_GAP)) * 1000)));
+    if (ratio === splitDrag.ratio) return;
+    splitDrag.ratio = ratio;
+    state.split.ratio = ratio; // the chrome's own surface and handle follow at once
+    queueLayout();
+    if (splitDrag.queued) return;
+    splitDrag.queued = true;
+    requestAnimationFrame(() => {
+      if (!splitDrag) return;
+      splitDrag.queued = false;
+      invoke('set_split_ratio', { permille: splitDrag.ratio });
+    });
+  });
+  const endSplitDrag = () => {
+    if (!splitDrag) return;
+    invoke('set_split_ratio', { permille: splitDrag.ratio });
+    splitDrag = null;
+    document.body.classList.remove('resizing-split', 'split-rows');
+  };
+  $('split-resize').addEventListener('pointerup', endSplitDrag);
+  $('split-resize').addEventListener('pointercancel', endSplitDrag);
+
   $('sidebar-resize').addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     const handle = $('sidebar-resize');
@@ -1538,18 +1583,25 @@
     let sRight = right;
     let sTop = top;
     let sBottom = bottom;
-    if (state && state.split && !overlay) {
-      const first = state.active === state.split.left;
-      if (state.split.orientation === 'rows') {
+    const handle = $('split-resize');
+    const split = state && state.split && state.sheet === null && !overlay ? state.split : null;
+    handle.hidden = !split;
+    if (split) {
+      const first = state.active === split.left;
+      const rows = split.orientation === 'rows';
+      handle.classList.toggle('rows', rows);
+      if (rows) {
         const h = window.innerHeight - top - bottom;
-        const half = Math.floor((h - 2) / 2);
-        if (first) sBottom = bottom + h - half;
-        else sTop = top + h - half;
+        const [a, b] = splitSizes(h, split.ratio);
+        if (first) sBottom = bottom + h - a;
+        else sTop = top + h - b;
+        Object.assign(handle.style, { left: left + 'px', right: right + 'px', width: '', top: top + a + 'px', height: SPLIT_GAP + 'px', bottom: '' });
       } else {
         const w = window.innerWidth - left - right;
-        const half = Math.floor((w - 2) / 2);
-        if (first) sRight = right + w - half;
-        else sLeft = left + w - half;
+        const [a, b] = splitSizes(w, split.ratio);
+        if (first) sRight = right + w - a;
+        else sLeft = left + w - b;
+        Object.assign(handle.style, { left: left + a + 'px', width: SPLIT_GAP + 'px', right: '', top: top + 'px', bottom: bottom + 'px', height: '' });
       }
     }
     const s = $('surface');
@@ -2867,14 +2919,15 @@
   function paneBox(tab) {
     const b = contentBox;
     const w = window.innerWidth - b.left - b.right;
-    if (state && state.split && (state.split.left === tab || state.split.right === tab)) {
-      if (state.split.orientation === 'rows') {
+    const s = state && state.split;
+    if (s && (s.left === tab || s.right === tab)) {
+      if (s.orientation === 'rows') {
         const h = window.innerHeight - b.top - b.bottom;
-        const half = Math.floor((h - 2) / 2);
-        return { x: b.left, y: state.split.left === tab ? b.top : b.top + h - half, w };
+        const [, second] = splitSizes(h, s.ratio);
+        return { x: b.left, y: s.left === tab ? b.top : b.top + h - second, w };
       }
-      const half = Math.floor((w - 2) / 2);
-      return { x: state.split.left === tab ? b.left : b.left + w - half, y: b.top, w: half };
+      const [first, second] = splitSizes(w, s.ratio);
+      return s.left === tab ? { x: b.left, y: b.top, w: first } : { x: b.left + w - second, y: b.top, w: second };
     }
     return { x: b.left, y: b.top, w };
   }

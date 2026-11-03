@@ -69,6 +69,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "move_bookmark" => json!({ "url": "https://example.com/", "index": 0 }),
         "split_tabs" => json!({ "tab": 1, "with": 2 }),
         "split_new" => json!({ "orientation": "rows" }),
+        "set_split_ratio" => json!({ "permille": 600 }),
         "set_view_mode" | "set_launch_mode" => json!({ "mode": "desaturate", "on": true }),
         "set_tab_view_exempt" => json!({ "tab": 1, "mode": "headers", "exempt": true }),
         "scroll_to_heading" => json!({ "tab": 1, "index": 0 }),

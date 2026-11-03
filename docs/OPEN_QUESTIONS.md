@@ -472,7 +472,8 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 74. **[verify] Split top and bottom** (2026-11-03). ⌘D / ⌘⇧D split with an empty tab, or change
     an existing split's layout. Check the panes, the start surface over the empty half, the
     selection and image menus' placement (pane geometry in `paneBox`) and dragging out of a pair
-    in rows. Bookmark Page moved to ⌥⌘D; a saved custom binding that used ⌘D or ⌘⇧D now clashes,
+    in rows, and dragging the divider (8 pt gap, one update per frame; each update re-places
+    the visible pages natively). Bookmark Page moved to ⌥⌘D; a saved custom binding that used ⌘D or ⌘⇧D now clashes,
     and Settings → Keyboard then refuses the set until one is changed.
 75. **[decide] Opening a pin or bookmark** (2026-11-03) now returns to its tab as left; Return to
     Original URL in its menu goes back to the saved address. Before, every click went back to it

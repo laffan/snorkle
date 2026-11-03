@@ -196,8 +196,10 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 - **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
   tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects
   carry a `Pane` (`Full`, `Left`/`Right` for a pair side by side, `Top`/`Bottom` for one in rows;
-  `SplitView::orientation`), and the host places each container in its half, with a 2 pt
-  divider. ⌘D (side by side) and ⌘⇧D (top and bottom) open an empty tab of the active tab's
+  `SplitView::orientation`), and the host places each container in its part, with an 8 pt gap.
+  The chrome draws a divider in the gap (no page covers it, so it needs no cut-out); dragging it
+  sets the pair's ratio (`SplitView::ratio`, first pane 20–80%, `Browser::set_split_ratio`),
+  which the core sends to the host (`Effect::SetSplitRatio`) before placing a pair's panes. ⌘D (side by side) and ⌘⇧D (top and bottom) open an empty tab of the active tab's
   profile as the second pane (right or below) and focus its address bar
   (`Browser::split_new`); in a pair they only change its layout, never adding a third pane. The panes on screen are protected from discard; pairs not on screen can
   be discarded and are restored together when chosen. Choosing a tab outside any pair shows it

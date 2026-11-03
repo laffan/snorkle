@@ -34,6 +34,7 @@
     "allow-split-tabs",
     "allow-unsplit",
     "allow-split-new",
+    "allow-set-split-ratio",
     "allow-get-view-mode",
     "allow-set-view-mode",
     "allow-set-launch-mode",

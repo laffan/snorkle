@@ -390,7 +390,10 @@ fn split_shortcuts_add_an_empty_tab_or_change_the_layout() {
     let (n, out) = b.split_new(SplitOrientation::Columns, 1);
     let n = n.expect("a new tab");
     assert_eq!(b.active(), Some(n), "the new tab is focused");
-    assert_eq!(b.view().split, Some(SplitView { left: a, right: n, orientation: SplitOrientation::Columns }));
+    assert_eq!(
+        b.view().split,
+        Some(SplitView { left: a, right: n, orientation: SplitOrientation::Columns, ratio: 500 })
+    );
     assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }), "the page keeps the left half");
     // Same shortcut again: nothing.
     let (again, out) = b.split_new(SplitOrientation::Columns, 2);
@@ -415,6 +418,31 @@ fn split_shortcuts_add_an_empty_tab_or_change_the_layout() {
     let mut b = browser(1);
     open_and_load(&mut b, "https://a.example/", 0);
     assert!(b.split_new(SplitOrientation::Columns, 1).0.is_none());
+}
+
+#[test]
+fn split_divider_sets_the_ratio() {
+    let mut b = browser(4);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 1);
+    b.split(c, a, 2);
+    assert_eq!(b.set_split_ratio(650), vec![Effect::SetSplitRatio(650), Effect::NotifyChrome]);
+    assert_eq!(b.view().split.map(|s| s.ratio), Some(650));
+    assert!(b.set_split_ratio(650).is_empty(), "no change");
+    assert_eq!(b.set_split_ratio(990), vec![Effect::SetSplitRatio(800), Effect::NotifyChrome], "clamped");
+    assert_eq!(b.set_split_ratio(0).first(), Some(&Effect::SetSplitRatio(200)));
+    // Another pair comes on screen with its own ratio, sent before its panes.
+    let (d, _) = open_and_load(&mut b, "https://d.example/", 3);
+    let (e, _) = open_and_load(&mut b, "https://e.example/", 4);
+    b.split(e, d, 5);
+    b.activate(a, 6);
+    let out = b.activate(d, 7);
+    let ratio = out.iter().position(|x| *x == Effect::SetSplitRatio(500)).expect("the new pair's ratio");
+    let shown = out.iter().position(|x| matches!(x, Effect::ShowView { .. })).expect("its panes");
+    assert!(ratio < shown);
+    // Not without a pair on screen.
+    b.unsplit(d);
+    assert!(b.set_split_ratio(300).is_empty());
 }
 
 #[test]
@@ -633,7 +661,10 @@ fn split_shows_both_tabs_side_by_side() {
     let out = b.split(c, a, 2);
     assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }));
     assert!(out.contains(&Effect::ShowView { tab: c, pane: Pane::Right }));
-    assert_eq!(b.view().split, Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns }));
+    assert_eq!(
+        b.view().split,
+        Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns, ratio: 500 })
+    );
     assert_eq!(b.active(), Some(c));
     // Focusing the other pane keeps the split.
     b.activate(a, 3);
@@ -651,14 +682,17 @@ fn split_pairs_survive_choosing_another_tab_and_end_when_a_pane_closes() {
     assert!(b.view().split.is_none(), "a tab outside the pair is shown alone");
     assert_eq!(
         b.view().splits,
-        vec![SplitView { left: a, right: c, orientation: SplitOrientation::Columns }],
+        vec![SplitView { left: a, right: c, orientation: SplitOrientation::Columns, ratio: 500 }],
         "the pair is kept"
     );
     assert!(out.contains(&Effect::HideView(a)) && out.contains(&Effect::HideView(c)));
     assert!(out.contains(&Effect::ShowView { tab: d, pane: Pane::Full }));
     // Choosing either tab of the pair shows the pair again.
     let out = b.activate(a, 5);
-    assert_eq!(b.view().split, Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns }));
+    assert_eq!(
+        b.view().split,
+        Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns, ratio: 500 })
+    );
     assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }));
     assert!(out.contains(&Effect::ShowView { tab: c, pane: Pane::Right }));
     b.close(a, 6);
@@ -678,14 +712,20 @@ fn several_pairs_and_repairing() {
     assert_eq!(
         b.view().splits,
         vec![
-            SplitView { left: a, right: c, orientation: SplitOrientation::Columns },
-            SplitView { left: d, right: e, orientation: SplitOrientation::Columns }
+            SplitView { left: a, right: c, orientation: SplitOrientation::Columns, ratio: 500 },
+            SplitView { left: d, right: e, orientation: SplitOrientation::Columns, ratio: 500 }
         ]
     );
-    assert_eq!(b.view().split, Some(SplitView { left: d, right: e, orientation: SplitOrientation::Columns }));
+    assert_eq!(
+        b.view().split,
+        Some(SplitView { left: d, right: e, orientation: SplitOrientation::Columns, ratio: 500 })
+    );
     // Pairing tabs from two pairs ends both and makes one new pair.
     b.split(d, a, 6);
-    assert_eq!(b.view().splits, vec![SplitView { left: a, right: d, orientation: SplitOrientation::Columns }]);
+    assert_eq!(
+        b.view().splits,
+        vec![SplitView { left: a, right: d, orientation: SplitOrientation::Columns, ratio: 500 }]
+    );
 }
 
 #[test]
@@ -726,7 +766,10 @@ fn hidden_pair_can_be_discarded_and_comes_back_whole() {
     let (d, _) = open_and_load(&mut b, "https://d.example/", 3);
     assert!(b.live_count() <= 2);
     let out = b.activate(a, 4);
-    assert_eq!(b.view().split, Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns }));
+    assert_eq!(
+        b.view().split,
+        Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns, ratio: 500 })
+    );
     assert_eq!(b.live_count(), 2);
     let created: Vec<_> = out
         .iter()

@@ -481,6 +481,12 @@ pub async fn find_in_page(
     Ok(text.ok().flatten().and_then(|t| snorkle_core::find::parse_position(&t)))
 }
 
+/// The split divider was dragged: the first pane's share, in permille.
+#[tauri::command]
+pub fn set_split_ratio(s: S<'_>, permille: u16) {
+    with_browser(&s, |b| b.set_split_ratio(permille));
+}
+
 /// ⌘D / ⌘⇧D: split the view with a new empty tab (returned), or change
 /// the layout of the split the active tab is in (`None`).
 #[tauri::command]

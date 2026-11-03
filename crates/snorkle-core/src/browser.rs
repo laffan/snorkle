@@ -60,6 +60,10 @@ pub enum Effect {
         pane: Pane,
     },
     HideView(TabId),
+    /// The share of the content area the first pane of the pair on screen
+    /// takes, in permille (the divider was dragged, or another pair came
+    /// on screen). Sent before the `ShowView`s that place its panes.
+    SetSplitRatio(u16),
     /// Set the web view's page scale (`percent` / 100: the page is laid out
     /// for its pane divided by that and drawn scaled by it). Also follows
     /// `CreateView` for a tab whose scale is not 100 %.
@@ -120,7 +124,15 @@ pub struct SplitView {
     pub left: TabId,
     pub right: TabId,
     pub orientation: SplitOrientation,
+    /// The first pane's share of the space, in permille
+    /// ([`SPLIT_RATIO_MIN`]..=[`SPLIT_RATIO_MAX`]); the divider sets it.
+    pub ratio: u16,
 }
+
+/// Default and limits of [`SplitView::ratio`].
+pub const SPLIT_RATIO_DEFAULT: u16 = 500;
+pub const SPLIT_RATIO_MIN: u16 = 200;
+pub const SPLIT_RATIO_MAX: u16 = 800;
 
 /// How a pair is laid out: side by side (a vertical divider; ⌘D and
 /// dragging a tab onto another) or one above the other (⌘⇧D).
@@ -257,6 +269,8 @@ pub struct Browser {
     chrome_overlay: bool,
     shown: Vec<(TabId, Pane)>,
     splits: Vec<SplitView>,
+    /// The ratio last sent to the host (`Effect::SetSplitRatio`).
+    shown_ratio: u16,
     adblock_allowed: BTreeSet<String>,
     adblock_status: AdblockStatus,
 }
@@ -275,6 +289,7 @@ impl Browser {
             chrome_overlay: false,
             shown: Vec::new(),
             splits: Vec::new(),
+            shown_ratio: SPLIT_RATIO_DEFAULT,
             adblock_allowed: BTreeSet::new(),
             adblock_status: AdblockStatus::Off,
         }
@@ -438,7 +453,7 @@ impl Browser {
             return out;
         }
         self.splits.retain(|s| ![s.left, s.right].iter().any(|t| *t == dragged || *t == target));
-        self.splits.push(SplitView { left: target, right: dragged, orientation });
+        self.splits.push(SplitView { left: target, right: dragged, orientation, ratio: SPLIT_RATIO_DEFAULT });
         self.activate_into(dragged, now, &mut out);
         out.push(Effect::NotifyChrome);
         out
@@ -471,6 +486,22 @@ impl Browser {
         let id = self.new_tab_into(profile, now, &mut out);
         out.extend(self.split_oriented(id, active, orientation, now));
         (Some(id), out)
+    }
+
+    /// The divider of the pair on screen was dragged: its first pane takes
+    /// `permille` of the space (clamped to 20–80%).
+    pub fn set_split_ratio(&mut self, permille: u16) -> Vec<Effect> {
+        let permille = permille.clamp(SPLIT_RATIO_MIN, SPLIT_RATIO_MAX);
+        let Some(active) = self.active else { return Vec::new() };
+        let Some(pair) = self.splits.iter_mut().find(|s| s.left == active || s.right == active) else {
+            return Vec::new();
+        };
+        if pair.ratio == permille {
+            return Vec::new();
+        }
+        pair.ratio = permille;
+        self.shown_ratio = permille;
+        vec![Effect::SetSplitRatio(permille), Effect::NotifyChrome]
     }
 
     /// Ends the pair holding `id`, if any. Both tabs stay open and the
@@ -1394,6 +1425,13 @@ impl Browser {
     }
 
     fn sync_visibility(&mut self, out: &mut Vec<Effect>) {
+        // The host lays out a pair's panes with its ratio: send it first.
+        if let Some(s) = self.split_view().filter(|_| self.front_sheet().is_none()) {
+            if s.ratio != self.shown_ratio {
+                self.shown_ratio = s.ratio;
+                out.push(Effect::SetSplitRatio(s.ratio));
+            }
+        }
         let want = self.desired_shown();
         if want == self.shown {
             return;

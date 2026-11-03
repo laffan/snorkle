@@ -278,6 +278,18 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
 #sidebar-resize::after { right: 0; }
 body.narrow #sidebar-resize { display: none; }
 #right-resize { position: fixed; bottom: 0; z-index: 14; }
+/* Split divider: the whole 8 pt gap grabs; a 3 pt line in its middle,
+   lit on hover like the sidebar's edge. */
+.split-edge { position: fixed; z-index: 14; touch-action: none; cursor: col-resize; }
+.split-edge.rows { cursor: row-resize; }
+.split-edge::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px;
+  background: var(--edge); transition: background-color .15s, box-shadow .15s;
+}
+.split-edge.rows::after { top: 50%; bottom: auto; left: 0; right: 0; width: auto; height: 3px; margin: -1.5px 0 0; }
+.split-edge:hover::after, body.resizing-split .split-edge::after { background: var(--edge-hot); box-shadow: 0 0 8px var(--edge-glow); }
+body.resizing-split { cursor: col-resize; }
+body.resizing-split.split-rows { cursor: row-resize; }
 #right-resize::after { left: 0; }
 body.resizing-right, body.resizing { cursor: col-resize; }
 
