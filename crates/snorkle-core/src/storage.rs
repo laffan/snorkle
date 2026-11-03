@@ -108,6 +108,57 @@ struct Data {
     pin_emoji: BTreeMap<String, String>,
     /// Offline copies of pinned and bookmarked pages (index of `offline/`).
     offline: Vec<OfflineEntry>,
+    /// Text of the most recently visited pages (index of `page-text/`).
+    page_texts: Vec<PageTextEntry>,
+}
+
+/// Text copies of recently visited pages (history's "cached version"), in
+/// `page-text/`, one JSON file per URL, listed in `page-text/index.json`.
+/// Only pages that are in history are kept: removing a page from history
+/// (or clearing it) deletes its text. Never written for private tabs (the
+/// caller only saves pages of non-private tabs, and history has none).
+const PAGE_TEXT_DIR: &str = "page-text";
+/// Pages whose text is kept; the oldest are deleted first.
+pub const MAX_PAGE_TEXTS: usize = 100;
+/// Largest text file accepted (the text itself is capped by the caller).
+pub const MAX_PAGE_TEXT_FILE_BYTES: u64 = 512 * 1024;
+/// Characters of a page's text kept.
+pub const MAX_PAGE_TEXT_STORED_CHARS: usize = crate::ai::MAX_CHAT_PAGE_CHARS;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PageTextEntry {
+    pub url: String,
+    /// File name in `page-text/`: 16 hex digits + `.json`.
+    pub file: String,
+    pub saved_ms: u64,
+    pub bytes: u64,
+}
+
+/// A page's saved text, as written by [`Store::save_page_text`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedPageText {
+    pub url: String,
+    pub title: String,
+    pub text: String,
+    pub saved_ms: u64,
+}
+
+/// A history search hit in a page's saved text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextHit {
+    pub url: String,
+    /// Up to about 160 characters around the first match.
+    pub snippet: String,
+}
+
+fn page_text_file(url: &str) -> String {
+    format!("{}.json", &offline_file(url)[..16])
+}
+
+fn valid_page_text_file(name: &str) -> bool {
+    name.len() == 16 + ".json".len()
+        && name.ends_with(".json")
+        && name[..16].bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 /// Offline copies (web archives) of pinned and bookmarked pages, in
@@ -329,6 +380,7 @@ impl Store {
         let offline = load_offline(&dir.join(OFFLINE_DIR), |u| {
             pins.iter().any(|p| p.url == u) || bookmarks.iter().any(|b| b.url == u)
         });
+        let page_texts = load_page_texts(&dir.join(PAGE_TEXT_DIR), |u| history.iter().any(|h| h.url == u));
         Ok(Store {
             dir,
             inner: Mutex::new(Data {
@@ -343,6 +395,7 @@ impl Store {
                 launch_modes,
                 pin_emoji,
                 offline,
+                page_texts,
             }),
         })
     }
@@ -375,8 +428,117 @@ impl Store {
     }
 
     pub fn clear_history(&self) -> std::io::Result<()> {
-        self.data().history.clear();
+        {
+            let mut d = self.data();
+            d.history.clear();
+            d.page_texts.clear();
+        }
+        let _ = fs::remove_dir_all(self.dir.join(PAGE_TEXT_DIR));
         atomic_write(&self.dir.join(HISTORY_FILE), b"[]")
+    }
+
+    /// Whether `url` (normalised) is in history.
+    pub fn in_history(&self, url: &str) -> bool {
+        storable_url(url).is_some_and(|u| self.data().history.iter().any(|h| h.url == u))
+    }
+
+    /// Removes the visits `(url, visited_ms)` from history; a page with no
+    /// visits left also loses its saved text. Returns how many were removed.
+    pub fn remove_history(&self, visits: &[(String, u64)]) -> std::io::Result<usize> {
+        let (snapshot, index, dropped, removed) = {
+            let mut d = self.data();
+            let before = d.history.len();
+            d.history.retain(|h| !visits.iter().any(|(u, ms)| *u == h.url && *ms == h.visited_ms));
+            let removed = before - d.history.len();
+            if removed == 0 {
+                return Ok(0);
+            }
+            let Data { history, page_texts, .. } = &mut *d;
+            let dropped: Vec<String> = page_texts
+                .iter()
+                .filter(|e| !history.iter().any(|h| h.url == e.url))
+                .map(|e| e.file.clone())
+                .collect();
+            page_texts.retain(|e| !dropped.contains(&e.file));
+            let index = (!dropped.is_empty()).then(|| serde_json::to_vec(&d.page_texts)).transpose()?;
+            (serde_json::to_vec(&d.history)?, index, dropped, removed)
+        };
+        atomic_write(&self.dir.join(HISTORY_FILE), &snapshot)?;
+        let dir = self.dir.join(PAGE_TEXT_DIR);
+        for f in dropped {
+            let _ = fs::remove_file(dir.join(f));
+        }
+        if let Some(index) = index {
+            atomic_write(&dir.join(OFFLINE_INDEX), &index)?;
+        }
+        Ok(removed)
+    }
+
+    /// Saves the text of a page in history (replacing its previous text)
+    /// and deletes the oldest beyond [`MAX_PAGE_TEXTS`]. False when `url`
+    /// is not in history or there is no text.
+    pub fn save_page_text(&self, url: &str, title: &str, text: &str, now_ms: u64) -> std::io::Result<bool> {
+        let Some(url) = storable_url(url) else { return Ok(false) };
+        let text = crate::ai::clean_multiline(text, MAX_PAGE_TEXT_STORED_CHARS);
+        if text.is_empty() {
+            return Ok(false);
+        }
+        let page = SavedPageText { url: url.clone(), title: clean_title(title), text, saved_ms: now_ms };
+        let bytes = serde_json::to_vec(&page)?;
+        if bytes.len() as u64 > MAX_PAGE_TEXT_FILE_BYTES {
+            return Ok(false);
+        }
+        let dir = self.dir.join(PAGE_TEXT_DIR);
+        let file = page_text_file(&url);
+        let (index, evicted) = {
+            let mut d = self.data();
+            if !d.history.iter().any(|h| h.url == url) {
+                return Ok(false);
+            }
+            fs::create_dir_all(&dir)?;
+            atomic_write(&dir.join(&file), &bytes)?;
+            d.page_texts.retain(|e| e.url != url && e.file != file);
+            d.page_texts.insert(0, PageTextEntry { url, file, saved_ms: now_ms, bytes: bytes.len() as u64 });
+            let evicted: Vec<String> = d.page_texts.iter().skip(MAX_PAGE_TEXTS).map(|e| e.file.clone()).collect();
+            d.page_texts.truncate(MAX_PAGE_TEXTS);
+            (serde_json::to_vec(&d.page_texts)?, evicted)
+        };
+        for f in evicted {
+            let _ = fs::remove_file(dir.join(f));
+        }
+        atomic_write(&dir.join(OFFLINE_INDEX), &index)?;
+        Ok(true)
+    }
+
+    /// Size in bytes of each saved page text, by URL.
+    pub fn page_text_sizes(&self) -> BTreeMap<String, u64> {
+        self.data().page_texts.iter().map(|e| (e.url.clone(), e.bytes)).collect()
+    }
+
+    /// The saved text of `url`, if any.
+    pub fn page_text(&self, url: &str) -> Option<SavedPageText> {
+        let url = storable_url(url)?;
+        let file = self.data().page_texts.iter().find(|e| e.url == url)?.file.clone();
+        read_page_text(&self.dir.join(PAGE_TEXT_DIR).join(file)).filter(|p| p.url == url)
+    }
+
+    /// Saved pages whose text contains `query` (case-insensitive), newest
+    /// first, with a snippet around the first match.
+    pub fn search_page_texts(&self, query: &str, limit: usize) -> Vec<TextHit> {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return Vec::new();
+        }
+        let files: Vec<PageTextEntry> = self.data().page_texts.clone();
+        let dir = self.dir.join(PAGE_TEXT_DIR);
+        files
+            .iter()
+            .filter_map(|e| {
+                let p = read_page_text(&dir.join(&e.file)).filter(|p| p.url == e.url)?;
+                Some(TextHit { url: e.url.clone(), snippet: snippet(&p.text, &q)? })
+            })
+            .take(limit)
+            .collect()
     }
 
     /// Adds a bookmark; returns false if the URL is not storable or already
@@ -980,6 +1142,69 @@ fn load_offline(dir: &Path, keep: impl Fn(&str) -> bool) -> Vec<OfflineEntry> {
     index
 }
 
+/// Reads the page-text index, keeping entries with a valid file name, an
+/// existing file and a URL still in history (`keep`), newest first and at
+/// most [`MAX_PAGE_TEXTS`]; deletes every other file in the folder.
+fn load_page_texts(dir: &Path, keep: impl Fn(&str) -> bool) -> Vec<PageTextEntry> {
+    let mut index: Vec<PageTextEntry> = load_or_reset(&dir.join(OFFLINE_INDEX));
+    index.retain(|e| {
+        valid_page_text_file(&e.file)
+            && storable_url(&e.url).as_deref() == Some(e.url.as_str())
+            && keep(&e.url)
+            && dir.join(&e.file).is_file()
+    });
+    index.sort_by_key(|e| std::cmp::Reverse(e.saved_ms));
+    index.truncate(MAX_PAGE_TEXTS);
+    if let Ok(entries) = fs::read_dir(dir) {
+        for f in entries.flatten() {
+            let name = f.file_name().to_string_lossy().to_string();
+            if name != OFFLINE_INDEX && !index.iter().any(|e| e.file == name) {
+                let _ = fs::remove_file(f.path());
+            }
+        }
+    }
+    if let Ok(bytes) = serde_json::to_vec(&index) {
+        if dir.is_dir() {
+            let _ = atomic_write(&dir.join(OFFLINE_INDEX), &bytes);
+        }
+    }
+    index
+}
+
+/// Reads one saved page text, re-cleaned (a tampered file cannot carry
+/// markup-relevant control characters or more than the cap).
+fn read_page_text(path: &Path) -> Option<SavedPageText> {
+    if fs::metadata(path).ok()?.len() > MAX_PAGE_TEXT_FILE_BYTES {
+        return None;
+    }
+    let mut p: SavedPageText = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    p.url = storable_url(&p.url)?;
+    p.title = clean_title(&p.title);
+    p.text = crate::ai::clean_multiline(&p.text, MAX_PAGE_TEXT_STORED_CHARS);
+    Some(p)
+}
+
+/// About 160 characters of `text` around the first case-insensitive match
+/// of `q` (already lowercase), on one line, with "…" where cut.
+fn snippet(text: &str, q: &str) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
+    let qc: Vec<char> = q.chars().collect();
+    let at = (0..=lower.len().checked_sub(qc.len())?).find(|&i| lower[i..i + qc.len()] == qc[..])?;
+    let start = at.saturating_sub(60);
+    let end = (at + qc.len() + 100).min(chars.len());
+    let body: String = chars[start..end].iter().map(|c| if c.is_whitespace() { ' ' } else { *c }).collect();
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(body.trim());
+    if end < chars.len() {
+        out.push('…');
+    }
+    Some(out)
+}
+
 fn load_or_reset<T: DeserializeOwned + Default>(path: &Path) -> T {
     let Ok(meta) = fs::metadata(path) else { return T::default() };
     let parsed = if meta.len() > MAX_FILE_BYTES {
@@ -1089,6 +1314,58 @@ mod tests {
         let s = Store::open(&dir).unwrap();
         assert_eq!(s.chats().len(), MAX_CHATS - 1);
         assert!(!dir.join(CHATS_DIR).join("c9.json").exists(), "corrupt chat files are removed");
+    }
+
+    #[test]
+    fn history_removal_and_page_text_cache() {
+        let dir = tmpdir("pagetext");
+        let _ = fs::remove_dir_all(&dir);
+        let s = Store::open(&dir).unwrap();
+        s.add_history("https://a.example/", "A", 1).unwrap();
+        s.add_history("https://b.example/", "B", 2).unwrap();
+        s.add_history("https://a.example/", "A", 3).unwrap();
+        assert!(!s.save_page_text("https://nothere.example/", "X", "text", 4).unwrap(), "only pages in history");
+        assert!(s.save_page_text("https://a.example/", "A", "Hello\n\nNeedle in a haystack", 4).unwrap());
+        assert!(s.save_page_text("https://b.example/", "B", "Other text", 5).unwrap());
+        assert_eq!(s.page_text("https://a.example/").unwrap().text, "Hello\n\nNeedle in a haystack");
+        let hits = s.search_page_texts("NEEDLE", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].url, "https://a.example/");
+        assert!(hits[0].snippet.contains("Needle"));
+        assert!(s.page_text_sizes()["https://a.example/"] > 0);
+        // One of a's two visits goes: its text stays; the other goes too: gone.
+        assert_eq!(s.remove_history(&[("https://a.example/".into(), 1)]).unwrap(), 1);
+        assert!(s.page_text("https://a.example/").is_some());
+        assert_eq!(s.remove_history(&[("https://a.example/".into(), 3)]).unwrap(), 1);
+        assert!(s.page_text("https://a.example/").is_none());
+        assert!(!s.in_history("https://a.example/") && s.in_history("https://b.example/"));
+        // Survives a reopen; clearing history clears the texts.
+        drop(s);
+        let s = Store::open(&dir).unwrap();
+        assert!(s.page_text("https://b.example/").is_some());
+        assert!(s.page_text("https://a.example/").is_none());
+        s.clear_history().unwrap();
+        assert!(s.page_text("https://b.example/").is_none() && s.page_text_sizes().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn page_text_cache_keeps_the_newest_hundred() {
+        let dir = tmpdir("pagetext-cap");
+        let _ = fs::remove_dir_all(&dir);
+        let s = Store::open(&dir).unwrap();
+        for i in 0..(MAX_PAGE_TEXTS as u64 + 5) {
+            let url = format!("https://p{i}.example/");
+            s.add_history(&url, "t", i).unwrap();
+            assert!(s.save_page_text(&url, "t", "words", i).unwrap());
+        }
+        assert_eq!(s.page_text_sizes().len(), MAX_PAGE_TEXTS);
+        assert!(s.page_text("https://p0.example/").is_none());
+        assert!(s.page_text(&format!("https://p{}.example/", MAX_PAGE_TEXTS + 4)).is_some());
+        let files = fs::read_dir(dir.join(PAGE_TEXT_DIR)).unwrap().count();
+        assert_eq!(files, MAX_PAGE_TEXTS + 1, "evicted files deleted (plus the index)");
+        assert_eq!(snippet("abc", "abcd"), None);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

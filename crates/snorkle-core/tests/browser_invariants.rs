@@ -1020,3 +1020,30 @@ fn popup_policy_blocks_dangerous_urls() {
     // about:blank popups (filled by script) are allowed.
     assert!(b.open_popup(t, None, PopupStyle::Sheet, 2).0.is_some());
 }
+
+// ---- reopening closed tabs (⌘⇧T) ------------------------------------------
+
+#[test]
+fn closed_tabs_reopen_newest_first_and_never_private() {
+    let mut b = browser(4);
+    let (a, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(a, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, a, "https://a.example/");
+    let (c, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(c, "https://c.example/", 0).unwrap();
+    webkit_load(&mut b, c, "https://c.example/");
+    let (p, _) = b.new_tab(Profile::Private, 0);
+    b.navigate_input(p, "https://private.example/", 0).unwrap();
+    webkit_load(&mut b, p, "https://private.example/");
+    let (empty, _) = b.new_tab(Profile::Default, 0);
+    b.close(a, 1);
+    b.close(c, 2);
+    b.close(p, 3);
+    b.close(empty, 4);
+    assert_eq!(b.pop_closed(), Some(u("https://c.example/")));
+    let (t, effects) = b.reopen_closed(u("https://a.example/"), 5);
+    let t = t.unwrap();
+    assert!(effects.iter().any(|e| matches!(e, Effect::CreateView { tab, .. } if *tab == t)));
+    assert_eq!(b.pop_closed(), Some(u("https://a.example/")));
+    assert_eq!(b.pop_closed(), None, "private and empty tabs are not remembered");
+}

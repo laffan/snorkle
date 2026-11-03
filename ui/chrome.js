@@ -375,10 +375,100 @@
   function renderStart() {}
 
   // History, newest first, under a heading per day and per hour.
-  function fillHistory(list, items) {
+  // ---- history ------------------------------------------------------------
+  //
+  // The panel lists visits by day and hour. A visit can be removed with the
+  // × that replaces its time on hover; Select turns rows into checkboxes
+  // (shift-click selects a range) for removing many. Pages whose text was
+  // saved (the 100 most recent) show its size, and clicking one shows that
+  // text; the search box also searches the saved text.
+  let historyItems = [];
+  let historyQuery = '';
+  let historySelecting = false;
+  const historySel = new Set();
+  let historyAnchor = -1;
+  let historySearchTimer = 0;
+  const visitKey = (it) => it.url + '\u0000' + it.visited_ms;
+
+  function fmtBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  // Appends `text` to `parent`, with case-insensitive matches of `q` in
+  // <mark>s (built with textContent only).
+  function appendMarked(parent, text, q) {
+    if (!q) { parent.appendChild(document.createTextNode(text)); return; }
+    const lower = text.toLowerCase();
+    let at = 0;
+    for (;;) {
+      const i = lower.indexOf(q, at);
+      if (i < 0) break;
+      if (i > at) parent.appendChild(document.createTextNode(text.slice(at, i)));
+      parent.appendChild(el('mark', null, text.slice(i, i + q.length)));
+      at = i + q.length;
+    }
+    if (at < text.length) parent.appendChild(document.createTextNode(text.slice(at)));
+  }
+
+  function loadHistory() {
+    const q = historyQuery.trim().toLowerCase();
+    const req = q ? T.core.invoke('search_history', { query: q }) : T.core.invoke('list_history', { limit: 500 });
+    return req.then((items) => {
+      if (q !== historyQuery.trim().toLowerCase()) return; // a newer search is on its way
+      historyItems = items;
+      const keys = new Set(items.map(visitKey));
+      for (const k of [...historySel]) if (!keys.has(k)) historySel.delete(k);
+      historyAnchor = -1;
+      fillHistory($('panel-list'), items, q);
+      renderHistoryHead();
+    }).catch((e) => toast(String(e)));
+  }
+
+  function renderHistoryHead() {
+    $('panel').classList.toggle('selecting', historySelecting);
+    $('panel-select').textContent = historySelecting ? 'Cancel' : 'Select';
+    $('panel-remove').hidden = !historySelecting;
+    $('panel-remove').disabled = historySel.size === 0;
+    $('panel-remove').textContent = historySel.size ? `Remove ${historySel.size}` : 'Remove';
+    $('panel-clear').hidden = historySelecting;
+    $('panel-title').textContent = historySelecting && historySel.size ? `${historySel.size} selected` : 'History';
+  }
+
+  function removeVisits(items) {
+    if (!items.length) return;
+    T.core.invoke('remove_history', { visits: items.map((it) => ({ url: it.url, visited_ms: it.visited_ms })) })
+      .then(() => { for (const it of items) historySel.delete(visitKey(it)); return loadHistory(); })
+      .catch((e) => toast(String(e)));
+  }
+
+  // A click on row `i` in Select mode: toggles it, or with Shift selects
+  // every row from the last one clicked.
+  function selectVisit(i, shift) {
+    const it = historyItems[i];
+    if (!it) return;
+    if (shift && historyAnchor >= 0) {
+      const [a, b] = historyAnchor < i ? [historyAnchor, i] : [i, historyAnchor];
+      for (let k = a; k <= b; k++) historySel.add(visitKey(historyItems[k]));
+    } else if (historySel.has(visitKey(it))) {
+      historySel.delete(visitKey(it));
+    } else {
+      historySel.add(visitKey(it));
+    }
+    historyAnchor = i;
+    document.querySelectorAll('#panel-list li.visit').forEach((li) => {
+      const on = historySel.has(li.dataset.key);
+      li.classList.toggle('selected', on);
+      li.setAttribute('aria-selected', String(on));
+    });
+    renderHistoryHead();
+  }
+
+  function fillHistory(list, items, q = '') {
     list.replaceChildren();
     if (!items.length) {
-      list.appendChild(el('li', 'muted', 'Nothing here yet.'));
+      list.appendChild(el('li', 'muted', q ? 'No matches.' : 'Nothing here yet.'));
       return;
     }
     const dayName = (d) => {
@@ -392,31 +482,107 @@
     const hourName = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(/:\d\d/, ':00');
     let lastDay = '';
     let lastHour = '';
-    for (const it of items) {
+    items.forEach((it, i) => {
       const when = new Date(it.visited_ms || 0);
       const day = dayName(when);
       const hour = day + hourName(when);
       if (day !== lastDay) { list.appendChild(el('li', 'day', day)); lastDay = day; lastHour = ''; }
       if (hour !== lastHour) { list.appendChild(el('li', 'hour', hourName(when))); lastHour = hour; }
-      const li = el('li');
+      const li = el('li', 'visit');
+      li.dataset.key = visitKey(it);
+      const selected = historySel.has(li.dataset.key);
+      li.classList.toggle('selected', selected);
+      li.setAttribute('aria-selected', String(selected));
+      li.appendChild(el('span', 'check'));
       const open = el('button', 'open');
-      open.appendChild(el('span', 't', it.title || it.display.registrable));
+      const t = el('span', 't');
+      appendMarked(t, it.title || it.display.registrable, q);
+      open.appendChild(t);
       const u = el('span', 'u');
       const sub = el('span', 'sub');
       const reg = el('span', 'reg');
       renderUrlInto(sub, reg, null, it.display);
       u.append(sub, reg);
+      if (it.cache_bytes) {
+        const size = el('span', 'size', fmtBytes(it.cache_bytes));
+        size.title = 'Saved page text';
+        u.appendChild(size);
+      }
       open.appendChild(u);
-      open.addEventListener('click', () => {
-        const tab = activeTab();
-        closePanel();
-        if (tab) invoke('navigate', { tab: tab.id, input: it.url });
+      if (it.snippet) {
+        const snip = el('span', 'snip');
+        appendMarked(snip, it.snippet, q);
+        open.appendChild(snip);
+      }
+      open.addEventListener('click', (ev) => {
+        if (historySelecting) { selectVisit(i, ev.shiftKey); return; }
+        if (it.cache_bytes) { showPageCopy(it.url); return; }
+        openHistoryItem(it.url);
       });
       li.appendChild(open);
-      li.appendChild(el('span', 'when', when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })));
+      const end = el('span', 'end');
+      end.appendChild(el('span', 'when', when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })));
+      const x = el('button', 'x', '×');
+      x.setAttribute('aria-label', 'Remove from history');
+      x.title = 'Remove from history';
+      x.addEventListener('click', (ev) => { ev.stopPropagation(); removeVisits([it]); });
+      end.appendChild(x);
+      li.appendChild(end);
       list.appendChild(li);
-    }
+    });
   }
+
+  function openHistoryItem(url) {
+    const tab = activeTab();
+    closePageCopy();
+    closePanel();
+    if (tab) invoke('navigate', { tab: tab.id, input: url });
+  }
+
+  // The saved text of a page, as paragraphs (textContent only).
+  let pageCopyUrl = null;
+  function showPageCopy(url) {
+    T.core.invoke('get_page_text', { url }).then((p) => {
+      if (!p) { openHistoryItem(url); return; }
+      pageCopyUrl = p.url;
+      $('copy-title').textContent = p.title || p.display.registrable;
+      $('copy-meta').textContent = `${p.display.full} · saved ${new Date(p.saved_ms).toLocaleString()} · text only`;
+      const body = $('copy-body');
+      body.replaceChildren();
+      const q = historyQuery.trim().toLowerCase();
+      for (const para of p.text.split(/\n{2,}/)) {
+        const el_ = el('p');
+        appendMarked(el_, para, q);
+        body.appendChild(el_);
+      }
+      body.scrollTop = 0;
+      $('copy-modal').hidden = false;
+      const first = body.querySelector('mark');
+      if (first) first.scrollIntoView({ block: 'center' });
+      $('copy-close').focus();
+    }).catch((e) => toast(String(e)));
+  }
+  function closePageCopy() {
+    pageCopyUrl = null;
+    $('copy-modal').hidden = true;
+  }
+  $('copy-close').addEventListener('click', closePageCopy);
+  $('copy-open').addEventListener('click', () => { if (pageCopyUrl) openHistoryItem(pageCopyUrl); });
+  $('copy-modal').addEventListener('click', (ev) => { if (ev.target === $('copy-modal')) closePageCopy(); });
+  $('panel-select').addEventListener('click', () => {
+    historySelecting = !historySelecting;
+    historySel.clear();
+    historyAnchor = -1;
+    document.querySelectorAll('#panel-list li.visit').forEach((li) => { li.classList.remove('selected'); li.setAttribute('aria-selected', 'false'); });
+    renderHistoryHead();
+  });
+  $('panel-remove').addEventListener('click', () => removeVisits(historyItems.filter((it) => historySel.has(visitKey(it)))));
+  $('history-search').addEventListener('input', () => {
+    historyQuery = $('history-search').value;
+    clearTimeout(historySearchTimer);
+    historySearchTimer = setTimeout(loadHistory, 180);
+  });
+
 
   // ---- opening links from pins / bookmarks / shortcuts -----------------------
 
@@ -1187,13 +1353,18 @@
     panel = 'history';
     clearArmed = false;
     $('panel-clear').textContent = 'Clear history';
-    T.core.invoke('list_history', { limit: 500 }).then((items) => fillHistory($('panel-list'), items));
+    historySelecting = false;
+    historySel.clear();
+    loadHistory();
     if (narrow) setSidebar(false);
     render();
   }
 
   function closePanel() {
     panel = null;
+    closePageCopy();
+    historySelecting = false;
+    historySel.clear();
     render();
   }
 
@@ -1748,13 +1919,14 @@
   // ---- view modes ---------------------------------------------------------
   //
   // Each button toggles its mode app-wide; a long press offers "Disable for
-  // this tab". The colour and images buttons are "pressed" when the mode is
-  // OFF (colour shown, media shown); the headers button when it is ON.
+  // this tab". Each shows what the pages look like: the palette and the
+  // picture are struck through while their mode is in effect (no colour,
+  // no images); dark shows a moon when on, a sun when off.
 
   const VIEW_BUTTONS = [
-    { id: 'color', mode: 'desaturate', pressedWhenOff: true, name: 'Black and white' },
-    { id: 'images', mode: 'hide_media', pressedWhenOff: true, name: 'Hide images and video' },
-    { id: 'dark', mode: 'dark', pressedWhenOff: false, name: 'Dark pages' },
+    { id: 'color', mode: 'desaturate', name: 'Black and white pages' },
+    { id: 'images', mode: 'hide_media', name: 'Hide images and video' },
+    { id: 'dark', mode: 'dark', name: 'Dark pages' },
   ];
 
   // The headers view is per tab (its button is in the URL bar).
@@ -1775,13 +1947,14 @@
     const tab = state ? state.active : null;
     for (const b of VIEW_BUTTONS) {
       const on = modeOn(b.mode, tab);
-      const pressed = b.pressedWhenOff ? !on : on;
       const btn = $(b.id);
       const exempt = viewModes.modes[b.mode] && exemptFor(tab, b.mode);
-      btn.classList.toggle('on', pressed && !exempt);
+      btn.classList.toggle('on', on);
+      btn.classList.toggle('struck', on && b.mode !== 'dark');
       btn.classList.toggle('exempt', exempt);
-      btn.setAttribute('aria-pressed', String(pressed));
-      btn.title = exempt ? `${b.name}: off for this tab (long-press to change)` : `${b.name} (long-press for this tab)`;
+      btn.setAttribute('aria-pressed', String(on));
+      const status = exempt ? 'off for this tab' : on ? 'on' : 'off';
+      btn.title = `${b.name}: ${status} (long-press for this tab)`;
     }
     // Settings → General: what each mode starts as at launch.
     const launch = viewModes.launch || {};
@@ -2593,6 +2766,11 @@
       openPalette();
     } else if (name === 'close_tab') {
       closeTabShortcut();
+    } else if (name === 'reopen_tab') {
+      // ⌘⇧T: the most recently closed tab whose page is still in history.
+      T.core.invoke('reopen_closed_tab')
+        .then((ok) => { if (!ok) toast('No closed tabs to reopen.'); })
+        .catch((e) => toast(String(e)));
     } else if (name === 'toggle_sidebar') {
       toggleSidebar();
     } else if (name === 'toggle_right') {
@@ -2637,31 +2815,46 @@
     const bm = key ? bookmarks.find((b) => b.url === key) : null;
     if (!bm) { invoke('close_tab', { tab: id }); return; }
     if (confirmAction && confirmAction.tab === id) { confirmAction.run(); return; } // ⌘W again confirms
-    askConfirm(`Close this tab and remove the bookmark “${bm.title || bm.display.registrable}”?`, 'Remove Bookmark', id, () =>
+    const name = bm.title || bm.display.registrable;
+    const remove = () =>
       T.core.invoke('remove_bookmark', { url: bm.url })
         .then(loadBookmarks)
         .then(() => invoke('close_tab', { tab: id }))
-        .catch((e) => toast(String(e))));
+        .catch((e) => toast(String(e)));
+    // The tab has moved on from the bookmark's page: going back to it is
+    // offered first (Return), removing the bookmark stays on ⌘W.
+    const moved = t.url && t.url.full !== bm.url;
+    if (moved) {
+      askConfirm(`This tab has left “${name}”. Return to the bookmarked page, or remove the bookmark?`, 'Remove Bookmark', id, remove,
+        { label: 'Return to Original URL', run: () => openLink(bm.url, true) });
+    } else {
+      askConfirm(`Close this tab and remove the bookmark “${name}”?`, 'Remove Bookmark', id, remove);
+    }
   }
 
   // A small confirmation floating above the pill (a hole, like the pill).
-  // ⌘W or Return confirms, Escape cancels.
-  function askConfirm(text, ok, tab, run) {
-    confirmAction = { tab, run: () => { closeConfirm(); run(); } };
+  // ⌘W or the primary button confirms, Escape cancels. `alt` adds a second
+  // action ({ label, run }), which then has the focus (Return).
+  function askConfirm(text, ok, tab, run, alt = null) {
+    confirmAction = { tab, run: () => { closeConfirm(); run(); }, alt: alt && (() => { closeConfirm(); alt.run(); }) };
     $('confirm-text').textContent = text;
     $('confirm-ok').textContent = ok + ' (⌘W)';
+    $('confirm-alt').hidden = !alt;
+    $('confirm-alt').textContent = alt ? alt.label : '';
     $('confirm-pop').hidden = false;
-    $('confirm-ok').focus();
+    $(alt ? 'confirm-alt' : 'confirm-ok').focus();
     syncMenuOpen();
     reportLayout();
   }
   function closeConfirm() {
     confirmAction = null;
     $('confirm-pop').hidden = true;
+    $('confirm-alt').hidden = true;
     syncMenuOpen();
     reportLayout();
   }
   $('confirm-ok').addEventListener('click', () => { if (confirmAction) confirmAction.run(); });
+  $('confirm-alt').addEventListener('click', () => { if (confirmAction && confirmAction.alt) confirmAction.alt(); });
   $('confirm-cancel').addEventListener('click', closeConfirm);
 
   // ⌥⌘D (and the ⋯ menu's Bookmark row): bookmarks the page, moving this
@@ -3134,6 +3327,7 @@
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
     if (paletteOpen) closePalette();
+    else if (!$('copy-modal').hidden) closePageCopy();
     else if (confirmAction) closeConfirm();
     else if (findOpen) closeFind();
     else if (flyoutMode() && sidebarShown) setSidebar(false);

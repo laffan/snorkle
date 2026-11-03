@@ -130,6 +130,8 @@ impl Appearance {
 pub enum Shortcut {
     NewTab,
     CloseTab,
+    /// Reopen the most recently closed tab (⌘⇧T).
+    ReopenTab,
     /// Show or hide the tab sidebar.
     ToggleSidebar,
     /// Show or hide the right panel (headers, chat).
@@ -184,6 +186,7 @@ const fn def(
 /// Every native shortcut, with its default binding (⌘ plus `mods`).
 pub const SHORTCUTS: &[ShortcutDef] = &[
     def("new_tab", ShortcutMenu::File, "New Tab", "t", 0, Shortcut::NewTab),
+    def("reopen_tab", ShortcutMenu::File, "Reopen Closed Tab", "t", MOD_SHIFT, Shortcut::ReopenTab),
     def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", MOD_ALT, Shortcut::Bookmark),
     def("split_columns", ShortcutMenu::View, "Split Side by Side", "d", 0, Shortcut::SplitColumns),
     def("split_rows", ShortcutMenu::View, "Split Top and Bottom", "d", MOD_SHIFT, Shortcut::SplitRows),
@@ -220,6 +223,7 @@ impl Shortcut {
         match self {
             Shortcut::NewTab => "new_tab".into(),
             Shortcut::CloseTab => "close_tab".into(),
+            Shortcut::ReopenTab => "reopen_tab".into(),
             Shortcut::ToggleSidebar => "toggle_sidebar".into(),
             Shortcut::ToggleRightPanel => "toggle_right".into(),
             Shortcut::Bookmark => "bookmark".into(),

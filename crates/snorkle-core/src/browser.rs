@@ -273,7 +273,13 @@ pub struct Browser {
     shown_ratio: u16,
     adblock_allowed: BTreeSet<String>,
     adblock_status: AdblockStatus,
+    /// Pages of recently closed non-private tabs, oldest first (⌘⇧T), in
+    /// memory only. Private tabs and popup sheets are never listed.
+    closed: Vec<Url>,
 }
+
+/// Most closed tabs remembered for ⌘⇧T.
+pub const MAX_CLOSED_TABS: usize = 50;
 
 impl Browser {
     pub fn new(budget: MemoryBudget, os: OsSupport) -> Self {
@@ -292,6 +298,7 @@ impl Browser {
             shown_ratio: SPLIT_RATIO_DEFAULT,
             adblock_allowed: BTreeSet::new(),
             adblock_status: AdblockStatus::Off,
+            closed: Vec::new(),
         }
     }
 
@@ -561,6 +568,14 @@ impl Browser {
         }
         let Some(idx) = self.tabs.iter().position(|t| t.id == id) else { return out };
         let tab = self.tabs.remove(idx);
+        if !tab.is_private() && !tab.sheet {
+            if let Some(url) = tab.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https")) {
+                self.closed.retain(|c| *c != url);
+                self.closed.push(url);
+                let excess = self.closed.len().saturating_sub(MAX_CLOSED_TABS);
+                self.closed.drain(..excess);
+            }
+        }
         self.shown.retain(|(t, _)| *t != id);
         self.splits.retain(|s| s.left != id && s.right != id);
         if tab.life == Life::Live {
@@ -593,6 +608,26 @@ impl Browser {
         }
         out.push(Effect::NotifyChrome);
         out
+    }
+
+    /// The page of the most recently closed tab not yet reopened (and
+    /// forgets it). The caller skips pages removed from history and asks
+    /// again.
+    pub fn pop_closed(&mut self) -> Option<Url> {
+        self.closed.pop()
+    }
+
+    /// Reopens a closed tab's page (⌘⇧T) in a new default-profile tab,
+    /// through the navigation policy.
+    pub fn reopen_closed(&mut self, url: Url, now: u64) -> (Option<TabId>, Vec<Effect>) {
+        if !self.os.allows_browsing() {
+            return (None, Vec::new());
+        }
+        let mut out = Vec::new();
+        let id = self.new_tab_into(Profile::Default, now, &mut out);
+        out.extend(self.navigate_trusted(id, url, now));
+        out.push(Effect::NotifyChrome);
+        (Some(id), out)
     }
 
     /// A link opened from another app (Snorkle as the default browser): a

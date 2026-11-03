@@ -38,9 +38,9 @@
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="spacer"></span>
-      <button id="color" class="icon mode" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm2.5-4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm5 .5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg></button>
-      <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><path d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg></button>
-      <button id="images" class="icon mode" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4zM9 11.2a1.7 1.7 0 1 0 0-3.4 1.7 1.7 0 0 0 0 3.4zM5 18h14v-2.2l-4-4-4.5 4.2-2.2-1.8L5 16.4z"/></svg></button>
+      <button id="color" class="icon mode" aria-label="Black and white pages" title="Black and white pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm2.5-4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm5 .5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/><path class="strike-gap" d="M4 3.5l16.5 16.5" fill="none"/><path class="strike" d="M4 3.5l16.5 16.5" fill="none"/></svg></button>
+      <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><g class="sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g><path class="moon" d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg></button>
+      <button id="images" class="icon mode" aria-label="Hide images and video" title="Hide images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4zM9 11.2a1.7 1.7 0 1 0 0-3.4 1.7 1.7 0 0 0 0 3.4zM5 18h14v-2.2l-4-4-4.5 4.2-2.2-1.8L5 16.4z"/><path class="strike-gap" d="M4 3.5l16.5 16.5" fill="none"/><path class="strike" d="M4 3.5l16.5 16.5" fill="none"/></svg></button>
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
       <button id="menu-new-tab" role="menuitem">New Tab <span class="kbd">⌘T</span></button>
@@ -102,6 +102,7 @@
     <div id="confirm-pop" class="confirm-pop" role="alertdialog" aria-labelledby="confirm-text" hidden>
       <span id="confirm-text"></span>
       <button id="confirm-cancel" class="pillbtn">Cancel</button>
+      <button id="confirm-alt" class="pillbtn" hidden></button>
       <button id="confirm-ok" class="pillbtn primary"></button>
     </div>
     <!-- ⌘F: find on page, attached to the top of the pill. -->
@@ -181,12 +182,16 @@
 
     <section id="panel" hidden>
       <div class="panel-head">
-        <h1>History</h1>
+        <h1 id="panel-title">History</h1>
         <span class="spacer"></span>
+        <button id="panel-remove" class="button danger" hidden disabled>Remove</button>
+        <button id="panel-select" class="button">Select</button>
         <button id="panel-clear" class="button">Clear history</button>
         <button id="panel-close" class="button">Done</button>
       </div>
-      <ul id="panel-list" class="list"></ul>
+      <input id="history-search" class="history-search" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+             maxlength="200" placeholder="Search history and saved page text" aria-label="Search history">
+      <ul id="panel-list" class="list history-list"></ul>
     </section>
 
     <section id="unsupported" class="notice" hidden>
@@ -196,6 +201,19 @@
   </main>
 
   <!-- Settings modal (over the content area). -->
+  <!-- History: the saved text of a visited page (the 100 most recent). -->
+  <div id="copy-modal" class="backdrop" hidden>
+    <div class="modal page-copy" role="dialog" aria-modal="true" aria-labelledby="copy-title">
+      <div class="modal-head">
+        <h1 id="copy-title"></h1>
+        <button id="copy-open" class="button primary">Open Page</button>
+        <button id="copy-close" class="button">Close</button>
+      </div>
+      <p id="copy-meta" class="muted small"></p>
+      <div id="copy-body" class="page-copy-body"></div>
+    </div>
+  </div>
+
   <div id="modal" class="backdrop" hidden>
     <div class="modal settings" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <nav class="settings-nav" aria-label="Settings sections">

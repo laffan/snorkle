@@ -49,6 +49,12 @@ pub enum StorageJob {
     /// Write a pending session now and report when done (the app is
     /// quitting; macOS).
     FlushNow(mpsc::Sender<()>),
+    /// The text of a visited page (history's cached version).
+    PageText {
+        url: String,
+        title: String,
+        text: String,
+    },
     /// An offline copy (web archive) of a pinned or bookmarked page.
     OfflineCopy {
         url: String,
@@ -305,6 +311,10 @@ impl Shared {
     }
 }
 
+/// How long after a page finished loading its text is read for history
+/// (pages often fill in after the load event).
+const PAGE_TEXT_DELAY: Duration = Duration::from_millis(1500);
+
 /// Longest a session snapshot waits before it is written.
 const SESSION_DELAY: Duration = Duration::from_millis(400);
 
@@ -343,6 +353,9 @@ fn spawn_storage_worker(store: Arc<Store>) -> Sender<StorageJob> {
                     }
                     Some(StorageJob::OfflineCopy { url, data }) => {
                         let _ = store.save_offline_copy(&url, &data, wall_ms());
+                    }
+                    Some(StorageJob::PageText { url, title, text }) => {
+                        let _ = store.save_page_text(&url, &title, &text, wall_ms());
                     }
                     Some(StorageJob::Flush) | None => {
                         if let Some((s, _)) = pending.take() {
@@ -424,6 +437,39 @@ impl Events {
                     }),
                 )
             })
+        });
+    }
+
+    /// After a non-private page finished loading: reads its text (the
+    /// constant `ai::PAGE_TEXT_JS`, channel C17) once it has had
+    /// `PAGE_TEXT_DELAY` to fill in, and saves it for history if the tab
+    /// still shows that page and is still not private.
+    fn save_page_text(&self, tab: TabId, page: String) {
+        if !page.starts_with("http://") && !page.starts_with("https://") {
+            return;
+        }
+        let shared = self.shared.clone();
+        let _ = std::thread::Builder::new().name("snorkle-page-text".into()).spawn(move || {
+            std::thread::sleep(PAGE_TEXT_DELAY);
+            snorkle_content::dispatch_main(move || {
+                with_host(|h| {
+                    h.read_page_text(
+                        tab,
+                        Box::new(move |text| {
+                            let still = {
+                                let b = shared.browser();
+                                b.tab(tab).is_some_and(|t| {
+                                    !t.is_private() && t.committed_url.as_ref().map(|u| u.to_string()) == Some(page.clone())
+                                }) && !b.shows_offline_copy(tab)
+                            };
+                            let parsed = text.and_then(|t| snorkle_core::ai::parse_page_text(&t, &page));
+                            if let (true, Some(p)) = (still, parsed) {
+                                shared.storage(StorageJob::PageText { url: page, title: p.title, text: p.text });
+                            }
+                        }),
+                    )
+                })
+            });
         });
     }
 
@@ -525,7 +571,10 @@ impl ContentEvents for Events {
         };
         self.apply(|b| b.on_finish(tab));
         if !skip {
-            self.save_offline_copy(tab, landing, page);
+            self.save_offline_copy(tab, landing, page.clone());
+            if let Some(page) = page {
+                self.save_page_text(tab, page);
+            }
         }
     }
     fn fail(&self, tab: TabId, provisional: bool, kind: NavErrorKind, failing_url: Option<Url>, message: String) {

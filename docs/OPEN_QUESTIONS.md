@@ -550,3 +550,21 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
 90. **[verify] Default browser.** Declaring the `http`/`https` URL schemes should list Snorkle under
     System Settings → Desktop & Dock → Default web browser; no document types are declared, so
     `.html` files do not open in Snorkle (file URLs are refused by the core anyway).
+
+
+## Round 9 (2026-11-03, both platforms)
+
+91. **[decide] Saved page text** is read from every page a non-private tab loads (1.5 s after the
+    load finishes), including signed-in pages such as mail and banking, and kept on disk for the
+    100 most recently visited pages until they leave history. It is the same data the page chat
+    reads (C17), but without a user action each time. Options if this is too broad: skip pages
+    with password fields, skip sites the user lists, or keep text in memory only.
+92. **[verify] Saved text quality.** `innerText` 1.5 s after load: single-page apps that render
+    later, infinite scrolls and pages behind overlays may save little or the wrong text. Each
+    visit replaces the page's previous text. Text over 48,000 characters is cut.
+93. **[verify] ⌘⇧T** opens the page in a new tab at the end of the list (not where the tab was),
+    without its back/forward history; closing a tab and then removing its page from history makes
+    ⌘⇧T skip it. The closed list is lost when the app quits.
+94. **[verify] History selection.** Shift-click on a row extends from the last row clicked in
+    Select mode; on iPad, Shift needs a hardware keyboard (each tap otherwise toggles one row). The
+    × replaces the time on hover and is always shown on touch-only devices.

@@ -115,6 +115,16 @@ body.narrow.sb-hidden #sidebar { box-shadow: 0 0 0 transparent; }
   background: var(--bar); border: 1px solid var(--line); border-left: 0; border-radius: 0 10px 10px 0;
   box-shadow: 2px 0 10px rgba(0, 0, 0, .12); transition: opacity .15s;
 }
+/* Attached and shown: the tab carries the resize edge's line around its
+   outline (top, end, bottom; the line runs behind the tab), and lights up
+   with it. */
+body:not(.sb-flyout):not(.sb-hidden):not(.narrow) #edge-tab {
+  border: 3px solid var(--edge); border-left: 0; transition: opacity .15s, border-color .15s, box-shadow .15s;
+}
+body:not(.sb-flyout):not(.sb-hidden):not(.narrow) #sidebar:has(#sidebar-resize:hover) #edge-tab,
+body.resizing:not(.sb-flyout) #edge-tab {
+  border-color: var(--edge-hot); box-shadow: 0 0 8px var(--edge-glow);
+}
 /* Attached, sidebar hidden, pointer away from the tab: hidden. */
 body.edge-away #edge-tab { opacity: 0; pointer-events: none; }
 /* Attached: a vertical line. */
@@ -138,7 +148,7 @@ body.sb-flyout #edge-tab::after {
    progress (the panel itself and its toggle stay opaque). Touch-only
    devices have no hover, so there they stay fully visible. */
 @media (any-hover: hover) {
-  body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #side-bottom) { opacity: .5; transition: opacity .15s; }
+  body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #side-bottom) { opacity: .5; transition: opacity .3s ease-in-out; }
   #toolbar { opacity: .5; transition: opacity .15s; }
   body:not(.narrow) #sidebar:hover :is(#side-scroll, #side-bottom),
   body:not(.narrow) #sidebar:focus-within :is(#side-scroll, #side-bottom),
@@ -228,14 +238,23 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
   display: flex; justify-content: space-between; align-items: center;
   padding: 6px 10px; background: var(--side);
 }
-/* View-mode buttons: a dot underneath marks a mode that is on; a ring dot
-   marks one that is on app-wide but off for this tab. */
+/* View-mode buttons show what the pages look like: the palette and the
+   picture are struck through while black and white or hide media is in
+   effect (no colour, no images), and dark mode shows a moon (on) or a sun
+   (off). A ring dot underneath marks a mode that is on app-wide but off
+   for this tab. */
 .icon.mode { position: relative; }
-.icon.mode.on::after, .icon.mode.exempt::after {
+.icon.mode .strike, .icon.mode .strike-gap { display: none; stroke-linecap: round; }
+.icon.mode .strike { stroke: currentColor; stroke-width: 2; }
+.icon.mode .strike-gap { stroke: var(--side); stroke-width: 5.5; }
+.icon.mode.struck :is(.strike, .strike-gap) { display: inline; }
+#dark .moon { display: none; }
+#dark.on .moon { display: inline; }
+#dark.on .sun { display: none; }
+.icon.mode.exempt::after {
   content: ""; position: absolute; left: 50%; bottom: 2px; width: 5px; height: 5px; margin-left: -2.5px;
-  border-radius: 50%; background: currentColor;
+  border-radius: 50%; box-shadow: 0 0 0 1.2px currentColor inset;
 }
-.icon.mode.exempt::after { background: none; box-shadow: 0 0 0 1.2px currentColor inset; }
 .vm-pop { left: auto; right: 10px; min-width: 220px; }
 .vm-title { font-size: 12px; color: var(--muted); padding: 6px 12px 4px; }
 .outline-list { list-style: none; margin: 0; padding: 0; }
@@ -437,6 +456,38 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .list li.day { display: block; border: 0; padding: 18px 4px 4px; font-weight: 700; font-size: 15px; }
 .list li.hour { display: block; border: 0; padding: 10px 4px 2px; font-size: 12px; color: var(--muted); }
 .list .when { font-size: 12px; color: var(--muted); padding: 0 8px; flex: 0 0 auto; }
+/* History rows: the saved-text size beside the address, a search snippet,
+   and an × in place of the time while pointed at (always shown on
+   touch-only devices). In Select mode a row is a checkbox. */
+.history-search { width: 100%; margin: 0 0 8px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); }
+.history-list .size { flex: 0 0 auto; margin-left: 8px; font-size: 12px; color: var(--muted); }
+.history-list .snip { font-size: 13px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+.history-list li.visit { position: relative; }
+.history-list .end { flex: 0 0 64px; display: flex; justify-content: flex-end; align-items: center; }
+.history-list .end .x { display: none; width: 30px; height: 30px; border-radius: 8px; color: var(--muted); font-size: 18px; }
+@media (any-hover: hover) {
+  .history-list li.visit:hover .end .when { display: none; }
+  .history-list li.visit:hover .end .x { display: inline-block; }
+  .history-list .end .x:hover { background: var(--field); color: var(--fg); }
+}
+@media (any-hover: none) {
+  .history-list .end { flex-basis: 96px; }
+  .history-list .end .x { display: inline-block; }
+}
+.history-list .check { flex: 0 0 auto; width: 20px; height: 20px; margin: 0 10px 0 4px; border-radius: 6px; border: 1.5px solid var(--muted); display: none; }
+#panel.selecting .history-list .check { display: inline-block; }
+#panel.selecting .history-list .end .x { display: none !important; }
+#panel.selecting .history-list .end .when { display: inline !important; }
+.history-list li.selected { background: var(--field); }
+.history-list li.selected .check { background: var(--fg); border-color: var(--fg); box-shadow: 0 0 0 3px var(--field) inset; }
+.history-list mark, .page-copy-body mark { background: var(--fg); color: var(--bar); border-radius: 2px; }
+#panel.selecting .history-list li.visit { user-select: none; -webkit-user-select: none; }
+/* The saved text of a page. */
+.modal.page-copy { width: min(760px, 100%); height: min(86vh, 100%); display: flex; flex-direction: column; }
+.modal.page-copy .modal-head h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#copy-meta { margin: 0 0 10px; }
+.page-copy-body { flex: 1; min-height: 0; overflow-y: auto; line-height: 1.5; font-size: 15px; -webkit-user-select: text; user-select: text; }
+.page-copy-body p { margin: 0 0 .7em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .modal h2 { margin: 16px 0 4px; }
 .clear-data.armed, #ai-usage-reset.armed { background: var(--fg); color: var(--bar); }
 

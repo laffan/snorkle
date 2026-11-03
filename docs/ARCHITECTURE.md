@@ -225,8 +225,9 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   behind links) never get `:hover`, so a pointer tracker marks whatever media are under the
   pointer (`elementsFromPoint`, plus video boxes by geometry). CSS background images are
   dropped, and videos are paused when they start unless pointed at. The hide-media style runs in every frame and re-attaches itself if
-  a page removes it. The palette button shows colour and the images button shows images and
-  video. Each launch starts from the stored launch modes (`viewmodes::LaunchModes`,
+  a page removes it. The buttons show what pages look like (2026-11-03): the palette is struck
+  through while black and white is in effect, the picture while media are hidden, and dark mode
+  shows a moon when on and a sun when off; a ring dot marks a mode turned off for this tab. Each launch starts from the stored launch modes (`viewmodes::LaunchModes`,
   `view-modes.json`), set in Settings → General (defaults: black and white and hide media on,
   dark off). The palette and images buttons change the current session only; the moon button
   also stores the new dark setting, so dark mode is remembered. "Disable for this tab" choices
@@ -258,7 +259,9 @@ width in narrow windows), with the share button inside its right end (hidden whi
 then a ⋯ button that opens a popup with the page actions (ad blocking,
 bookmark, site scripts, page zoom), the per-tab headers-view button and the chat button. Toasts and banners
 appear above the pill. With a pointer device the pill and the sidebar sit at 50% opacity until
-hovered.
+hovered (the sidebar fades in and out over 0.3 s, the pill over 0.15 s). While the sidebar is
+attached and shown, its toggle tab carries the resize edge's line around its outline, so the
+edge follows the tab's contour and lights up with it.
 
 Page views are drawn above the chrome's web view, so the chrome cannot simply draw over a page.
 Instead it reports the rectangles of the pill, the open actions popup and any toast or banner as
@@ -287,8 +290,10 @@ work whatever has focus, including nothing (sidebar hidden, no page). They are n
 items any more (as menu items they stopped working, apparently from the menu system's
 validation and key-equivalent conflicts, e.g. ⌘I with Format → Italic); the menu bar only loses
 the system's Close and Find. Recording a binding is native too: while recording, the app delegate
-offers every accepted ⌘ combination and Escape and reports the one pressed. Shortcuts: ⌘T new tab, ⌘W close tab (a
-pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘G /
+offers every accepted ⌘ combination and Escape and reports the one pressed. Shortcuts: ⌘T new tab, ⌘⇧T reopen the last
+closed tab, ⌘W close tab (a
+pin's tab never; a bookmark's tab after a confirmation, removing the bookmark; if the tab has left the
+bookmark's page, the confirmation offers Return to Original URL first), ⌘F find, ⌘G /
 ⌘⇧G next / previous match, ⌘S or
 ⌘\ sidebar, ⌘⇧\ right panels, ⌘D / ⌘⇧D split side by side / top and bottom, ⌥⌘D bookmark (on a
 bookmark's tab: un-bookmark; it was ⌘D until 2026-11-03), ⌘I images,
@@ -312,6 +317,25 @@ sends them at launch (`set_shortcuts`, validated, clashes refused). The
 chrome's own keydown handler uses the same bindings when it has focus; a shortcut arriving twice
 within 60 ms is run once. An input the chrome opens from a shortcut (palette, find, chat) first
 asks the host to make the chrome's web view first responder (`focus_chrome`).
+
+**Reopening closed tabs** (⌘⇧T, 2026-11-03): the core remembers the committed page of every closed
+non-private tab except popup sheets (`Browser::closed`, at most 50, in memory only, most recent
+last). ⌘⇧T takes the most recent one whose page is still in history (pages removed from history are
+skipped and forgotten) and opens it in a new tab through the navigation policy
+(`reopen_closed_tab`). Back/forward history of the closed tab is not restored.
+
+**History** (2026-11-03): the panel lists visits by day and hour, with a search box. Pointing at a
+visit replaces its time with an × that removes it; Select turns rows into checkboxes (Shift-click
+selects a range) and Remove deletes the selection (`remove_history`, by URL and visit time). The
+text of the 100 most recently visited pages is saved (`storage` `page-text/`, `SavedPageText`): 1.5 s
+after a non-private page finishes loading, the host runs the constant `ai::PAGE_TEXT_JS` (C17) and
+the title and visible text (`innerText`, ≤ 48,000 characters, cleaned) are written if the tab still
+shows that page. The text is kept only while the page is in history: removing its last visit or
+clearing history deletes it. Rows with saved text show its size beside the address; clicking one
+opens a dialog with the text (paragraphs, `textContent` only, search matches marked) and Open
+Page; other rows open the page as before. Search (`search_history`) matches titles, addresses and
+the saved text (with a snippet). Images are not saved. Settings → Cache does not delete saved text
+(it belongs to history).
 
 Bookmarking a tab (⌥⌘D, the ⋯ menu, or dragging it into the bookmarks) moves it into the
 bookmark: the tab becomes that bookmark's tab (`Browser::bind_launcher`) instead of a second tab
