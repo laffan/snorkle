@@ -55,11 +55,13 @@
       <div id="vm-title" class="vm-title"></div>
       <button id="vm-tab" role="menuitem"></button>
     </div>
-    <!-- Right-click or ⌘-click on a pin or bookmark (the pin-only rows are
-         hidden for bookmarks). -->
+    <!-- Right-click or ⌘-click on a pin or bookmark, right-click on a tab
+         (the pin-only rows are hidden for bookmarks; a tab has only Copy
+         URL). -->
     <div id="pin-pop" class="popup pin-pop" role="menu" hidden>
-      <button id="item-original" role="menuitem">Return to Original URL</button>
-      <button id="item-edit" role="menuitem">Edit URL…</button>
+      <button id="item-copy" role="menuitem">Copy URL</button>
+      <button id="item-original" class="item-only" role="menuitem">Return to Original URL</button>
+      <button id="item-edit" class="item-only" role="menuitem">Edit URL…</button>
       <form id="item-url-form" class="pin-emoji-form" novalidate hidden>
         <input id="item-url-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
                maxlength="4096" aria-label="Address of this item">

@@ -261,6 +261,12 @@
     close.addEventListener('click', (ev) => { ev.stopPropagation(); invoke('close_tab', { tab: t.id }); });
     node.appendChild(close);
     node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'tab', id: t.id, private: t.private, paired: !!pair }));
+    // Right-click: the item menu, with Copy URL (tabs with a page only).
+    node.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      cancelPending();
+      if (t.url) openPinPop({ url: t.url.full, id: t.id }, node, 'tab');
+    });
     return node;
   }
 
@@ -710,7 +716,7 @@
   // Pin and bookmark menu (right-click or ⌘-click): Return to Original
   // URL, Edit URL; for pins also Return to Bookmark and Use Emoji for Icon.
   // Placed under the item, inside the sidebar.
-  let pinMenu = null; // the pin or bookmark, plus { kind: 'pin' | 'bookmark' }
+  let pinMenu = null; // the pin, bookmark or tab, plus { kind: 'pin' | 'bookmark' | 'tab' }
   function openPinPop(p, node, kind = 'pin') {
     closeMenu();
     pinMenu = { ...p, kind };
@@ -718,10 +724,10 @@
     const side = $('sidebar').getBoundingClientRect();
     pop.style.top = Math.round(node.getBoundingClientRect().bottom - side.top + 6) + 'px';
     for (const e of pop.querySelectorAll('.pin-only')) e.hidden = kind !== 'pin';
+    for (const e of pop.querySelectorAll('.item-only')) e.hidden = kind === 'tab';
     $('pin-emoji-form').hidden = true;
     $('pin-emoji-hint').hidden = true;
     $('item-url-form').hidden = true;
-    $('item-edit').hidden = false;
     $('pin-emoji-clear').hidden = kind !== 'pin' || !p.emoji;
     pop.hidden = false;
     syncMenuOpen();
@@ -734,6 +740,19 @@
     pinMenu = null;
     syncMenuOpen();
   }
+  // Copy URL: the page the tab shows; for a pin or bookmark, the page its
+  // tab shows now, or its saved address if it has no tab yet.
+  function itemPageUrl(p) {
+    if (p.kind === 'tab') return p.url;
+    const t = state && state.tabs.find((x) => x.launcher === p.url && x.sheet_over === null);
+    return (t && t.url && t.url.full) || p.url;
+  }
+  $('item-copy').addEventListener('click', () => {
+    const p = pinMenu;
+    closePinPop();
+    if (!p) return;
+    navigator.clipboard.writeText(itemPageUrl(p)).then(() => toast('Address copied.'), () => toast('Could not copy (clipboard unavailable).'));
+  });
   // Back to the address the item was saved with, in its own tab.
   $('item-original').addEventListener('click', () => {
     const p = pinMenu;
@@ -1126,35 +1145,14 @@
   // `animate`: the page and its cut-outs slide with the sidebar (the host
   // animates them over the same 0.25 s as the CSS).
   let slideStartedAt = 0;
-  // Attached mode, sidebar hidden, with a pointer device: the edge tab
-  // shows only while the pointer is within 100 pt of it. Pages are native
-  // views, so the host reports the pointer near the left edge
-  // (`edge_pointer`); touch-only devices always show the tab.
-  const EDGE_NEAR_PT = 100;
-  let edgeNear = false;
+  // The edge tab shows only in flyout mode (2026-11-03). Exceptions, so
+  // the tabs can always be reached: narrow windows (it opens the overlaid
+  // sidebar) and, on touch-only devices, an attached sidebar that is
+  // hidden (no keyboard for the sidebar shortcut, no pointer for a flyout).
   const hoverDevice = () => matchMedia('(any-hover: hover)').matches;
   function edgeAway() {
-    return !narrow && !flyoutMode() && !sidebarShown && hoverDevice() && !edgeNear;
+    return !narrow && !flyoutMode() && (sidebarShown || hoverDevice());
   }
-  function syncEdgeTab() {
-    const away = edgeAway();
-    if (document.body.classList.contains('edge-away') === away) return;
-    document.body.classList.toggle('edge-away', away);
-    reportLayout();
-  }
-  T.event.listen('edge_pointer', (e) => {
-    const p = e.payload;
-    let near = false;
-    if (p) {
-      const r = $('edge-tab').getBoundingClientRect();
-      const dx = Math.max(r.left - p.x, 0, p.x - r.right);
-      const dy = Math.max(r.top - p.y, 0, p.y - r.bottom);
-      near = Math.hypot(dx, dy) <= EDGE_NEAR_PT;
-    }
-    if (near === edgeNear) return;
-    edgeNear = near;
-    syncEdgeTab();
-  });
 
   function applySidebar(animate) {
     const b = document.body.classList;

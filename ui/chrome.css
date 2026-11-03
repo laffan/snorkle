@@ -115,17 +115,8 @@ body.narrow.sb-hidden #sidebar { box-shadow: 0 0 0 transparent; }
   background: var(--bar); border: 1px solid var(--line); border-left: 0; border-radius: 0 10px 10px 0;
   box-shadow: 2px 0 10px rgba(0, 0, 0, .12); transition: opacity .15s;
 }
-/* Attached and shown: the tab carries the resize edge's line around its
-   outline (top, end, bottom; the line runs behind the tab), and lights up
-   with it. */
-body:not(.sb-flyout):not(.sb-hidden):not(.narrow) #edge-tab {
-  border: 3px solid var(--edge); border-left: 0; transition: opacity .15s, border-color .15s, box-shadow .15s;
-}
-body:not(.sb-flyout):not(.sb-hidden):not(.narrow) #sidebar:has(#sidebar-resize:hover) #edge-tab,
-body.resizing:not(.sb-flyout) #edge-tab {
-  border-color: var(--edge-hot); box-shadow: 0 0 8px var(--edge-glow);
-}
-/* Attached, sidebar hidden, pointer away from the tab: hidden. */
+/* Attached (wide windows): no tab; it shows only in flyout mode (see
+   `edgeAway` in chrome.js for the exceptions). */
 body.edge-away #edge-tab { opacity: 0; pointer-events: none; }
 /* Attached: a vertical line. */
 #edge-tab::after {

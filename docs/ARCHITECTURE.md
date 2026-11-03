@@ -259,9 +259,11 @@ width in narrow windows), with the share button inside its right end (hidden whi
 then a ⋯ button that opens a popup with the page actions (ad blocking,
 bookmark, site scripts, page zoom), the per-tab headers-view button and the chat button. Toasts and banners
 appear above the pill. With a pointer device the pill and the sidebar sit at 50% opacity until
-hovered (the sidebar fades in and out over 0.3 s, the pill over 0.15 s). While the sidebar is
-attached and shown, its toggle tab carries the resize edge's line around its outline, so the
-edge follows the tab's contour and lights up with it.
+hovered (the sidebar fades in and out over 0.3 s, the pill over 0.15 s). Since 2026-11-03 the
+sidebar's toggle tab shows only in flyout mode; an attached sidebar is shown and hidden with ⌘\.
+Two exceptions keep the tabs reachable without a keyboard: narrow windows (the tab opens the
+overlaid sidebar) and touch-only devices with an attached sidebar hidden. The host still reports
+the pointer near the left edge (`edge_pointer`); the chrome no longer uses it.
 
 Page views are drawn above the chrome's web view, so the chrome cannot simply draw over a page.
 Instead it reports the rectangles of the pill, the open actions popup and any toast or banner as
@@ -352,7 +354,8 @@ smaller; sites that serve an enlarged layout to a narrow iPad window get their w
 2026-11-03 this was `WKWebView.pageZoom`, which scaled text and boxes inside the same viewport.)
 
 **Pins and bookmarks:** opening one returns to its tab as it was left (since 2026-11-03; before,
-it always loaded the item's page again). Right-click or ⌘-click on one opens its menu: Return to
+it always loaded the item's page again). Right-click or ⌘-click on one opens its menu: Copy URL (the page its tab shows, or the saved
+address if it has no tab; ordinary tabs get a menu with only this, on right-click), Return to
 Original URL (its tab loads the saved address) and Edit URL (read like the address bar, addresses
 only; title, place and emoji are kept, its tab follows via `Browser::rekey_launcher`, its offline
 copy is dropped). **Pins:** up to 12 (three rows of four); their menu adds Return to
