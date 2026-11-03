@@ -68,6 +68,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "bookmark_tab" => json!({ "tab": 1, "index": 0 }),
         "move_bookmark" => json!({ "url": "https://example.com/", "index": 0 }),
         "split_tabs" => json!({ "tab": 1, "with": 2 }),
+        "split_new" => json!({ "orientation": "rows" }),
         "set_view_mode" | "set_launch_mode" => json!({ "mode": "desaturate", "on": true }),
         "set_tab_view_exempt" => json!({ "tab": 1, "mode": "headers", "exempt": true }),
         "scroll_to_heading" => json!({ "tab": 1, "index": 0 }),
@@ -91,6 +92,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "pin_bookmark" | "move_pin" => json!({ "url": "https://example.com/", "index": 0 }),
         "unpin" => json!({ "url": "https://example.com/", "bookmarkIndex": null }),
         "set_pin_emoji" => json!({ "url": "https://example.com/", "emoji": null }),
+        "edit_item_url" => json!({ "url": "https://example.com/", "newUrl": "https://example.org/" }),
         "get_state" | "list_bookmarks" | "clear_history" => json!({}),
         _ => json!({ "tab": 1 }),
     }

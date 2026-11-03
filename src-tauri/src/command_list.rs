@@ -26,6 +26,7 @@ pub const COMMANDS: &[&str] = &[
     "move_bookmark",
     "split_tabs",
     "unsplit",
+    "split_new",
     "get_view_mode",
     "set_view_mode",
     "set_launch_mode",
@@ -71,4 +72,5 @@ pub const COMMANDS: &[&str] = &[
     "move_pin",
     "unpin",
     "set_pin_emoji",
+    "edit_item_url",
 ];

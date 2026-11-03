@@ -95,6 +95,9 @@ pub enum Pane {
     Full,
     Left,
     Right,
+    /// The halves of a pair split in rows (one above the other).
+    Top,
+    Bottom,
     /// A popup window centred over its (dimmed, still running) opener.
     Sheet,
 }
@@ -109,12 +112,23 @@ pub enum PopupStyle {
     Sheet,
 }
 
-/// Two tabs shown side by side. A tab belongs to at most one pair; the
-/// pair holding the active tab is the one on screen.
+/// Two tabs shown together. A tab belongs to at most one pair; the pair
+/// holding the active tab is the one on screen. `left` is the first pane
+/// (left, or top in rows), `right` the second (right, or bottom).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct SplitView {
     pub left: TabId,
     pub right: TabId,
+    pub orientation: SplitOrientation,
+}
+
+/// How a pair is laid out: side by side (a vertical divider; ⌘D and
+/// dragging a tab onto another) or one above the other (⌘⇧D).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitOrientation {
+    Columns,
+    Rows,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -396,6 +410,17 @@ impl Browser {
     /// paired; a popup tab whose opener is outside the pair only with a
     /// budget of at least 3 live views (its opener stays live as well).
     pub fn split(&mut self, dragged: TabId, target: TabId, now: u64) -> Vec<Effect> {
+        self.split_oriented(dragged, target, SplitOrientation::Columns, now)
+    }
+
+    /// [`Browser::split`] with a layout.
+    pub fn split_oriented(
+        &mut self,
+        dragged: TabId,
+        target: TabId,
+        orientation: SplitOrientation,
+        now: u64,
+    ) -> Vec<Effect> {
         let mut out = Vec::new();
         // Both panes need live web views; never exceed the memory budget.
         if dragged == target || self.budget.max_live < 2 {
@@ -413,10 +438,39 @@ impl Browser {
             return out;
         }
         self.splits.retain(|s| ![s.left, s.right].iter().any(|t| *t == dragged || *t == target));
-        self.splits.push(SplitView { left: target, right: dragged });
+        self.splits.push(SplitView { left: target, right: dragged, orientation });
         self.activate_into(dragged, now, &mut out);
         out.push(Effect::NotifyChrome);
         out
+    }
+
+    /// ⌘D (columns) and ⌘⇧D (rows). With the active tab in a pair: lays
+    /// the pair out that way (nothing if it already is; never a third
+    /// pane). Otherwise: opens an empty tab of the active tab's profile and
+    /// pairs it with the active tab, the new tab second (right or below)
+    /// and focused. Returns the new tab. Not for popup sheets, nor where
+    /// [`Browser::split`] would refuse the pair.
+    pub fn split_new(&mut self, orientation: SplitOrientation, now: u64) -> (Option<TabId>, Vec<Effect>) {
+        let mut out = Vec::new();
+        let Some(active) = self.active else { return (None, out) };
+        if let Some(i) = self.splits.iter().position(|s| s.left == active || s.right == active) {
+            if self.splits[i].orientation != orientation {
+                self.splits[i].orientation = orientation;
+                self.sync_visibility(&mut out);
+                out.push(Effect::NotifyChrome);
+            }
+            return (None, out);
+        }
+        let Some(t) = self.tab(active) else { return (None, out) };
+        // As `split` checks: the active tab's opener stays live too.
+        let needs = if t.opener.is_some() { 3 } else { 2 };
+        if t.sheet || self.budget.max_live < needs || !self.os.allows_browsing() {
+            return (None, out);
+        }
+        let profile = t.profile;
+        let id = self.new_tab_into(profile, now, &mut out);
+        out.extend(self.split_oriented(id, active, orientation, now));
+        (Some(id), out)
     }
 
     /// Ends the pair holding `id`, if any. Both tabs stay open and the
@@ -528,16 +582,18 @@ impl Browser {
         (Some(id), out)
     }
 
-    /// Opens a pin or bookmark: returns to the tab that belongs to it, or
-    /// creates one (default profile), and loads `url` there unless the tab
-    /// already shows it, so opening it always goes back to its own page.
-    /// `key` is the pin's or bookmark's stored URL.
-    pub fn open_launcher(&mut self, key: &str, url: Url, now: u64) -> (TabId, Vec<Effect>) {
+    /// Opens a pin or bookmark: returns to the tab that belongs to it as
+    /// the user left it (2026-11-03; before, it always went back to the
+    /// item's own page), or creates one (default profile) and loads `url`.
+    /// With `reset` ("Return to Original URL"), the item's tab loads `url`
+    /// unless it already shows it. A tab with no page loads `url` either
+    /// way. `key` is the pin's or bookmark's stored URL.
+    pub fn open_launcher(&mut self, key: &str, url: Url, reset: bool, now: u64) -> (TabId, Vec<Effect>) {
         let existing = self.tabs.iter().find(|t| t.launcher.as_deref() == Some(key) && !t.is_private()).map(|t| t.id);
         if let Some(id) = existing {
             let mut out = self.activate(id, now);
             let shown = self.tab(id).and_then(|t| t.committed_url.clone());
-            if shown.as_ref() != Some(&url) {
+            if shown.is_none() || (reset && shown.as_ref() != Some(&url)) {
                 out.extend(self.navigate_trusted(id, url, now));
                 if let Some(t) = self.tab_mut(id) {
                     t.landing = Some(key.to_string());
@@ -654,6 +710,20 @@ impl Browser {
         let mut changed = false;
         for t in self.tabs.iter_mut().filter(|t| t.launcher.as_deref() == Some(key)) {
             t.launcher = None;
+            changed = true;
+        }
+        if !changed {
+            return Vec::new();
+        }
+        vec![Effect::PersistSession(self.session()), Effect::NotifyChrome]
+    }
+
+    /// A pin's or bookmark's URL changed from `old` to `new` ("Edit URL"):
+    /// its tab now belongs to the new key.
+    pub fn rekey_launcher(&mut self, old: &str, new: &str) -> Vec<Effect> {
+        let mut changed = false;
+        for t in self.tabs.iter_mut().filter(|t| t.launcher.as_deref() == Some(old)) {
+            t.launcher = Some(new.to_string());
             changed = true;
         }
         if !changed {
@@ -1306,7 +1376,10 @@ impl Browser {
                 .collect();
         }
         let wanted = match (self.split_view(), self.active) {
-            (Some(s), _) => vec![(s.left, Pane::Left), (s.right, Pane::Right)],
+            (Some(s), _) => match s.orientation {
+                SplitOrientation::Columns => vec![(s.left, Pane::Left), (s.right, Pane::Right)],
+                SplitOrientation::Rows => vec![(s.left, Pane::Top), (s.right, Pane::Bottom)],
+            },
             (None, Some(a)) => vec![(a, Pane::Full)],
             (None, None) => Vec::new(),
         };

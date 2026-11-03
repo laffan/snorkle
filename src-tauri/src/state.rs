@@ -71,6 +71,8 @@ pub enum ChromeEvent<'a> {
     /// Where a tab's text selection is (`None`: nothing selected).
     Selection(TabId, Option<snorkle_core::selection::SelectionRect>),
     /// The image menu for an image in a tab's page (its URL, and where).
+    /// The pointer near the window's left edge (`None`: away).
+    EdgePointer(Option<(f64, f64)>),
     /// `None`: close it (the page was touched or scrolled).
     ImageMenu(TabId, Option<(&'a str, snorkle_core::selection::SelectionRect)>),
     /// Console entries were removed (cleared, or the private session ended).
@@ -550,6 +552,9 @@ impl ContentEvents for Events {
             None => "record:cancel".to_string(),
         };
         (self.shared.emit)(ChromeEvent::Shortcut(&name));
+    }
+    fn edge_pointer(&self, at: Option<(f64, f64)>) {
+        (self.shared.emit)(ChromeEvent::EdgePointer(at));
     }
     fn note(&self, text: &str) {
         self.shared.log(console::Level::Info, None, text);

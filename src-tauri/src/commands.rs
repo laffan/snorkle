@@ -252,12 +252,12 @@ pub async fn remove_bookmark(s: S<'_>, url: String) -> Result<(), String> {
 /// Opens a pin or bookmark in the tab that belongs to it (created on first
 /// use; not listed with the other tabs).
 #[tauri::command]
-pub fn open_launcher(s: S<'_>, url: String) -> Result<u64, String> {
+pub fn open_launcher(s: S<'_>, url: String, reset: Option<bool>) -> Result<u64, String> {
     let parsed = Url::parse(&url).map_err(|_| "Not a web address".to_string())?;
     if !matches!(parsed.scheme(), "http" | "https") || url.len() > 4096 {
         return Err("Not a web address".into());
     }
-    let (id, effects) = s.browser().open_launcher(&url, parsed, now_ms());
+    let (id, effects) = s.browser().open_launcher(&url, parsed, reset.unwrap_or(false), now_ms());
     s.run(effects);
     Ok(id.0)
 }
@@ -479,6 +479,15 @@ pub async fn find_in_page(
         .await
         .map_err(|_| "Find failed.".to_string())?;
     Ok(text.ok().flatten().and_then(|t| snorkle_core::find::parse_position(&t)))
+}
+
+/// ⌘D / ⌘⇧D: split the view with a new empty tab (returned), or change
+/// the layout of the split the active tab is in (`None`).
+#[tauri::command]
+pub fn split_new(s: S<'_>, orientation: snorkle_core::browser::SplitOrientation) -> Option<u64> {
+    let (id, effects) = s.browser().split_new(orientation, now_ms());
+    s.run(effects);
+    id.map(|t| t.0)
 }
 
 /// Image menu: Copy, Share or Download the image at `url` (an http(s)
@@ -805,6 +814,24 @@ pub async fn move_pin(s: S<'_>, url: String, index: usize) -> Result<(), String>
         Some(store) => store.move_pin(&url, index).map_err(|e| e.to_string()),
         None => Ok(()),
     }
+}
+
+/// Changes a pin's or bookmark's URL ("Edit URL"). `new_url` is what the
+/// user typed, read like the address bar but only as an address (a search
+/// is refused). Returns the stored URL.
+#[tauri::command]
+pub async fn edit_item_url(s: S<'_>, url: String, new_url: String) -> Result<String, String> {
+    let target = match snorkle_core::input::interpret(&new_url, &snorkle_core::input::DEFAULT_SEARCH) {
+        Ok(snorkle_core::input::Interpretation::Url(u)) if matches!(u.scheme(), "http" | "https") => u,
+        _ => return Err("Enter a web address (https://…).".into()),
+    };
+    let Some(store) = s.store.clone() else { return Err("Storage is unavailable.".into()) };
+    let stored = store
+        .change_item_url(&url, target.as_str())
+        .map_err(|e| e.to_string())?
+        .ok_or("That address is already pinned or bookmarked, or the item is gone.")?;
+    with_browser(&s, |b| b.rekey_launcher(&url, &stored));
+    Ok(stored)
 }
 
 /// Sets (or with `None` removes) the emoji a pin shows instead of its

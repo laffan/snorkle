@@ -195,8 +195,11 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   pulsing gray box until its load or error event, then fades in.
 - **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
   tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects
-  carry a `Pane` (`Full`, `Left` or `Right`), and the host places each container in its half,
-  with a 2 pt divider. The panes on screen are protected from discard; pairs not on screen can
+  carry a `Pane` (`Full`, `Left`/`Right` for a pair side by side, `Top`/`Bottom` for one in rows;
+  `SplitView::orientation`), and the host places each container in its half, with a 2 pt
+  divider. ⌘D (side by side) and ⌘⇧D (top and bottom) open an empty tab of the active tab's
+  profile as the second pane (right or below) and focus its address bar
+  (`Browser::split_new`); in a pair they only change its layout, never adding a third pane. The panes on screen are protected from discard; pairs not on screen can
   be discarded and are restored together when chosen. Choosing a tab outside any pair shows it
   alone and keeps the pairs. Closing a tab, pairing one of its tabs elsewhere, or unsplitting
   ends a pair. The sidebar shows each pair as one row with a half per tab; dragging a half out
@@ -243,8 +246,13 @@ the system's Close and Find. Recording a binding is native too: while recording,
 offers every accepted ⌘ combination and Escape and reports the one pressed. Shortcuts: ⌘T new tab, ⌘W close tab (a
 pin's tab never; a bookmark's tab after a confirmation, removing the bookmark), ⌘F find, ⌘G /
 ⌘⇧G next / previous match, ⌘S or
-⌘\ sidebar, ⌘⇧\ right panels, ⌘D bookmark (on a bookmark's tab: un-bookmark), ⌘I images,
-⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or ⌘-click its toggle):
+⌘\ sidebar, ⌘⇧\ right panels, ⌘D / ⌘⇧D split side by side / top and bottom, ⌥⌘D bookmark (on a
+bookmark's tab: un-bookmark; it was ⌘D until 2026-11-03), ⌘I images,
+⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or ⌘-click its toggle; its toggle tab reaches 3 pt
+into the sidebar, over the resize edge's line, and in attached mode with the sidebar hidden and a
+pointer device it shows only while the pointer is within 100 pt of it: a hover recognizer on the
+window's root view reports the pointer near the left edge, since pages are native views the chrome
+cannot see the pointer over):
 **attached**, a full-height column beside the page that the toggle shows and hides, and
 **flyout**, shown as soon as the pointer reaches the toggle and hidden 150 ms after it leaves
 the sidebar. ⌘\ (and clicking the toggle) shows or hides an attached sidebar, and
@@ -261,7 +269,7 @@ chrome's own keydown handler uses the same bindings when it has focus; a shortcu
 within 60 ms is run once. An input the chrome opens from a shortcut (palette, find, chat) first
 asks the host to make the chrome's web view first responder (`focus_chrome`).
 
-Bookmarking a tab (⌘D, the ⋯ menu, or dragging it into the bookmarks) moves it into the
+Bookmarking a tab (⌥⌘D, the ⋯ menu, or dragging it into the bookmarks) moves it into the
 bookmark: the tab becomes that bookmark's tab (`Browser::bind_launcher`) instead of a second tab
 appearing when the bookmark is opened. Un-bookmarking makes it an ordinary tab again.
 
@@ -275,7 +283,11 @@ viewport 1.25 times wider (more CSS pixels, as on a larger screen) and everythin
 smaller; sites that serve an enlarged layout to a narrow iPad window get their wider layout. (Until
 2026-11-03 this was `WKWebView.pageZoom`, which scaled text and boxes inside the same viewport.)
 
-**Pins:** up to 12 (three rows of four). Right-click or ⌘-click on a pin opens its menu: Return to
+**Pins and bookmarks:** opening one returns to its tab as it was left (since 2026-11-03; before,
+it always loaded the item's page again). Right-click or ⌘-click on one opens its menu: Return to
+Original URL (its tab loads the saved address) and Edit URL (read like the address bar, addresses
+only; title, place and emoji are kept, its tab follows via `Browser::rekey_launcher`, its offline
+copy is dropped). **Pins:** up to 12 (three rows of four); their menu adds Return to
 Bookmark (moves it to the top of the bookmarks) and Use Emoji for Icon (an emoji shown instead of
 the favicon, stored in `pin-emoji.json`, validated by `storage::clean_emoji`). **Appearance**
 (Settings → General: System, Light, Dark) sets the chrome's colours (`data-theme`) and the

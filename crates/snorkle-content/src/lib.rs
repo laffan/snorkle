@@ -126,6 +126,10 @@ pub enum Shortcut {
     /// Next / previous match of the find bar (opens it if closed).
     FindNext,
     FindPrevious,
+    /// Split the view with an empty tab: side by side (⌘D) or one above
+    /// the other (⌘⇧D); in a split, change its layout.
+    SplitColumns,
+    SplitRows,
     /// The n-th item in the sidebar (pins, bookmarks, then tabs).
     Item(u8),
 }
@@ -163,7 +167,9 @@ const fn def(
 /// Every native shortcut, with its default binding (⌘ plus `mods`).
 pub const SHORTCUTS: &[ShortcutDef] = &[
     def("new_tab", ShortcutMenu::File, "New Tab", "t", 0, Shortcut::NewTab),
-    def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", 0, Shortcut::Bookmark),
+    def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", MOD_ALT, Shortcut::Bookmark),
+    def("split_columns", ShortcutMenu::View, "Split Side by Side", "d", 0, Shortcut::SplitColumns),
+    def("split_rows", ShortcutMenu::View, "Split Top and Bottom", "d", MOD_SHIFT, Shortcut::SplitRows),
     def("close_tab", ShortcutMenu::Close, "Close Tab", "w", 0, Shortcut::CloseTab),
     def("find", ShortcutMenu::Find, "Find on Page", "f", 0, Shortcut::Find),
     def("find_next", ShortcutMenu::Find, "Find Next", "g", 0, Shortcut::FindNext),
@@ -204,6 +210,8 @@ impl Shortcut {
             Shortcut::Find => "find".into(),
             Shortcut::FindNext => "find_next".into(),
             Shortcut::FindPrevious => "find_prev".into(),
+            Shortcut::SplitColumns => "split_columns".into(),
+            Shortcut::SplitRows => "split_rows".into(),
             Shortcut::Item(n) => format!("item:{n}"),
         }
     }
@@ -296,6 +304,11 @@ pub trait ContentEvents: 'static {
     /// The selection watcher reported where the selection is (a JSON
     /// string, page-influenced; `tab` comes from WebKit).
     fn selection(&self, tab: Option<TabId>, body: String);
+    /// Where the pointer (trackpad, mouse) is while it is within
+    /// `EDGE_ZONE` points of the window's left edge, in window points
+    /// (throttled), and `None` once it leaves that strip or stops hovering.
+    /// For the sidebar's edge tab, which shows only near the pointer.
+    fn edge_pointer(&self, _at: Option<(f64, f64)>) {}
     /// A note for the in-app console (native diagnostics, no page data).
     fn note(&self, _text: &str) {}
     /// The shortcut editor's recording: the ⌘ combination pressed (key,
@@ -527,7 +540,14 @@ mod tests {
         assert_eq!(ids.len(), SHORTCUTS.len(), "ids (menu property lists) are unique: UIKit throws otherwise");
         let defaults = effective_bindings(&[]).expect("defaults do not collide");
         assert_eq!(defaults.len(), SHORTCUTS.len());
-        assert_eq!(shortcut_index("bookmark").map(|i| &defaults[i]), Some(&KeyBinding { key: "d".into(), mods: 0 }));
+        assert_eq!(
+            shortcut_index("bookmark").map(|i| &defaults[i]),
+            Some(&KeyBinding { key: "d".into(), mods: MOD_ALT })
+        );
+        assert_eq!(
+            shortcut_index("split_columns").map(|i| &defaults[i]),
+            Some(&KeyBinding { key: "d".into(), mods: 0 })
+        );
         let b = effective_bindings(&[("new_tab".into(), "N".into(), MOD_SHIFT)]).unwrap();
         assert_eq!(b[0], KeyBinding { key: "n".into(), mods: MOD_SHIFT });
         assert!(effective_bindings(&[("new_tab".into(), "w".into(), 0)]).unwrap_err().contains("Close Tab"));

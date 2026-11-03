@@ -463,3 +463,17 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 72. **[verify] Appearance** (2026-11-03). The window's interface style also reaches content views
     that have no override, so pages see `prefers-color-scheme` follow the app's setting (dark
     pages mode still forces dark on its views).
+73. **[verify] Edge tab near the pointer** (2026-11-03). A `UIHoverGestureRecognizer` on the
+    window's root view (recognising alongside every other recognizer) reports the pointer within
+    160 pt of the left edge, at most every 33 ms. Assumed: it receives hover over page views and
+    the chrome alike and does not disturb WebKit's own hover (`:hover`, menus on pages). The tab
+    is hidden only with `(any-hover: hover)`; with a trackpad attached but used by touch, the
+    hidden sidebar is reached with ⌘\ or by pointing.
+74. **[verify] Split top and bottom** (2026-11-03). ⌘D / ⌘⇧D split with an empty tab, or change
+    an existing split's layout. Check the panes, the start surface over the empty half, the
+    selection and image menus' placement (pane geometry in `paneBox`) and dragging out of a pair
+    in rows. Bookmark Page moved to ⌥⌘D; a saved custom binding that used ⌘D or ⌘⇧D now clashes,
+    and Settings → Keyboard then refuses the set until one is changed.
+75. **[decide] Opening a pin or bookmark** (2026-11-03) now returns to its tab as left; Return to
+    Original URL in its menu goes back to the saved address. Before, every click went back to it
+    (and reloaded sites that redirect, e.g. nytimes.com → www.nytimes.com).

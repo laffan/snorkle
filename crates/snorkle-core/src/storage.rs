@@ -412,6 +412,67 @@ impl Store {
         Ok(true)
     }
 
+    /// Changes the URL of a pin or bookmark ("Edit URL"), keeping its title,
+    /// position and emoji; its offline copy is deleted (it was of the old
+    /// page). Returns the stored (normalised) new URL, or `None` when `old`
+    /// is neither pinned nor bookmarked, `new` is not an http(s) URL, or
+    /// it is already pinned or bookmarked.
+    pub fn change_item_url(&self, old: &str, new: &str) -> std::io::Result<Option<String>> {
+        let Some(new) = storable_url(new) else { return Ok(None) };
+        if new == old {
+            return Ok(Some(new));
+        }
+        let (pins, bookmarks, emoji, offline, dropped) = {
+            let mut d = self.data();
+            let taken = d.pins.iter().chain(d.bookmarks.iter()).any(|b| b.url == new);
+            let in_pins = d.pins.iter().position(|b| b.url == old);
+            let in_bookmarks = d.bookmarks.iter().position(|b| b.url == old);
+            if taken || (in_pins.is_none() && in_bookmarks.is_none()) {
+                return Ok(None);
+            }
+            if let Some(i) = in_pins {
+                d.pins[i].url = new.clone();
+            }
+            if let Some(i) = in_bookmarks {
+                d.bookmarks[i].url = new.clone();
+            }
+            let emoji = match d.pin_emoji.remove(old) {
+                Some(e) => {
+                    d.pin_emoji.insert(new.clone(), e);
+                    Some(serde_json::to_vec(&d.pin_emoji)?)
+                }
+                None => None,
+            };
+            let dropped: Vec<String> = d.offline.iter().filter(|e| e.url == old).map(|e| e.file.clone()).collect();
+            d.offline.retain(|e| e.url != old);
+            let offline = (!dropped.is_empty()).then(|| serde_json::to_vec(&d.offline)).transpose()?;
+            (
+                in_pins.map(|_| serde_json::to_vec(&d.pins)).transpose()?,
+                in_bookmarks.map(|_| serde_json::to_vec(&d.bookmarks)).transpose()?,
+                emoji,
+                offline,
+                dropped,
+            )
+        };
+        if let Some(p) = pins {
+            atomic_write(&self.dir.join(PINS_FILE), &p)?;
+        }
+        if let Some(b) = bookmarks {
+            atomic_write(&self.dir.join(BOOKMARKS_FILE), &b)?;
+        }
+        if let Some(e) = emoji {
+            atomic_write(&self.dir.join(PIN_EMOJI_FILE), &e)?;
+        }
+        if let Some(o) = offline {
+            let dir = self.dir.join(OFFLINE_DIR);
+            for f in dropped {
+                let _ = fs::remove_file(dir.join(f));
+            }
+            atomic_write(&dir.join(OFFLINE_INDEX), &o)?;
+        }
+        Ok(Some(new))
+    }
+
     /// Moves the bookmark for `url` to position `index` (clamped).
     pub fn move_bookmark(&self, url: &str, index: usize) -> std::io::Result<()> {
         let snapshot = {
@@ -1176,6 +1237,35 @@ mod tests {
         s.clear_offline_copies();
         assert!(s.offline_copy(url).is_none() && !dir.join(OFFLINE_DIR).exists());
         assert!(valid_offline_file(&offline_file(url)) && !valid_offline_file("../x.webarchive"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn item_urls_can_be_changed() {
+        let dir = tmpdir("edit-url");
+        let s = Store::open(&dir).unwrap();
+        s.insert_pin("https://p.example/", "P", 0, 0).unwrap();
+        s.set_pin_emoji("https://p.example/", Some("📌")).unwrap();
+        s.insert_bookmark("https://b.example/", "B", 0, 0).unwrap();
+        s.save_offline_copy("https://b.example/", b"x", 1).unwrap();
+        assert_eq!(
+            s.change_item_url("https://p.example/", "https://p.example/home").unwrap().as_deref(),
+            Some("https://p.example/home")
+        );
+        assert_eq!(s.pins()[0].url, "https://p.example/home");
+        assert_eq!(s.pins()[0].title, "P", "title kept");
+        assert_eq!(s.pin_emoji("https://p.example/home").as_deref(), Some("📌"), "emoji follows");
+        assert!(s.change_item_url("https://b.example/", "https://p.example/home").unwrap().is_none(), "already pinned");
+        assert!(s.change_item_url("https://b.example/", "javascript:alert(1)").unwrap().is_none());
+        assert!(s.change_item_url("https://none.example/", "https://x.example/").unwrap().is_none());
+        assert!(s.change_item_url("https://b.example/", "https://b.example/new").unwrap().is_some());
+        assert!(
+            s.offline_copy("https://b.example/new").is_none() && s.offline_copy("https://b.example/").is_none(),
+            "old copy dropped"
+        );
+        drop(s);
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.bookmarks()[0].url, "https://b.example/new");
         let _ = fs::remove_dir_all(&dir);
     }
 

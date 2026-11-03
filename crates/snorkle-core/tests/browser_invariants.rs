@@ -3,7 +3,7 @@
 //! silently, private tabs never reach storage, and the memory budget holds.
 
 use snorkle_core::browser::{
-    AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, PopupStyle, SplitView, Verdict,
+    AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, PopupStyle, SplitOrientation, SplitView, Verdict,
 };
 use snorkle_core::os::{OsSupport, OsVersion};
 use snorkle_core::policy::Frame;
@@ -377,10 +377,44 @@ fn offline_copy_replaces_a_network_error_once() {
 #[test]
 fn opening_a_launcher_marks_its_landing_load() {
     let mut b = browser(4);
-    let (t, _) = b.open_launcher("https://nytimes.com/", u("https://nytimes.com/"), 0);
+    let (t, _) = b.open_launcher("https://nytimes.com/", u("https://nytimes.com/"), false, 0);
     assert_eq!(b.landing(t).as_deref(), Some("https://nytimes.com/"));
     webkit_load(&mut b, t, "https://www.nytimes.com/");
     assert_eq!(b.landing(t), None, "cleared when that load finishes");
+}
+
+#[test]
+fn split_shortcuts_add_an_empty_tab_or_change_the_layout() {
+    let mut b = browser(4);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (n, out) = b.split_new(SplitOrientation::Columns, 1);
+    let n = n.expect("a new tab");
+    assert_eq!(b.active(), Some(n), "the new tab is focused");
+    assert_eq!(b.view().split, Some(SplitView { left: a, right: n, orientation: SplitOrientation::Columns }));
+    assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }), "the page keeps the left half");
+    // Same shortcut again: nothing.
+    let (again, out) = b.split_new(SplitOrientation::Columns, 2);
+    assert!(again.is_none() && out.is_empty());
+    // The other one: the same pair, one above the other; no third pane.
+    let (again, out) = b.split_new(SplitOrientation::Rows, 3);
+    assert!(again.is_none());
+    assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Top }));
+    assert_eq!(b.view().split.map(|s| s.orientation), Some(SplitOrientation::Rows));
+    assert_eq!(b.view().tabs.len(), 2);
+    // From the other half too.
+    b.activate(a, 4);
+    let (_, out) = b.split_new(SplitOrientation::Columns, 5);
+    assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }));
+    // A private tab's new pane is private.
+    let mut b = browser(4);
+    let (pv, _) = b.new_tab(Profile::Private, 0);
+    let (n, _) = b.split_new(SplitOrientation::Rows, 1);
+    assert!(b.view().tabs.iter().any(|t| Some(t.id) == n && t.private));
+    assert_eq!(b.view().split.map(|s| (s.left, s.orientation)), Some((pv, SplitOrientation::Rows)));
+    // Not with a budget of one live view.
+    let mut b = browser(1);
+    open_and_load(&mut b, "https://a.example/", 0);
+    assert!(b.split_new(SplitOrientation::Columns, 1).0.is_none());
 }
 
 #[test]
@@ -411,7 +445,7 @@ fn bookmarking_moves_the_tab() {
     assert_eq!(b.tab(t).unwrap().launcher.as_deref(), Some("https://a.example/"));
     assert_eq!(b.session().tabs[0].launcher.as_deref(), Some("https://a.example/"));
     // Opening the bookmark returns to this tab instead of making another.
-    let (id, _) = b.open_launcher("https://a.example/", u("https://a.example/"), 1);
+    let (id, _) = b.open_launcher("https://a.example/", u("https://a.example/"), false, 1);
     assert_eq!(id, t);
     let (t2, _) = b.new_tab(Profile::Default, 2);
     assert!(!b.bind_launcher(t2, "https://a.example/").0, "one tab per item");
@@ -599,7 +633,7 @@ fn split_shows_both_tabs_side_by_side() {
     let out = b.split(c, a, 2);
     assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }));
     assert!(out.contains(&Effect::ShowView { tab: c, pane: Pane::Right }));
-    assert_eq!(b.view().split, Some(SplitView { left: a, right: c }));
+    assert_eq!(b.view().split, Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns }));
     assert_eq!(b.active(), Some(c));
     // Focusing the other pane keeps the split.
     b.activate(a, 3);
@@ -615,12 +649,16 @@ fn split_pairs_survive_choosing_another_tab_and_end_when_a_pane_closes() {
     b.split(c, a, 3);
     let out = b.activate(d, 4);
     assert!(b.view().split.is_none(), "a tab outside the pair is shown alone");
-    assert_eq!(b.view().splits, vec![SplitView { left: a, right: c }], "the pair is kept");
+    assert_eq!(
+        b.view().splits,
+        vec![SplitView { left: a, right: c, orientation: SplitOrientation::Columns }],
+        "the pair is kept"
+    );
     assert!(out.contains(&Effect::HideView(a)) && out.contains(&Effect::HideView(c)));
     assert!(out.contains(&Effect::ShowView { tab: d, pane: Pane::Full }));
     // Choosing either tab of the pair shows the pair again.
     let out = b.activate(a, 5);
-    assert_eq!(b.view().split, Some(SplitView { left: a, right: c }));
+    assert_eq!(b.view().split, Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns }));
     assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Left }));
     assert!(out.contains(&Effect::ShowView { tab: c, pane: Pane::Right }));
     b.close(a, 6);
@@ -637,11 +675,17 @@ fn several_pairs_and_repairing() {
     let (e, _) = open_and_load(&mut b, "https://e.example/", 3);
     b.split(c, a, 4);
     b.split(e, d, 5);
-    assert_eq!(b.view().splits, vec![SplitView { left: a, right: c }, SplitView { left: d, right: e }]);
-    assert_eq!(b.view().split, Some(SplitView { left: d, right: e }));
+    assert_eq!(
+        b.view().splits,
+        vec![
+            SplitView { left: a, right: c, orientation: SplitOrientation::Columns },
+            SplitView { left: d, right: e, orientation: SplitOrientation::Columns }
+        ]
+    );
+    assert_eq!(b.view().split, Some(SplitView { left: d, right: e, orientation: SplitOrientation::Columns }));
     // Pairing tabs from two pairs ends both and makes one new pair.
     b.split(d, a, 6);
-    assert_eq!(b.view().splits, vec![SplitView { left: a, right: d }]);
+    assert_eq!(b.view().splits, vec![SplitView { left: a, right: d, orientation: SplitOrientation::Columns }]);
 }
 
 #[test]
@@ -682,7 +726,7 @@ fn hidden_pair_can_be_discarded_and_comes_back_whole() {
     let (d, _) = open_and_load(&mut b, "https://d.example/", 3);
     assert!(b.live_count() <= 2);
     let out = b.activate(a, 4);
-    assert_eq!(b.view().split, Some(SplitView { left: a, right: c }));
+    assert_eq!(b.view().split, Some(SplitView { left: a, right: c, orientation: SplitOrientation::Columns }));
     assert_eq!(b.live_count(), 2);
     let created: Vec<_> = out
         .iter()
@@ -760,21 +804,26 @@ fn launcher_reuses_its_tab_and_survives_restart() {
     let mut b = browser(4);
     let (t, _) = open_and_load(&mut b, "https://a.example/", 0);
     let key = "https://pin.example/";
-    let (p, out) = b.open_launcher(key, u(key), 1);
+    let (p, out) = b.open_launcher(key, u(key), false, 1);
     assert_ne!(p, t);
     assert!(out.iter().any(|e| matches!(e, Effect::CreateView { .. } | Effect::Load { .. })));
     webkit_load(&mut b, p, key);
     // Navigating inside the pin's tab keeps it bound.
     webkit_load(&mut b, p, "https://pin.example/page");
     b.activate(t, 2);
-    let (again, out) = b.open_launcher(key, u(key), 3);
+    let (again, out) = b.open_launcher(key, u(key), false, 3);
     assert_eq!(again, p, "no new tab");
+    assert!(!out.iter().any(|e| matches!(e, Effect::Load { .. })), "back to the tab as it was left");
+    assert_eq!(b.active(), Some(p));
+    b.activate(t, 3);
+    let (again, out) = b.open_launcher(key, u(key), true, 3);
+    assert_eq!(again, p);
     assert!(
         out.iter().any(|e| matches!(e, Effect::Load { tab, url } if *tab == p && url.as_str() == key)),
-        "back to the pinned page"
+        "Return to Original URL: back to the pinned page"
     );
     webkit_load(&mut b, p, key);
-    let (_, out) = b.open_launcher(key, u(key), 4);
+    let (_, out) = b.open_launcher(key, u(key), true, 4);
     assert!(!out.iter().any(|e| matches!(e, Effect::Load { .. })), "already there: no reload");
     assert_eq!(b.active(), Some(p));
     assert_eq!(b.view().tabs.len(), 2);

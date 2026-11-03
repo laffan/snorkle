@@ -59,6 +59,7 @@ use objc2_ui_kit::{
     UIApplicationDidReceiveMemoryWarningNotification, UIBezierPath, UIColor, UIControlEvents, UIRectCorner,
     UIReferenceLibraryViewController, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
     UIUserInterfaceStyle, UIViewController, UIDocumentPickerViewController, UIImage, UIPasteboard,
+    UIHoverGestureRecognizer,
 };
 use objc2_web_kit::{
     WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController,
@@ -76,7 +77,9 @@ use snorkle_core::userscripts::Injection;
 use url::Url;
 
 use self::bindings::WKWebView;
-use self::delegates::{NavDelegate, Observer, RefreshTarget, TabIvars, TapFocus, UiDelegate, KVO_KEYS};
+use self::delegates::{
+    HoverEdge, HoverIvars, NavDelegate, Observer, RefreshTarget, TabIvars, TapFocus, UiDelegate, KVO_KEYS,
+};
 use crate::{clamp_inset, ContentEvents, DataKind, Hole, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
 
 // Adding any page-to-native channel requires writing installation code
@@ -142,6 +145,8 @@ pub struct ContentHost {
     console: bool,
     /// Dims the content area under a popup sheet and swallows its touches.
     backdrop: Retained<UIView>,
+    /// Target of the hover recognizer on the root view (edge tab).
+    _hover: Retained<HoverEdge>,
     /// Where the chrome floats over the content area (window coordinates).
     holes: keys::Holes,
     /// The chrome's own web view (Tauri's), to give it keyboard focus.
@@ -198,6 +203,16 @@ impl ContentHost {
             &active,
         ));
 
+        // Pointer near the left edge, for the sidebar's edge tab.
+        let hover = HoverEdge::new(mtm, HoverIvars::new(events.clone()));
+        let recognizer = UIHoverGestureRecognizer::initWithTarget_action(
+            UIHoverGestureRecognizer::alloc(mtm),
+            Some(&hover),
+            Some(sel!(hovered:)),
+        );
+        recognizer.setDelegate(Some(ProtocolObject::from_ref(&*hover)));
+        root.addGestureRecognizer(&recognizer);
+
         menu::install(mtm, events.clone());
         let holes = keys::Holes::default();
         // A container too, so it also leaves the holes (and their touches) out.
@@ -209,6 +224,7 @@ impl ContentHost {
         ContentHost {
             mtm,
             backdrop,
+            _hover: hover,
             holes,
             chrome,
             root,
@@ -246,17 +262,23 @@ impl ContentHost {
     }
 
     /// Frame of one pane: the whole content area, or one half of it with a
-    /// 2 pt divider in split view.
+    /// 2 pt divider in split view (side by side, or one above the other).
     fn pane_frame(&self, pane: Pane) -> CGRect {
         let area = self.content_frame();
         const GAP: f64 = 2.0;
         let half = ((area.size.width - GAP) / 2.0).floor().max(0.0);
+        let half_h = ((area.size.height - GAP) / 2.0).floor().max(0.0);
         match pane {
             Pane::Full => area,
             Pane::Left => CGRect::new(area.origin, CGSize::new(half, area.size.height)),
             Pane::Right => CGRect::new(
                 CGPoint::new(area.origin.x + area.size.width - half, area.origin.y),
                 CGSize::new(half, area.size.height),
+            ),
+            Pane::Top => CGRect::new(area.origin, CGSize::new(area.size.width, half_h)),
+            Pane::Bottom => CGRect::new(
+                CGPoint::new(area.origin.x, area.origin.y + area.size.height - half_h),
+                CGSize::new(area.size.width, half_h),
             ),
             // Window-sized, centred, with a margin that leaves the page
             // underneath visible.
@@ -454,7 +476,8 @@ impl ContentHost {
     ) -> Result<(), String> {
         use snorkle_core::imagemenu::{download_name, ImageAction};
         if action == ImageAction::Copy {
-            let image = UIImage::imageWithData(&NSData::with_bytes(&data)).ok_or("This kind of image cannot be copied.")?;
+            let image =
+                UIImage::imageWithData(&NSData::with_bytes(&data)).ok_or("This kind of image cannot be copied.")?;
             unsafe { UIPasteboard::generalPasteboard().setImage(Some(&image)) };
             return Ok(());
         }

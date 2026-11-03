@@ -33,6 +33,7 @@
     "allow-move-bookmark",
     "allow-split-tabs",
     "allow-unsplit",
+    "allow-split-new",
     "allow-get-view-mode",
     "allow-set-view-mode",
     "allow-set-launch-mode",
@@ -77,6 +78,7 @@
     "allow-pin-bookmark",
     "allow-move-pin",
     "allow-unpin",
-    "allow-set-pin-emoji"
+    "allow-set-pin-emoji",
+    "allow-edit-item-url"
   ]
 }

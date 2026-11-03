@@ -26,7 +26,7 @@ use objc2_foundation::{
     NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
     NSURLSessionAuthChallengeDisposition, NSURL,
 };
-use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate, UIKeyModifierFlags};
+use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState, UIKeyModifierFlags};
 use objc2_web_kit::{
     WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
     WKNavigationResponse, WKNavigationResponsePolicy, WKNavigationType, WKPermissionDecision, WKSecurityOrigin,
@@ -523,6 +523,72 @@ impl RefreshTarget {
 
 impl TapFocus {
     pub fn new(mtm: MainThreadMarker, ivars: TabIvars) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// Width of the strip along the window's left edge where the pointer is
+/// reported (the edge tab is 14 pt wide and shows within 100 pt of it).
+pub const EDGE_ZONE: f64 = 160.0;
+
+pub struct HoverIvars {
+    pub events: Rc<dyn ContentEvents>,
+    near: Cell<bool>,
+    last: Cell<Option<std::time::Instant>>,
+}
+
+impl HoverIvars {
+    pub fn new(events: Rc<dyn ContentEvents>) -> Self {
+        HoverIvars { events, near: Cell::new(false), last: Cell::new(None) }
+    }
+}
+
+define_class!(
+    /// The target of a hover recognizer on the window's root view: reports
+    /// the pointer's position while it is near the window's left edge (at
+    /// most every 33 ms) and once when it leaves, so the chrome can show
+    /// the sidebar's edge tab only near the pointer. Pointer positions
+    /// only; it runs alongside every other recognizer.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "SnorkleHoverEdge"]
+    #[ivars = HoverIvars]
+    pub struct HoverEdge;
+
+    unsafe impl NSObjectProtocol for HoverEdge {}
+
+    unsafe impl UIGestureRecognizerDelegate for HoverEdge {
+        #[unsafe(method(gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:))]
+        fn simultaneous(&self, _g: &UIGestureRecognizer, _other: &UIGestureRecognizer) -> bool {
+            true
+        }
+    }
+
+    impl HoverEdge {
+        #[unsafe(method(hovered:))]
+        fn hovered(&self, g: &UIGestureRecognizer) {
+            let i = self.ivars();
+            let state = g.state();
+            let p = g.locationInView(g.view().as_deref());
+            let hovering = matches!(state, UIGestureRecognizerState::Began | UIGestureRecognizerState::Changed);
+            if hovering && p.x.is_finite() && p.y.is_finite() && p.x <= EDGE_ZONE {
+                let now = std::time::Instant::now();
+                if i.near.get() && i.last.get().is_some_and(|t| now.duration_since(t).as_millis() < 33) {
+                    return;
+                }
+                i.near.set(true);
+                i.last.set(Some(now));
+                i.events.edge_pointer(Some((p.x, p.y)));
+            } else if i.near.replace(false) {
+                i.events.edge_pointer(None);
+            }
+        }
+    }
+);
+
+impl HoverEdge {
+    pub fn new(mtm: MainThreadMarker, ivars: HoverIvars) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
     }

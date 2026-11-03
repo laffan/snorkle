@@ -26,7 +26,7 @@
       <div id="pins" class="pingrid" aria-label="Pinned sites"></div>
       <div class="side-gap" aria-hidden="true"></div>
       <div id="bookmarks" class="droplist" aria-label="Bookmarks"></div>
-      <div class="side-gap" aria-hidden="true"></div>
+      <div class="side-gap side-rule" aria-hidden="true"></div>
       <div id="tabs" class="tablist" role="tablist" aria-label="Tabs" aria-orientation="vertical"></div>
       <div id="private-head" class="side-section" hidden>Private</div>
       <div id="private-tabs" class="tablist" role="tablist" aria-orientation="vertical"></div>
@@ -51,10 +51,19 @@
       <div id="vm-title" class="vm-title"></div>
       <button id="vm-tab" role="menuitem"></button>
     </div>
-    <!-- Right-click or ⌘-click on a pin. -->
+    <!-- Right-click or ⌘-click on a pin or bookmark (the pin-only rows are
+         hidden for bookmarks). -->
     <div id="pin-pop" class="popup pin-pop" role="menu" hidden>
-      <button id="pin-to-bookmark" role="menuitem">Return to Bookmark</button>
-      <button id="pin-emoji" role="menuitem">Use Emoji for Icon…</button>
+      <button id="item-original" role="menuitem">Return to Original URL</button>
+      <button id="item-edit" role="menuitem">Edit URL…</button>
+      <form id="item-url-form" class="pin-emoji-form" novalidate hidden>
+        <input id="item-url-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+               maxlength="4096" aria-label="Address of this item">
+        <button class="button primary" type="submit">Save</button>
+      </form>
+      <div class="menu-sep pin-only" role="separator"></div>
+      <button id="pin-to-bookmark" class="pin-only" role="menuitem">Return to Bookmark</button>
+      <button id="pin-emoji" class="pin-only" role="menuitem">Use Emoji for Icon…</button>
       <button id="pin-emoji-clear" role="menuitem" hidden>Use Site Icon</button>
       <form id="pin-emoji-form" class="pin-emoji-form" hidden>
         <input id="pin-emoji-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
@@ -149,12 +158,9 @@
   <!-- Shown only where no content view covers it (start page, notices,
        history). -->
   <main id="surface">
-    <section id="start" hidden>
-      <h1 id="start-title">New Tab</h1>
-      <p id="start-private" class="muted" hidden>Private tab: history, cookies and site data are kept in memory only and are discarded when you close your last private tab.</p>
-      <p class="muted">Type an address or search above. Bookmarks are in the sidebar: drag a tab into them to add one, drag a tab onto another tab to view both side by side, and drag a tab out of its pair to view it alone again.</p>
-      <p class="muted credit">Ad and tracker blocking uses EasyList and EasyPrivacy by The EasyList authors (easylist.to), licensed CC BY-SA 3.0.</p>
-    </section>
+    <!-- A new tab: an empty surface (the address bar says what to do; the
+         EasyList credit is in Settings → General). -->
+    <section id="start" hidden></section>
 
     <section id="notice" class="notice" hidden>
       <h1 id="notice-title"></h1>

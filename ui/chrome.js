@@ -356,10 +356,7 @@
     }
   }
 
-  function renderStart(tab) {
-    $('start-title').textContent = tab && tab.private ? 'New Private Tab' : 'New Tab';
-    $('start-private').hidden = !(tab && tab.private);
-  }
+  function renderStart() {}
 
   // History, newest first, under a heading per day and per hour.
   function fillHistory(list, items) {
@@ -410,8 +407,10 @@
   // Each pin and bookmark has its own tab, which is not listed with the
   // other tabs: opening one returns to it (created on first use), and the
   // pin or bookmark is shown as selected.
-  function openLink(url) {
-    invoke('open_launcher', { url });
+  // Opens a pin or bookmark (its own tab, as left); `reset` goes back to
+  // its saved address ("Return to Original URL").
+  function openLink(url, reset = false) {
+    invoke('open_launcher', { url, reset });
     if (narrow) setSidebar(false);
   }
 
@@ -526,19 +525,22 @@
     if (state) renderLauncherSelection();
   }
 
-  // Pin menu: Return to Bookmark, Use Emoji for Icon (right-click or
-  // ⌘-click on a pin). Placed under the pin, inside the sidebar.
-  let pinMenu = null;
-  function openPinPop(p, node) {
+  // Pin and bookmark menu (right-click or ⌘-click): Return to Original
+  // URL, Edit URL; for pins also Return to Bookmark and Use Emoji for Icon.
+  // Placed under the item, inside the sidebar.
+  let pinMenu = null; // the pin or bookmark, plus { kind: 'pin' | 'bookmark' }
+  function openPinPop(p, node, kind = 'pin') {
     closeMenu();
-    pinMenu = p;
+    pinMenu = { ...p, kind };
     const pop = $('pin-pop');
     const side = $('sidebar').getBoundingClientRect();
     pop.style.top = Math.round(node.getBoundingClientRect().bottom - side.top + 6) + 'px';
+    for (const e of pop.querySelectorAll('.pin-only')) e.hidden = kind !== 'pin';
     $('pin-emoji-form').hidden = true;
     $('pin-emoji-hint').hidden = true;
-    $('pin-emoji').hidden = false;
-    $('pin-emoji-clear').hidden = !p.emoji;
+    $('item-url-form').hidden = true;
+    $('item-edit').hidden = false;
+    $('pin-emoji-clear').hidden = kind !== 'pin' || !p.emoji;
     pop.hidden = false;
     syncMenuOpen();
   }
@@ -546,9 +548,33 @@
     if ($('pin-pop').hidden) return;
     $('pin-pop').hidden = true;
     $('pin-emoji-input').blur();
+    $('item-url-input').blur();
     pinMenu = null;
     syncMenuOpen();
   }
+  // Back to the address the item was saved with, in its own tab.
+  $('item-original').addEventListener('click', () => {
+    const p = pinMenu;
+    closePinPop();
+    if (p) openLink(p.url, true);
+  });
+  $('item-edit').addEventListener('click', () => {
+    $('item-edit').hidden = true;
+    $('item-url-form').hidden = false;
+    const input = $('item-url-input');
+    input.value = pinMenu ? pinMenu.url : '';
+    focusInput(input, true);
+  });
+  $('item-url-form').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const p = pinMenu;
+    const value = $('item-url-input').value.trim();
+    if (!p || !value) return;
+    T.core.invoke('edit_item_url', { url: p.url, newUrl: value }).then(() => {
+      closePinPop();
+      return Promise.all([loadPins(), loadBookmarks()]);
+    }).catch((e) => toast(String(e)));
+  });
   $('pin-to-bookmark').addEventListener('click', () => {
     const p = pinMenu;
     closePinPop();
@@ -601,7 +627,12 @@
       const host = el('span', 'h');
       fillLabels(host, b.display.registrable, false);
       open.appendChild(host);
-      open.addEventListener('click', () => { if (!suppressClick) openLink(b.url); });
+      open.addEventListener('click', (ev) => {
+        if (suppressClick) return;
+        if (ev.metaKey) { openPinPop(b, node, 'bookmark'); return; } // ⌘-click: the item menu
+        openLink(b.url);
+      });
+      node.addEventListener('contextmenu', (ev) => { ev.preventDefault(); cancelPending(); openPinPop(b, node, 'bookmark'); });
       const rm = el('button', 'close', '×');
       rm.setAttribute('aria-label', 'Remove bookmark');
       rm.addEventListener('click', (ev) => {
@@ -913,12 +944,43 @@
   // `animate`: the page and its cut-outs slide with the sidebar (the host
   // animates them over the same 0.25 s as the CSS).
   let slideStartedAt = 0;
+  // Attached mode, sidebar hidden, with a pointer device: the edge tab
+  // shows only while the pointer is within 100 pt of it. Pages are native
+  // views, so the host reports the pointer near the left edge
+  // (`edge_pointer`); touch-only devices always show the tab.
+  const EDGE_NEAR_PT = 100;
+  let edgeNear = false;
+  const hoverDevice = () => matchMedia('(any-hover: hover)').matches;
+  function edgeAway() {
+    return !narrow && !flyoutMode() && !sidebarShown && hoverDevice() && !edgeNear;
+  }
+  function syncEdgeTab() {
+    const away = edgeAway();
+    if (document.body.classList.contains('edge-away') === away) return;
+    document.body.classList.toggle('edge-away', away);
+    reportLayout();
+  }
+  T.event.listen('edge_pointer', (e) => {
+    const p = e.payload;
+    let near = false;
+    if (p) {
+      const r = $('edge-tab').getBoundingClientRect();
+      const dx = Math.max(r.left - p.x, 0, p.x - r.right);
+      const dy = Math.max(r.top - p.y, 0, p.y - r.bottom);
+      near = Math.hypot(dx, dy) <= EDGE_NEAR_PT;
+    }
+    if (near === edgeNear) return;
+    edgeNear = near;
+    syncEdgeTab();
+  });
+
   function applySidebar(animate) {
     const b = document.body.classList;
     b.toggle('narrow', narrow);
     b.toggle('sb-flyout', flyoutMode());
     b.toggle('sb-hidden', !sidebarShown);
     b.toggle('sb-docked', sidebarDocked());
+    b.toggle('edge-away', edgeAway());
     if (animate) slideStartedAt = Date.now();
     $('sidebar').setAttribute('aria-hidden', String(!sidebarShown));
     const tab = $('edge-tab');
@@ -1469,21 +1531,32 @@
     con.style.bottom = strip + 'px';
     const bottom = consoleOpen ? strip + Math.ceil(con.getBoundingClientRect().height) : 0;
     // The chrome surface (start page, notices) covers the focused pane: in
-    // split view that is one half of the content area (matching the native
-    // pane frames: 2 pt divider, halves floored).
+    // split view that is one half of the content area, side by side or one
+    // above the other (matching the native pane frames: 2 pt divider,
+    // halves floored).
     let sLeft = left;
     let sRight = right;
+    let sTop = top;
+    let sBottom = bottom;
     if (state && state.split && !overlay) {
-      const w = window.innerWidth - left - right;
-      const half = Math.floor((w - 2) / 2);
-      if (state.active === state.split.left) sRight = right + w - half;
-      else sLeft = left + w - half;
+      const first = state.active === state.split.left;
+      if (state.split.orientation === 'rows') {
+        const h = window.innerHeight - top - bottom;
+        const half = Math.floor((h - 2) / 2);
+        if (first) sBottom = bottom + h - half;
+        else sTop = top + h - half;
+      } else {
+        const w = window.innerWidth - left - right;
+        const half = Math.floor((w - 2) / 2);
+        if (first) sRight = right + w - half;
+        else sLeft = left + w - half;
+      }
     }
     const s = $('surface');
-    s.style.top = top + 'px';
+    s.style.top = sTop + 'px';
     s.style.left = sLeft + 'px';
     s.style.right = sRight + 'px';
-    s.style.bottom = bottom + 'px';
+    s.style.bottom = sBottom + 'px';
     contentBox = { left, top, right, bottom };
     const holes = overlay ? [] : floatingHoles();
     const key = JSON.stringify([top, left, right, bottom, overlay, holes]);
@@ -1546,10 +1619,10 @@
     const height = window.innerHeight - top - (fly ? FLY_INSET + $('safe-bottom').offsetHeight : 0);
     const panelX = sidebarShown ? -1 : -(w + 3);
     const tabX = sidebarShown ? w : 0;
-    return [
-      { x: panelX, y: top - 1, w: w + 1, h: height + 2, r: 15, c: 10 },
-      { x: tabX, y: Math.round(top + (height - TAB_H) / 2) - 1, w: 15, h: TAB_H + 2, r: 11, c: 10 },
-    ];
+    const panel = { x: panelX, y: top - 1, w: w + 1, h: height + 2, r: 15, c: 10 };
+    // The hidden edge tab is not cut out (the page shows there).
+    if (document.body.classList.contains('edge-away')) return [panel];
+    return [panel, { x: tabX, y: Math.round(top + (height - TAB_H) / 2) - 1, w: 15, h: TAB_H + 2, r: 11, c: 10 }];
   }
 
   // The panels docked on the right of the content area: site scripts while
@@ -2460,6 +2533,13 @@
       bookmarkShortcut();
     } else if (name === 'find') {
       openFind();
+    } else if (name === 'split_columns' || name === 'split_rows') {
+      // ⌘D / ⌘⇧D: a new empty tab beside (or below) this one, ready for an
+      // address; in a split, its layout changes instead.
+      const orientation = name === 'split_columns' ? 'columns' : 'rows';
+      T.core.invoke('split_new', { orientation })
+        .then((id) => { if (id !== null && id !== undefined) beginEdit(); })
+        .catch((e) => toast(String(e)));
     } else if (name === 'find_next' || name === 'find_prev') {
       // ⌘G / ⌘⇧G: step through the matches; open the bar if it is closed.
       if (findOpen && find.query) findStep(name === 'find_prev');
@@ -2516,7 +2596,7 @@
   $('confirm-ok').addEventListener('click', () => { if (confirmAction) confirmAction.run(); });
   $('confirm-cancel').addEventListener('click', closeConfirm);
 
-  // ⌘D (and the ⋯ menu's Bookmark row): bookmarks the page, moving this
+  // ⌥⌘D (and the ⋯ menu's Bookmark row): bookmarks the page, moving this
   // tab into the bookmark; on a bookmark's own tab, removes the bookmark
   // and the tab becomes an ordinary tab again.
   const BOOKMARK_RESULT = {
@@ -2788,6 +2868,11 @@
     const b = contentBox;
     const w = window.innerWidth - b.left - b.right;
     if (state && state.split && (state.split.left === tab || state.split.right === tab)) {
+      if (state.split.orientation === 'rows') {
+        const h = window.innerHeight - b.top - b.bottom;
+        const half = Math.floor((h - 2) / 2);
+        return { x: b.left, y: state.split.left === tab ? b.top : b.top + h - half, w };
+      }
       const half = Math.floor((w - 2) / 2);
       return { x: state.split.left === tab ? b.left : b.left + w - half, y: b.top, w: half };
     }
