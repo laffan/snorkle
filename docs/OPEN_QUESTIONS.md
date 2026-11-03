@@ -478,3 +478,75 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
 75. **[decide] Opening a pin or bookmark** (2026-11-03) now returns to its tab as left; Return to
     Original URL in its menu goes back to the saved address. Before, every click went back to it
     (and reloaded sites that redirect, e.g. nytimes.com → www.nytimes.com).
+
+## macOS (2026-11-03)
+
+The macOS host (`crates/snorkle-content/src/macos/`, ARCHITECTURE §1a) type-checks and
+clippy-lints for `aarch64-apple-darwin` against the objc2 AppKit/WebKit bindings
+(`scripts/check-macos.sh`, stub C compiler, no SDK). **It has not been linked or run on a Mac.**
+The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–10, 14, 23, 35, 44–45,
+55 and 70 apply on macOS too.
+
+76. **[verify] First launch.** Assumed from wry 0.57.1 and tao 0.37.2 source: the window's content
+    view is wry's `WryWebViewParent` holding the chrome's `WKWebView`; `WebviewWindow::ns_window`
+    returns that window during `setup`; a view added to the content view afterwards is above the
+    chrome (hit-tested first, drawn on top). If pages do not appear, or clicks on the sidebar do
+    nothing, check these first.
+77. **[verify] Masks and hit-testing.** All views in the hierarchy are unflipped, on the
+    assumption that a layer-backed unflipped view's layer then uses the view's coordinates (no
+    `geometryFlipped`), so the mask path is built bottom-up. If cut-outs appear mirrored
+    vertically (the pill's hole at the top of the page), that assumption is wrong. Check: the
+    pill, its ⋯ popup, toasts, the find bar and the sidebar's edge tab are drawn and clickable over
+    a page, the page is clickable right next to them, and the cut-outs glide with the sidebar.
+78. **[verify] Hover and cursor in holes.** Mouse moves are delivered by tracking areas, which
+    know nothing of the holes, so a page under the pill may still see `:hover` and set the cursor
+    while the pointer is over the pill. Clicks and scrolling are hit-tested and are correct.
+79. **[verify] Shortcuts.** The key monitor consumes bound ⌘ combinations before the menu bar, so
+    ⌘W closes a tab instead of Tauri's default "Close Window", and ⌘F/⌘G/⌘D/⌘I/⌘T go to the
+    browser while a page has focus. Keys are read with `charactersByApplyingModifiers:` (no
+    modifiers), so ⌘⇧\ reads as `\` plus Shift; check on a non-US layout. Held keys do not repeat
+    a shortcut. **[decide]** No ⌘R (reload), ⌘L (address bar) or ⌘[ / ⌘] (back, forward) yet: the
+    shortcut list is shared with the iPad.
+80. **[verify] Title bar.** `titleBarStyle: Overlay` with `trafficLightPosition` (16, 20) is meant
+    to centre the buttons in the sidebar's 40 pt strip; the exact offset depends on the macOS
+    version's title-bar height and may need adjusting. The buttons are hidden whenever the chrome
+    reports no docked sidebar (hidden, flyout, narrow window, full screen keeps its own). Check that
+    the strip drags the window and a double-click zooms it (Tauri's drag script, permissions
+    `core:window:allow-start-dragging` and `allow-internal-toggle-maximize`). **[decide]** With the
+    sidebar hidden there is nowhere to drag the window.
+81. **[verify] Engine version.** The gate and the user agent use `CFBundleShortVersionString` of
+    `/Applications/Safari.app` (falling back to the OS version). Check that it reads e.g. `27.2` on
+    macOS 15 and 26 with Safari 27 installed, and that Google sign-in accepts the UA.
+    `os::MACOS_SAFARI_LATEST` (27.2, found 2026-11-03) must be updated with each Safari security
+    release, like `LATEST_KNOWN_PATCH` (item 2; Safari 27.2's existence suggests iPadOS 27.2 is
+    out too, which that table does not list yet).
+82. **[verify] Page scale** on macOS is `WKWebView.pageZoom`, assumed to reflow in a wider viewport
+    (as Safari's ⌘−) rather than scale the bitmap. Pinch zoom on the trackpad is turned on
+    (`allowsMagnification`, off by default on macOS), as the iPad has it.
+83. **[verify] Keychain.** Unsigned and ad-hoc-signed builds get `errSecMissingEntitlement` (-34018)
+    from the data-protection keychain and fall back to the login keychain, where any app the user
+    approves can read the key, and rebuilt binaries may trigger an access prompt. Signed builds
+    with an application identifier should use the data-protection keychain; check which one is
+    used (Keychain Access shows login-keychain items).
+84. **[gap] No memory pressure handling** on macOS (no memory-warning notification is observed;
+    a `DispatchSource` memory-pressure source would be the equivalent). The live-view budget is by
+    physical RAM as on the iPad.
+85. **[gap] No pull to refresh** on macOS (no `UIRefreshControl`); back/forward swipes on the
+    trackpad work (`allowsBackForwardNavigationGestures`).
+86. **[verify] Session on quit.** `RunEvent::Exit` writes a pending session synchronously (up to
+    2 s). Resigning active (switching apps) does what entering the background does on the iPad
+    (idle views are discarded by the TTL tick, the session is written).
+87. **[verify] Image menu and system UI.** Share uses `NSSharingServicePicker` anchored above the
+    share button; Download asks for a location with a save-panel sheet; Copy writes an `NSImage` to
+    the pasteboard; Define uses Look Up (`showDefinitionForAttributedString:atPoint:`) at the
+    selection's bottom-left. Check placement in split view and with page scale.
+88. **[verify] Favicons.** The hidden web view sits outside the root view's bounds (in the window)
+    so WebKit renders it; its background is white (transparency needs a private API), so icons
+    with transparency get a white backdrop. A white snapshot is assumed to encode below the
+    220-byte "blank" threshold.
+89. **[decide] Minimum macOS 15.0** (`bundle.macOS.minimumSystemVersion`); browsing additionally
+    needs Safari 26 or later. The app is not sandboxed (the WebContent processes are, by WebKit).
+    Data at rest relies on FileVault (no per-file data protection on macOS).
+90. **[verify] Default browser.** Declaring the `http`/`https` URL schemes should list Snorkle under
+    System Settings → Desktop & Dock → Default web browser; no document types are declared, so
+    `.html` files do not open in Snorkle (file URLs are refused by the core anyway).

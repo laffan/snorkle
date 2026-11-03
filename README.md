@@ -1,14 +1,16 @@
 # Snorkle
 
-An iPad-first web browser: Tauri v2 hosts the trusted browser chrome, untrusted pages run in system
-`WKWebView`s that are created and driven from Rust, and a pure-Rust core makes every decision
-(tabs, navigation policy, HTTPS-first, address-bar display, storage, content blocking).
-Security first, speed second.
+An iPad-first web browser that also runs on macOS: Tauri v2 hosts the trusted browser chrome,
+untrusted pages run in system `WKWebView`s that are created and driven from Rust, and a pure-Rust
+core makes every decision (tabs, navigation policy, HTTPS-first, address-bar display, storage,
+content blocking). Security first, speed second.
 
 **Status:** an initial shell with tabs, address bar, navigation, suspension/discard and private
 mode, plus a security test suite and fuzzers. It has **not yet been built for, or run on, an iPad**:
 this repository was developed on Linux without Xcode. The iOS code type-checks for
-`aarch64-apple-ios` but has never been linked or executed. Read `docs/OPEN_QUESTIONS.md` first.
+`aarch64-apple-ios` but has never been linked or executed. The macOS host (added 2026-11-03)
+type-checks for `aarch64-apple-darwin` and has not been built or run on a Mac either. Read
+`docs/OPEN_QUESTIONS.md` first (macOS: items 76–90).
 
 ## Docs
 
@@ -22,12 +24,13 @@ this repository was developed on Linux without Xcode. The iOS code type-checks f
 
 ```
 crates/snorkle-core     platform-independent core (#![forbid(unsafe_code)])
-crates/snorkle-content  iOS content WKWebView host (objc2), stub elsewhere
+crates/snorkle-content  content WKWebView hosts (objc2): src/ios (UIKit), src/macos (AppKit),
+                        src/webkit (WebKit code both share), stub elsewhere
 src-tauri               Tauri app: chrome window, commands, capabilities, plist/entitlements
 ui                      chrome UI (HTML/CSS/JS, no build step, no packages)
 fuzz                    cargo-fuzz targets (separate workspace, nightly)
 tests/device            on-device probes (IPC isolation, rAF/ProMotion)
-scripts                 check-ios.sh (iOS type-check without Xcode), check-deps.sh
+scripts                 check-ios.sh / check-macos.sh (type-checks without Xcode), check-deps.sh
 ```
 
 ## Test (any OS)
@@ -35,6 +38,7 @@ scripts                 check-ios.sh (iOS type-check without Xcode), check-deps.
 ```sh
 cargo test --workspace          # unit, URL-spoofing, browser invariants, IPC isolation, config, tripwires
 scripts/check-ios.sh            # clippy -D warnings for aarch64-apple-ios (no SDK; stub C compiler)
+scripts/check-macos.sh          # the same for aarch64-apple-darwin
 scripts/check-deps.sh           # cargo deny + cargo audit + graph checks
 scripts/update-filter-lists.sh  # refresh bundled EasyList/EasyPrivacy, record versions + hashes
 cd fuzz && cargo +nightly fuzz run url_display     # also: input, nav_policy, browser_events
@@ -43,14 +47,32 @@ cd fuzz && cargo +nightly fuzz run url_display     # also: input, nav_policy, br
 On Linux, the Tauri test build needs the WebKitGTK development packages
 (`libwebkit2gtk-4.1-dev libgtk-3-dev`).
 
-## Run (macOS)
+## Run on macOS
 
-`npm ci` installs the pinned Tauri CLI (dev tool only; the chrome UI has no JS packages).
+`npm ci` installs the pinned Tauri CLI (dev tool only; the chrome UI has no JS packages). Needs
+Xcode's command-line tools and Rust 1.90+; Safari 26 or later (Safari 27 runs on macOS 15, 26 and
+27). The app's minimum macOS is 15.0.
 
-- `npm run tauri dev`: **desktop preview**. Only the browser chrome runs; there is no content
-  host on macOS, so pages never render (a banner says so). The Web Inspector opens
-  automatically in debug builds, and the terminal prints `[snorkle] policy …` / `effect …` lines
-  for every navigation decision.
+- `npm run tauri dev`: **the browser on macOS**, with the same chrome, pages and features as on the
+  iPad. The window has no title bar: the close, minimise and zoom buttons sit in a strip at the top
+  of the docked sidebar (hidden while the sidebar is hidden or flies out), and that strip drags the
+  window (double-click zooms). Inspect the chrome and the pages from Safari → Develop → *this Mac*
+  (Safari → Settings → Advanced → "Show features for web developers"); the terminal prints
+  `[snorkle] policy …` / `effect …` lines for every navigation decision.
+- `npm run tauri build`: an app bundle in `target/release/bundle/macos/`. Set the bundle
+  identifier (`tauri.conf.json`, a placeholder) and, to sign, `APPLE_SIGNING_IDENTITY`.
+  Unsigned and ad-hoc-signed builds keep AI keys in the login keychain instead of the
+  data-protection keychain (`webkit/keychain.rs`), and macOS may ask to allow access after each
+  rebuild.
+- Default browser: the bundle declares `http`/`https` (`src-tauri/Info.plist`); choose Snorkle
+  under System Settings → Desktop & Dock → Default web browser. Links open in new tabs.
+- What differs from the iPad: no pull to refresh; page scale reflows the page like Safari's zoom
+  (`pageZoom`); no memory warnings (only the live-view budget and the idle timeout); keyboard
+  shortcuts come from a key-event monitor instead of UIKit key commands. See `docs/ARCHITECTURE.md`
+  §1a.
+
+## Run on iPadOS
+
 - **In-app console** (Menu → Console): the same browser log plus page console output and errors,
   on the device itself. Recording is on by default in debug builds; see
   `docs/ARCHITECTURE.md` §5d.
@@ -91,4 +113,5 @@ security release.
 
 ## Non-goals (for now)
 
-Extensions, an embedded AI agent, sync, alternative engines, platforms other than iPadOS.
+Extensions, an embedded AI agent, sync, alternative engines, platforms other than iPadOS and
+macOS. On Linux only the chrome runs (a desktop preview for UI work; pages never render).

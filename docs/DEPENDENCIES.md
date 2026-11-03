@@ -2,8 +2,9 @@
 
 Policy:
 - Every external crate is pinned with `=` in `Cargo.toml` and `Cargo.lock` is committed.
-- The objc2 crates (`objc2`, `block2`, `objc2-foundation`, `objc2-ui-kit`, `objc2-web-kit`,
-  `objc2-core-foundation`) must stay at exactly the versions wry resolves. Two copies would
+- The objc2 crates (`objc2`, `block2`, `objc2-foundation`, `objc2-ui-kit`, `objc2-app-kit`,
+  `objc2-web-kit`, `objc2-core-foundation`) must stay at exactly the versions wry resolves, on iOS
+  and macOS. Two copies would
   register duplicate Objective-C classes. `scripts/check-deps.sh` fails if they are duplicated.
 - No Tauri plugins (each adds an IPC surface). No JavaScript packages in the app: `ui/` is plain
   JS with no build step, and the check script fails if `ui/package.json` appears. The root
@@ -29,6 +30,7 @@ Policy:
 | objc2-foundation / -ui-kit / -web-kit / -core-foundation | =0.3.2 | content (iOS) | Framework bindings (same versions as wry) |
 | objc2-security | =0.3.2 (features `SecBase`, `SecItem`) | content (iOS) | Keychain items for AI API keys (2026-10-30). Already in wry's graph at this version; no new crate. |
 | objc2-quartz-core / objc2-core-graphics | =0.3.2 (features `CALayer`, `CAShapeLayer` / `CGPath`); plus `objc2-ui-kit` feature `UIBezierPath` | content (iOS) | Layer mask that cuts the floating URL pill (and its popup and toasts) out of content views (2026-11-01). Already in wry's graph at this version; no new crate. |
+| objc2-app-kit | =0.3.2 | content (macOS) | AppKit views, events, appearance, share menu, save panel, bitmap encoding for the macOS host (2026-11-03). Already in wry's macOS graph at this version; no new crate. The other objc2 crates are the same versions on macOS (`objc2-web-kit` gains its `objc2-app-kit` and `WKWebView` features there). |
 | libfuzzer-sys | =0.4.13 | fuzz (separate workspace) | cargo-fuzz harness |
 
 Graph size (normal edges): `snorkle-core` 60 crates; the iOS app 244 crates, almost all from

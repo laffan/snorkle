@@ -126,7 +126,16 @@ static PENDING_LINKS: std::sync::Mutex<Vec<snorkle_core::Url>> = std::sync::Mute
 
 #[allow(unused_variables)]
 fn on_run_event<R: Runtime>(app: &tauri::AppHandle<R>, event: tauri::RunEvent) {
-    // Snorkle as the default browser: iOS sends links tapped in other apps.
+    // Quitting (⌘Q on macOS): the session waits up to 400 ms to be written;
+    // write it now.
+    if let tauri::RunEvent::Exit = event {
+        if let Some(shared) = app.try_state::<Arc<Shared>>() {
+            shared.flush_blocking(Duration::from_secs(2));
+        }
+        return;
+    }
+    // Snorkle as the default browser: iOS and macOS send links opened in
+    // other apps.
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     if let tauri::RunEvent::Opened { urls } = event {
         match app.try_state::<Arc<Shared>>() {
@@ -148,9 +157,15 @@ fn open_links(shared: &Arc<Shared>, urls: Vec<snorkle_core::Url>) {
 }
 
 fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
-    // Only iOS has a content host; desktop builds run the chrome alone.
-    let os_support =
-        if cfg!(target_os = "ios") { os::check(snorkle_content::os_version()) } else { OsSupport::PreviewOnly };
+    // iPadOS and macOS have a content host; other desktop builds run the
+    // chrome alone. On macOS the web engine's version is Safari's.
+    let os_support = if cfg!(target_os = "ios") {
+        os::check(snorkle_content::os_version())
+    } else if cfg!(target_os = "macos") {
+        os::check_macos_safari(snorkle_content::webkit_version())
+    } else {
+        OsSupport::PreviewOnly
+    };
     let browser = make_browser(os_support, snorkle_content::physical_memory());
 
     let store = app.path().app_data_dir().ok().and_then(|d| Store::open(d.join("profile-default")).ok());
@@ -193,16 +208,18 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     let window = app.get_webview_window(CHROME_LABEL).ok_or("main window missing")?;
     attach_content_host(&window, shared.clone())?;
     // The chrome's own WKWebView, so the host can give it keyboard focus.
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
     window.with_webview(|w| {
         let view = w.inner();
         // SAFETY: Tauri runs this on the main thread; `view` is the chrome's
         // WKWebView, alive as long as the window (the host retains it).
         state::with_host(|h| unsafe { h.set_chrome_view(view) });
     })?;
-    // Debug desktop builds: open the chrome's Web Inspector (console etc.).
-    // On iOS use Safari > Develop > <device or Simulator> instead.
-    #[cfg(all(debug_assertions, desktop))]
+    // Debug desktop preview builds: open the chrome's Web Inspector. On iOS
+    // and macOS use Safari > Develop instead (both the chrome and the pages
+    // are inspectable in debug builds); on macOS a docked inspector would
+    // sit under the page views.
+    #[cfg(all(debug_assertions, desktop, not(target_os = "macos")))]
     window.open_devtools();
 
     pins::refresh_icons(&shared);
@@ -264,12 +281,28 @@ fn attach_content_host<R: Runtime>(
     Ok(())
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(target_os = "macos")]
+fn attach_content_host<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    shared: Arc<Shared>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ns_window = window.ns_window()?;
+    if ns_window.is_null() {
+        return Err("main window has no NSWindow".into());
+    }
+    // SAFETY: the NSWindow of the main window, valid for the window's
+    // lifetime, whose content view holds the chrome's web view; `setup`
+    // runs on the main thread.
+    unsafe { state::install_host(ns_window, shared) };
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 fn attach_content_host<R: Runtime>(
     _window: &tauri::WebviewWindow<R>,
     shared: Arc<Shared>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Development stand-in: no web content is rendered off iOS.
+    // Development stand-in: no web content is rendered off iOS and macOS.
     unsafe { state::install_host(std::ptr::null_mut(), shared) };
     Ok(())
 }

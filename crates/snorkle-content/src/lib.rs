@@ -28,15 +28,32 @@ use url::Url;
 
 pub use snorkle_core::browser::Effect;
 
+// iPadOS (UIKit) and macOS (AppKit) hosts; the WebKit code they share
+// (delegates, injection, content blocking, HTTPS requests, Keychain) is in
+// `webkit`, which reaches its platform through `crate::platform`.
 #[cfg(target_os = "ios")]
 mod ios;
 #[cfg(target_os = "ios")]
-pub use ios::{dispatch_main, http, keychain, os_version, physical_memory, ContentHost};
+use ios as platform;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos as platform;
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+mod webkit;
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+pub use platform::{dispatch_main, os_version, physical_memory, webkit_version, ContentHost};
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+pub use webkit::{http, keychain};
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 mod stub;
-#[cfg(not(target_os = "ios"))]
-pub use stub::{dispatch_main, http, keychain, os_version, physical_memory, ContentHost};
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
+pub use stub::{dispatch_main, http, keychain, os_version, physical_memory, webkit_version, ContentHost};
+
+/// Width of the strip along the window's left edge where the pointer is
+/// reported (the edge tab is 14 pt wide and shows within 100 pt of it).
+pub const EDGE_ZONE: f64 = 160.0;
 
 /// Completion of an HTTPS request: status and body, or a short error.
 /// Called once, on any thread.

@@ -46,3 +46,34 @@ objc2-web-kit = { version = "=0.3.2", features = [
   "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
   "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences",
 ] }
+
+# macOS: the same objc2 crates at the same versions (wry resolves them for
+# macOS too), plus AppKit instead of UIKit. objc2-web-kit binds the macOS
+# `WKWebView` itself (`WKWebView` feature), so no hand-written binding.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "=0.6.5", features = ["exception"] }
+block2 = "=0.6.2"
+objc2-core-foundation = { version = "=0.3.2", features = ["std", "CFCGTypes", "CFDictionary", "CFData", "CFString", "CFNumber"] }
+objc2-security = { version = "=0.3.2", default-features = false, features = ["std", "SecBase", "SecItem"] }
+objc2-foundation = { version = "=0.3.2", features = [
+  "std", "block2", "objc2-core-foundation",
+  "NSArray", "NSAttributedString", "NSBundle", "NSDate", "NSDictionary", "NSError", "NSGeometry", "NSKeyValueObserving",
+  "NSNotification", "NSObject", "NSOperation", "NSProcessInfo", "NSSet", "NSString", "NSURL", "NSURLRequest",
+  "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLSession", "NSURLResponse", "NSUUID", "NSValue", "NSData",
+] }
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "CALayer", "CAShapeLayer", "CATransaction", "CAMediaTimingFunction", "CAAnimation", "CABase", "CAMediaTiming"] }
+objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["std", "CGPath", "CGColor"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
+  "std", "block2", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core",
+  "NSAnimation", "NSAnimationContext", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor",
+  "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSPanel", "NSPasteboard",
+  "NSResponder", "NSSavePanel", "NSSharingService", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace",
+] }
+objc2-web-kit = { version = "=0.3.2", features = [
+  "std", "block2", "objc2-core-foundation", "objc2-app-kit",
+  "WKContentRuleList", "WKContentRuleListStore", "WKFrameInfo", "WKNavigation",
+  "WKFindConfiguration", "WKFindResult", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences",
+  "WKSecurityOrigin", "WKUIDelegate", "WKUserContentController", "WKWebViewConfiguration",
+  "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
+  "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences", "WKWebView",
+] }

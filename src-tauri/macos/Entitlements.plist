@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS entitlements (`bundle.macOS.entitlements`). The app is not
+  sandboxed (as Safari's own WebKit processes, the content views' WebKit
+  processes are sandboxed by WebKit itself). With the hardened runtime
+  (signed release builds), camera and microphone access for web pages
+  needs these two; nothing else is requested.
+  SECURITY-REVIEW: every key here needs human sign-off.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>

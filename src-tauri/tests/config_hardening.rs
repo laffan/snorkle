@@ -49,6 +49,11 @@ fn chrome_permissions_are_exactly_the_reviewed_set() {
     let mut want: BTreeSet<String> = COMMANDS.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect();
     want.insert("core:event:allow-listen".into());
     want.insert("core:event:allow-unlisten".into());
+    // macOS hidden title bar: dragging the window by the sidebar's top
+    // strip (`data-tauri-drag-region`), double-click to zoom. No other
+    // window commands.
+    want.insert("core:window:allow-start-dragging".into());
+    want.insert("core:window:allow-internal-toggle-maximize".into());
     assert_eq!(got, want);
     assert!(got.iter().all(|p| !p.ends_with(":default") && !p.contains('*')));
 }
@@ -103,6 +108,30 @@ fn minimum_ios_matches_core_policy() {
     let min = conf()["bundle"]["iOS"]["minimumSystemVersion"].as_str().unwrap().to_string();
     let m = snorkle_core::os::MINIMUM;
     assert_eq!(min, format!("{}.{}", m.major, m.minor));
+}
+
+#[test]
+fn macos_window_and_bundle() {
+    let c = conf();
+    let w = &c["app"]["windows"][0];
+    assert_eq!(w["titleBarStyle"], "Overlay", "macOS: no title bar; pages run the full height");
+    assert_eq!(w["hiddenTitle"], Value::Bool(true));
+    assert!(c["bundle"]["macOS"]["minimumSystemVersion"].as_str().is_some());
+    let e = fs::read_to_string(root().join(c["bundle"]["macOS"]["entitlements"].as_str().unwrap())).unwrap();
+    let keys: Vec<&str> = e.lines().filter_map(|l| l.trim().strip_prefix("<key>")?.strip_suffix("</key>")).collect();
+    assert_eq!(keys, ["com.apple.security.device.camera", "com.apple.security.device.audio-input"]);
+    assert!(!e.contains("disable-library-validation") && !e.contains("allow-jit") && !e.contains("allow-unsigned"));
+}
+
+#[test]
+fn macos_plist_keeps_ats_for_app() {
+    let plist = fs::read_to_string(root().join("Info.plist")).unwrap();
+    assert!(plist.contains("<key>NSAllowsArbitraryLoadsInWebContent</key>"));
+    assert!(!plist.contains("<key>NSAllowsArbitraryLoads</key>"));
+    assert!(!plist.contains("NSExceptionDomains"));
+    for scheme in ["<string>http</string>", "<string>https</string>"] {
+        assert!(plist.contains(scheme), "default browsers must declare {scheme}");
+    }
 }
 
 #[test]

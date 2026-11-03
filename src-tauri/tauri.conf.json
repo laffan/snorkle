@@ -12,7 +12,17 @@
       {
         "label": "main",
         "title": "Snorkle",
-        "url": "index.html"
+        "url": "index.html",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 520,
+        "minHeight": 420,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 20
+        }
       }
     ],
     "security": {
@@ -46,6 +56,10 @@
     ],
     "iOS": {
       "minimumSystemVersion": "26.0"
+    },
+    "macOS": {
+      "minimumSystemVersion": "15.0",
+      "entitlements": "macos/Entitlements.plist"
     }
   }
 }

@@ -4,7 +4,7 @@
 //! be exempted from it ("Disable for this tab").
 //!
 //! This module generates the constant sources the content host injects
-//! (via `ios/injection.rs`) and parses what the headers extractor reports.
+//! (via `webkit/injection.rs`) and parses what the headers extractor reports.
 //!
 //! Security assumptions / design:
 //! - All sources are constant code (no input from pages or the user except

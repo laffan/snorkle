@@ -15,6 +15,11 @@
   const T = window.__TAURI__;
   const invoke = (cmd, args) => T.core.invoke(cmd, args).catch((e) => toast(String(e)));
   const $ = (id) => document.getElementById(id);
+  // macOS (no touch points; an iPad, also in desktop mode, has them): no
+  // title bar, so the sidebar keeps a strip for the window buttons, and the
+  // web engine's version is Safari's.
+  const macOS = navigator.maxTouchPoints === 0 && /Macintosh/.test(navigator.userAgent);
+  if (macOS) document.documentElement.classList.add('macos');
 
   let state = null;
   let editing = false;
@@ -110,10 +115,21 @@
     const block = $('unsupported');
     banner.hidden = os.status !== 'update_recommended' && os.status !== 'preview_only';
     if (os.status === 'preview_only') {
-      banner.textContent = 'Desktop preview: only the browser chrome runs here. Web pages render on iPadOS only (device or Simulator: npm run tauri ios dev).';
+      banner.textContent = 'Desktop preview: only the browser chrome runs here. Web pages render on iPadOS and macOS only (npm run tauri dev on a Mac; npm run tauri ios dev for the iPad).';
     }
     block.hidden = os.status !== 'unsupported';
     const v = (x) => `${x.major}.${x.minor}.${x.patch}`;
+    if (macOS) {
+      // macOS: WebKit is updated with Safari (Software Update), on older
+      // macOS versions too.
+      if (os.status === 'update_recommended') {
+        banner.textContent = `Safari ${v(os.current)} is missing security fixes for the web engine. Update Safari to ${v(os.recommended)} or later in System Settings → General → Software Update.`;
+      } else if (os.status === 'unsupported') {
+        $('unsupported-title').textContent = 'Update Safari to browse';
+        $('unsupported-body').textContent = `This version of Safari's web engine (${v(os.current)}) no longer receives the security fixes Snorkle depends on. Safari ${v(os.minimum)} or later is required.`;
+      }
+      return;
+    }
     if (os.status === 'update_recommended') {
       banner.textContent = `iPadOS ${v(os.current)} is missing security fixes for the web engine. Update to ${v(os.recommended)} or later.`;
     } else if (os.status === 'unsupported') {

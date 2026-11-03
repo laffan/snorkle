@@ -1,6 +1,7 @@
 # Snorkle: architecture and threat model
 
-Status: initial shell, 2026-10-29. Targets iPadOS 27 (current) and 26 (prior).
+Status: initial shell, 2026-10-29. Targets iPadOS 27 (current) and 26 (prior); since 2026-11-03
+also macOS 15 and later with Safari 26 or later (§1a).
 Priorities: security first, speed second.
 
 ## 1. Components
@@ -25,7 +26,7 @@ Priorities: security first, speed second.
 | Crate / dir | Responsibility | Trust |
 |---|---|---|
 | `crates/snorkle-core` | Tab/session model, suspension and discard, navigation policy, HTTPS-first, address-bar display (eTLD+1, IDN policy), input parsing, history/bookmark/session storage, content-blocking list parsing and WebKit rule generation, OS-version policy. Pure Rust, `#![forbid(unsafe_code)]`, no platform dependencies. | Trusted. All decisions live here. |
-| `crates/snorkle-content` | Creates, lays out and destroys the per-tab `WKWebView`s; maps profiles to `WKWebsiteDataStore`s; implements `WKNavigationDelegate`/`WKUIDelegate`/KVO and forwards WebKit metadata to the core; installs the compiled content rule list. iOS only (a stub elsewhere). | Trusted code that handles untrusted data. |
+| `crates/snorkle-content` | Creates, lays out and destroys the per-tab `WKWebView`s; maps profiles to `WKWebsiteDataStore`s; implements `WKNavigationDelegate`/`WKUIDelegate`/KVO and forwards WebKit metadata to the core; installs the compiled content rule list. `src/webkit` holds the WebKit code both Apple hosts share (delegates, configuration, injection, rule lists, HTTPS requests, Keychain); `src/ios` (UIKit) and `src/macos` (AppKit) hold the views, input and system UI. A stub elsewhere. | Trusted code that handles untrusted data. |
 | `src-tauri` | Tauri app: one window, one webview (`main`) with the chrome; Tauri commands; routes core effects to the content host (main thread), the storage thread and the chrome. | Trusted. |
 | `ui/` | Chrome UI: tab strip, toolbar, address bar, interstitials, start page, bookmarks/history panel. Plain HTML/CSS/JS, no build step, no npm packages. | Trusted, local, bundled. |
 | Web content | Rendering, JS, networking, TLS validation, same-origin policy, mixed-content blocking, process isolation. All done by system WebKit. | Untrusted. |
@@ -43,6 +44,47 @@ popups, permission prompts, process termination). wry's iOS surface does not off
 `crates/snorkle-content/src/ios/bindings.rs` declares the UIKit `WKWebView` by hand, the same way
 wry does. All objc2 crate versions are pinned to the versions wry resolves, so only one copy is
 linked. Two copies would register duplicate Objective-C classes.
+
+## 1a. macOS (2026-11-03)
+
+The same design on AppKit. The Tauri window's content view holds wry's chrome `WKWebView`; the
+host adds a `ContentRoot` view above it (`macos/views.rs`) that draws nothing and is never hit
+itself, so clicks outside page containers reach the chrome. Each page sits in a `Container` that
+clips to its pane, is masked with the chrome's holes (`CAShapeLayer`, even-odd, as on iPadOS) and
+returns no hit inside a hole, so the URL pill, its popups, toasts and the sidebar tab take the
+clicks there. Views are unflipped (bottom-left origin); rectangles from the chrome (top-left) are
+converted at the boundary (`views::Tl`). Containers are reordered with `sortSubviewsUsingFunction`
+rather than removed and re-added, which would take a web view out of its window.
+
+Platform mapping:
+
+| iPadOS | macOS |
+|---|---|
+| Hand-written UIKit `WKWebView` binding | `objc2-web-kit`'s own (AppKit) binding |
+| App delegate key commands (`ios/menu.rs`), container key commands as fallback | A local key-down monitor (`macos/keys.rs`): sees every key event of the app first, consumes only bound ⌘ combinations (⌘C, ⌘V, ⌘Q and the menu bar keep working; Tauri's default menu supplies Edit) |
+| Tap recognizer on containers (split focus), hover recognizer (edge tab) | A local mouse monitor: a click whose hit view is inside a container focuses that pane; pointer moves within 160 pt of the left edge are reported; a tracking area reports leaving the window |
+| `UIRefreshControl` | none (no pull to refresh) |
+| Page scale by view transform | `WKWebView.pageZoom`, which on macOS reflows the page in a wider viewport, as Safari's zoom does |
+| Share sheet, Files export, `UIReferenceLibraryViewController` | `NSSharingServicePicker`, `NSSavePanel` (window sheet), `showDefinitionForAttributedString:atPoint:` (Look Up) |
+| Memory warning, did-enter-background | No memory warning; on resigning active the core ticks and the session is written; on quit (`RunEvent::Exit`) the session is written synchronously (`Shared::flush_blocking`) |
+| OS version gate (`os::check`) | Safari's version (`/Applications/Safari.app`), since WebKit updates with Safari on older macOS too (`os::check_macos_safari`, minimum 26.0, newest known 27.2); it is also the version in the user agent |
+| `overrideUserInterfaceStyle` | `NSAppearance` (window; content views in dark pages mode) |
+| Keychain, `WhenUnlockedThisDeviceOnly` | The data-protection keychain with the same class when the build is signed with an application identifier; otherwise the login keychain (`webkit/keychain.rs`) |
+
+**Window.** No title bar (`titleBarStyle: Overlay`, hidden title): pages run the full height. The
+close, minimise and zoom buttons sit in a 40 pt strip at the top of the docked sidebar
+(`#titlebar`, `trafficLightPosition` 16, 20) and are hidden while the sidebar is not docked
+(`left` inset 0), so they never float over a page. The strip is a `data-tauri-drag-region`: it
+drags the window and a double-click zooms it, through Tauri's own drag script and two window
+permissions granted to the chrome (`core:window:allow-start-dragging`,
+`core:window:allow-internal-toggle-maximize`). With the sidebar hidden there is no drag area;
+⌘\ shows it. The chrome detects macOS by `navigator.maxTouchPoints == 0` with a Macintosh user
+agent (an iPad reports touch points, also in desktop mode).
+
+**Data at rest.** macOS has no `NSFileProtectionComplete`; the profile and website data are in the
+user's Library (`~/Library/Application Support/<identifier>` and WebKit's stores), protected by
+the user account and FileVault. The app is not sandboxed; WebKit sandboxes its own content
+processes as for Safari.
 
 ## 2. Trust boundaries
 
@@ -136,7 +178,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 - **Caching:** WebKit compiles the lists and stores them as `snorkle.cb.<key>.<i>.of.<n>`, where
   the key hashes the converter version, the lists and the allowlist. Later launches look up the
   compiled lists instead of converting again; lists for other keys are deleted
-  (`snorkle-content/src/ios/rules.rs`).
+  (`snorkle-content/src/webkit/rules.rs`).
 - **Enforcement:** WebKit blocks network loads and hides elements with `css-display-none`,
   inside its own processes, with no per-request work in the app. Blocking injects no scripts, so
   scriptlet filters are unsupported.
@@ -149,7 +191,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 
 ## 5c. User scripts, view modes, split view
 
-- **User scripts and styles** (`snorkle_core::userscripts`, `snorkle-content/src/ios/injection.rs`)
+- **User scripts and styles** (`snorkle_core::userscripts`, `snorkle-content/src/webkit/injection.rs`)
   are the one owner-approved exception to "no scripts in content". They are installed as
   main-frame `WKUserScript`s in WebKit's isolated client world and guarded by
   `location.hostname`. There is no native bridge. See SECURITY_REVIEW I1/I2.
@@ -391,7 +433,7 @@ overlaid sidebar instead.
 
 The only credentials the app stores are the user's own AI API keys (Settings → AI): iOS Keychain
 generic passwords, service `app.snorkle.ai-keys`, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
-(`snorkle-content/src/ios/keychain.rs`). They are read only to send a request to the provider and
+(`snorkle-content/src/webkit/keychain.rs`). They are read only to send a request to the provider and
 are never returned to the chrome. Site-script requests carry the site's domain, its site script
 and the user's prompt; Detect Headers sends short snippets of headline-like text; page chat sends
 the page's URL, title, visible text and selection with the conversation (§5g). The model's

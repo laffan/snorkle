@@ -22,6 +22,10 @@
        Docked and resizable in wide windows; slides over a hidden content
        area in narrow ones (Split View, Slide Over). -->
   <aside id="sidebar" aria-label="Bookmarks and tabs">
+    <!-- macOS only (no title bar): the window's close, minimise and zoom
+         buttons sit in this strip, which also drags the window
+         (double-click zooms it). -->
+    <div id="titlebar" data-tauri-drag-region aria-hidden="true"></div>
     <div id="side-scroll">
       <div id="pins" class="pingrid" aria-label="Pinned sites"></div>
       <div class="side-gap" aria-hidden="true"></div>
@@ -186,7 +190,7 @@
     </section>
 
     <section id="unsupported" class="notice" hidden>
-      <h1>Update iPadOS to browse</h1>
+      <h1 id="unsupported-title">Update iPadOS to browse</h1>
       <p id="unsupported-body"></p>
     </section>
   </main>

@@ -46,6 +46,9 @@ pub enum StorageJob {
     /// Write a pending session now (the app is going to the background,
     /// where iOS may suspend or end it).
     Flush,
+    /// Write a pending session now and report when done (the app is
+    /// quitting; macOS).
+    FlushNow(mpsc::Sender<()>),
     /// An offline copy (web archive) of a pinned or bookmarked page.
     OfflineCopy {
         url: String,
@@ -250,6 +253,14 @@ impl Shared {
             let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(job);
         }
     }
+
+    /// Writes a pending session before the app quits, waiting at most
+    /// `limit` for the storage thread.
+    pub fn flush_blocking(&self, limit: Duration) {
+        let (tx, rx) = mpsc::channel();
+        self.storage(StorageJob::FlushNow(tx));
+        let _ = rx.recv_timeout(limit);
+    }
 }
 
 impl Shared {
@@ -338,6 +349,12 @@ fn spawn_storage_worker(store: Arc<Store>) -> Sender<StorageJob> {
                             let _ = store.save_session(&s);
                         }
                     }
+                    Some(StorageJob::FlushNow(done)) => {
+                        if let Some((s, _)) = pending.take() {
+                            let _ = store.save_session(&s);
+                        }
+                        let _ = done.send(());
+                    }
                 }
                 if pending.as_ref().is_some_and(|(_, due)| *due <= Instant::now()) {
                     if let Some((s, _)) = pending.take() {
@@ -354,7 +371,7 @@ fn spawn_storage_worker(store: Arc<Store>) -> Sender<StorageJob> {
 }
 
 thread_local! {
-    /// The content host lives on the main thread only (UIKit objects).
+    /// The content host lives on the main thread only (UIKit/AppKit objects).
     pub static HOST: RefCell<Option<ContentHost>> = const { RefCell::new(None) };
 }
 
@@ -602,8 +619,9 @@ impl ContentEvents for Events {
 /// window's root view.
 ///
 /// # Safety
-/// `root_view` must be the `UIView*` of the main window (iOS) and this must
-/// run on the main thread.
+/// `root_view` must be the `UIView*` of the main window (iOS), its
+/// `NSWindow*` (macOS) or null (other platforms), and this must run on the
+/// main thread.
 pub unsafe fn install_host(root_view: *mut std::ffi::c_void, shared: Arc<Shared>) {
     let events: Rc<dyn ContentEvents> = Rc::new(Events { shared });
     let host = ContentHost::new(root_view, events);

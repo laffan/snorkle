@@ -140,6 +140,11 @@ pub fn os_version() -> OsVersion {
     OsVersion::new(27, 0, 0)
 }
 
+/// See `os_version`.
+pub fn webkit_version() -> OsVersion {
+    os_version()
+}
+
 /// No network stack off iOS (desktop preview): AI requests fail politely.
 pub mod http {
     pub fn send(_req: snorkle_core::ai::HttpRequest, done: crate::HttpDone) {

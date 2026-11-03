@@ -146,6 +146,11 @@ body.sb-flyout #edge-tab::after {
   body.menu-open :is(#side-scroll, #side-bottom), #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
 }
 body.resizing #sidebar { transition: none; }
+/* macOS: the strip holding the window buttons (they are hidden while the
+   sidebar is not docked, so the flyout needs no strip). */
+#titlebar { display: none; flex: none; height: 40px; }
+html.macos #titlebar { display: block; }
+html.macos body.sb-flyout #titlebar { display: none; }
 #side-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px 12px; }
 body.dragging #side-scroll { overflow-y: hidden; }
 /* Space between the pins, bookmarks and tabs; a rule between the

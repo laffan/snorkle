@@ -41,6 +41,16 @@ pub const MINIMUM: OsVersion = OsVersion::new(26, 0, 0);
 /// Newest known security patch level per supported major version.
 pub const LATEST_KNOWN_PATCH: &[OsVersion] = &[OsVersion::new(26, 6, 1), OsVersion::new(27, 0, 0)];
 
+/// macOS: WebKit is updated with Safari, on the current macOS and the
+/// earlier ones Apple still supports (Safari 27 runs on macOS 15, 26 and
+/// 27), so the policy is about the installed Safari's version rather than
+/// the OS version. Below `MACOS_SAFARI_MINIMUM` no web view is created;
+/// below `MACOS_SAFARI_LATEST` (on any macOS) a banner asks for an update.
+/// As of 2026-11-03: Safari 27.2 is the newest release with security fixes
+/// found (Apple's "About the security content of Safari 27.2").
+pub const MACOS_SAFARI_MINIMUM: OsVersion = OsVersion::new(26, 0, 0);
+pub const MACOS_SAFARI_LATEST: OsVersion = OsVersion::new(27, 2, 0);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum OsSupport {
@@ -69,6 +79,18 @@ pub fn check(current: OsVersion) -> OsSupport {
     }
 }
 
+/// The macOS policy, from the installed Safari's version (see
+/// [`MACOS_SAFARI_LATEST`]). Newer versions than known are current.
+pub fn check_macos_safari(safari: OsVersion) -> OsSupport {
+    if safari < MACOS_SAFARI_MINIMUM {
+        OsSupport::Unsupported { current: safari, minimum: MACOS_SAFARI_MINIMUM }
+    } else if safari < MACOS_SAFARI_LATEST {
+        OsSupport::UpdateRecommended { current: safari, recommended: MACOS_SAFARI_LATEST }
+    } else {
+        OsSupport::Supported
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +103,15 @@ mod tests {
         assert_eq!(check(OsVersion::new(27, 0, 0)), OsSupport::Supported);
         assert_eq!(check(OsVersion::new(28, 0, 0)), OsSupport::Supported);
         assert!(!check(OsVersion::new(25, 9, 9)).allows_browsing());
+    }
+
+    #[test]
+    fn macos_policy_follows_safari() {
+        assert!(matches!(check_macos_safari(OsVersion::new(18, 6, 0)), OsSupport::Unsupported { .. }));
+        assert!(!check_macos_safari(OsVersion::new(18, 6, 0)).allows_browsing());
+        assert!(matches!(check_macos_safari(OsVersion::new(26, 4, 0)), OsSupport::UpdateRecommended { .. }));
+        assert!(matches!(check_macos_safari(OsVersion::new(27, 1, 0)), OsSupport::UpdateRecommended { .. }));
+        assert_eq!(check_macos_safari(OsVersion::new(27, 2, 0)), OsSupport::Supported);
+        assert_eq!(check_macos_safari(OsVersion::new(28, 0, 0)), OsSupport::Supported);
     }
 }

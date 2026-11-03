@@ -24,14 +24,10 @@
 //! - All methods run on the main thread (`MainThreadMarker` is required).
 
 mod bindings;
-mod delegates;
 mod favicon;
-pub mod http;
-mod injection;
-pub mod keychain;
+mod gestures;
 mod keys;
 mod menu;
-mod rules;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -45,8 +41,8 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSArray, NSDate, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
-    NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSSet, NSString,
+    NSArray, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
+    NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSString,
     NSURLRequest, NSURL, NSUUID, NSData, NSError,
 };
 use objc2_core_graphics::CGPath;
@@ -61,14 +57,7 @@ use objc2_ui_kit::{
     UIUserInterfaceStyle, UIViewController, UIDocumentPickerViewController, UIImage, UIPasteboard,
     UIHoverGestureRecognizer,
 };
-use objc2_web_kit::{
-    WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController,
-    WKWebViewConfiguration, WKWebsiteDataStore, WKWebsiteDataTypeCookies, WKWebsiteDataTypeDiskCache,
-    WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeFileSystem, WKWebsiteDataTypeIndexedDBDatabases,
-    WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeMediaKeys, WKWebsiteDataTypeMemoryCache,
-    WKWebsiteDataTypeOfflineWebApplicationCache, WKWebsiteDataTypeServiceWorkerRegistrations,
-    WKWebsiteDataTypeSessionStorage, WKWebsiteDataTypeWebSQLDatabases,
-};
+use objc2_web_kit::{WKUserContentController, WKWebViewConfiguration, WKWebsiteDataStore};
 use snorkle_core::browser::{AfterCreate, Effect, Pane};
 use snorkle_core::os::OsVersion;
 use snorkle_core::policy::INTERNAL_SCHEMES;
@@ -76,10 +65,10 @@ use snorkle_core::tabs::{Profile, TabId};
 use snorkle_core::userscripts::Injection;
 use url::Url;
 
-use self::bindings::WKWebView;
-use self::delegates::{
-    HoverEdge, HoverIvars, NavDelegate, Observer, RefreshTarget, TabIvars, TapFocus, UiDelegate, KVO_KEYS,
-};
+pub(crate) use self::bindings::WKWebView;
+use self::gestures::{HoverEdge, HoverIvars, RefreshTarget, TapFocus};
+use crate::webkit::delegates::{NavDelegate, Observer, TabIvars, UiDelegate, KVO_KEYS};
+use crate::webkit::{injection, rules, stores};
 use crate::{clamp_inset, ContentEvents, DataKind, Hole, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
 
 // Adding any page-to-native channel requires writing installation code
@@ -645,34 +634,7 @@ impl ContentHost {
 
     /// Deletes one kind of website data from every profile's store.
     pub fn clear_data(&mut self, kind: DataKind) {
-        unsafe {
-            let cache = [
-                WKWebsiteDataTypeDiskCache,
-                WKWebsiteDataTypeMemoryCache,
-                WKWebsiteDataTypeFetchCache,
-                WKWebsiteDataTypeOfflineWebApplicationCache,
-            ];
-            let site = [
-                WKWebsiteDataTypeLocalStorage,
-                WKWebsiteDataTypeSessionStorage,
-                WKWebsiteDataTypeIndexedDBDatabases,
-                WKWebsiteDataTypeWebSQLDatabases,
-                WKWebsiteDataTypeServiceWorkerRegistrations,
-                WKWebsiteDataTypeFileSystem,
-                WKWebsiteDataTypeMediaKeys,
-            ];
-            let list: Vec<&NSString> = match kind {
-                DataKind::Cache => cache.to_vec(),
-                DataKind::Cookies => vec![WKWebsiteDataTypeCookies],
-                DataKind::SiteData => site.to_vec(),
-                DataKind::Logins => std::iter::once(WKWebsiteDataTypeCookies).chain(site).collect(),
-            };
-            let types = NSSet::from_slice(&list);
-            for store in std::iter::once(&self.default_store).chain(self.private_store.as_ref()) {
-                let done = RcBlock::new(|| {});
-                store.removeDataOfTypes_modifiedSince_completionHandler(&types, &NSDate::distantPast(), &done);
-            }
-        }
+        unsafe { stores::clear_data(std::iter::once(&*self.default_store).chain(self.private_store.as_deref()), kind) }
     }
 
     pub fn apply(&mut self, effect: &Effect) {
@@ -793,44 +755,13 @@ impl ContentHost {
         // tabs (DestroyView keep_state=false). Wipe the store explicitly
         // before releasing it, in case WebKit keeps it alive internally.
         if let Some(store) = self.private_store.take() {
-            let types = WKWebsiteDataStore::allWebsiteDataTypes(self.mtm);
-            let done = RcBlock::new(|| {});
-            store.removeDataOfTypes_modifiedSince_completionHandler(&types, &NSDate::distantPast(), &done);
+            stores::wipe(self.mtm, &store);
         }
     }
 
     unsafe fn create_view(&mut self, tab: TabId, profile: Profile) -> View {
         let mtm = self.mtm;
-        let spec = &CONTENT_VIEW_SPEC;
-        let config = WKWebViewConfiguration::new(mtm);
-        config.setWebsiteDataStore(&self.store_for(profile));
-
-        let prefs = config.preferences();
-        prefs.setJavaScriptCanOpenWindowsAutomatically(spec.javascript_can_open_windows_automatically);
-        prefs.setFraudulentWebsiteWarningEnabled(spec.fraudulent_website_warning);
-        if prefs.respondsToSelector(sel!(setElementFullscreenEnabled:)) {
-            prefs.setElementFullscreenEnabled(spec.element_fullscreen);
-        }
-        if prefs.respondsToSelector(sel!(setInactiveSchedulingPolicy:)) {
-            prefs.setInactiveSchedulingPolicy(WKInactiveSchedulingPolicy::Suspend);
-        }
-        if config.respondsToSelector(sel!(setUpgradeKnownHostsToHTTPS:)) {
-            config.setUpgradeKnownHostsToHTTPS(spec.upgrade_known_hosts_to_https);
-        }
-        if config.respondsToSelector(sel!(setLimitsNavigationsToAppBoundDomains:)) {
-            config.setLimitsNavigationsToAppBoundDomains(spec.limits_navigations_to_app_bound_domains);
-        }
-        // iOS-only property, absent from the macOS-generated bindings.
-        if config.respondsToSelector(sel!(setAllowsInlineMediaPlayback:)) {
-            let _: () = msg_send![&*config, setAllowsInlineMediaPlayback: true];
-        }
-
-        if spec.safari_desktop_user_agent {
-            // Desktop-class content to match the desktop UA set below
-            // (Safari's default on iPad, except in narrow multitasking).
-            config.defaultWebpagePreferences().setPreferredContentMode(WKContentMode::Desktop);
-        }
-
+        let config = stores::content_configuration(mtm, &self.store_for(profile));
         let frame = self.content_frame();
         let parts = build_web_view(mtm, tab, &config, CGRect::new(CGPoint::new(0.0, 0.0), frame.size), &self.events);
         self.mount(tab, parts)
@@ -954,6 +885,22 @@ thread_local! {
     /// Web views (by address) about to load an offline copy: its navigation
     /// runs with JavaScript off (see `delegates.rs`).
     static OFFLINE_LOADS: RefCell<std::collections::HashSet<usize>> = RefCell::new(std::collections::HashSet::new());
+}
+
+/// Whether ⌘ was held for this navigation action (`modifierFlags`, a
+/// `UIKeyModifierFlags` on iOS 18.4+; absent before, then never).
+pub(crate) unsafe fn command_held(action: &objc2_web_kit::WKNavigationAction) -> bool {
+    if !action.respondsToSelector(sel!(modifierFlags)) {
+        return false;
+    }
+    let flags: objc2_ui_kit::UIKeyModifierFlags = msg_send![action, modifierFlags];
+    flags.contains(objc2_ui_kit::UIKeyModifierFlags::Command)
+}
+
+/// A main-frame load ended (finished or failed): stops the pull-to-refresh
+/// spinner if it started it.
+pub(crate) fn load_ended(web: &WKWebView) {
+    gestures::end_refreshing(web);
 }
 
 /// Whether `web`'s next main-frame navigation is an offline copy (and
@@ -1125,25 +1072,11 @@ unsafe fn open_external(mtm: MainThreadMarker, url: &Url) {
     }
 }
 
-/// Schedules `f` on the main queue. Always asynchronous, even when called
-/// from the main thread, so effects are never applied re-entrantly from
-/// inside a WebKit delegate callback.
-pub fn dispatch_main(f: impl FnOnce() + Send + 'static) {
-    let cell = Cell::new(Some(f));
-    let block = RcBlock::new(move || {
-        if let Some(f) = cell.take() {
-            f()
-        }
-    });
-    unsafe { NSOperationQueue::mainQueue().addOperationWithBlock(&block) };
-}
+pub use crate::webkit::{dispatch_main, os_version, physical_memory};
 
-pub fn physical_memory() -> u64 {
-    NSProcessInfo::processInfo().physicalMemory()
-}
-
-pub fn os_version() -> OsVersion {
-    let v = NSProcessInfo::processInfo().operatingSystemVersion();
-    let c = |x: isize| u32::try_from(x).unwrap_or(0);
-    OsVersion::new(c(v.majorVersion), c(v.minorVersion), c(v.patchVersion))
+/// Version of the system web engine, as Safari's version (sites read it
+/// from the user agent): on iPadOS, WebKit ships with the OS, so this is
+/// the OS version.
+pub fn webkit_version() -> OsVersion {
+    os_version()
 }

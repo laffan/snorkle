@@ -16,7 +16,7 @@
 //!   (inside the page's pane) and never displays the URL as text.
 //! - The image is fetched only when the user picks Copy, Share or
 //!   Download: an ephemeral session, no cookies, image types only, at most
-//!   [`MAX_IMAGE_BYTES`] (see `snorkle-content` `ios/http.rs`).
+//!   [`MAX_IMAGE_BYTES`] (see `snorkle-content` `webkit/http.rs`).
 
 use url::Url;
 

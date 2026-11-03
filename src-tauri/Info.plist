@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS: merged by the Tauri CLI into the app bundle's Info.plist and
+  embedded in the binary by tauri-build (so `tauri dev` has it too).
+  The iPadOS keys are in Info.ios.plist.
+  SECURITY-REVIEW: every key here needs human sign-off.
+-->
+<plist version="1.0">
+<dict>
+  <!-- Links opened in other apps (Snorkle as the default browser): declare
+       the http and https schemes. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Web site URL</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>http</string>
+        <string>https</string>
+      </array>
+    </dict>
+  </array>
+  <!--
+    ATS: allow plain-HTTP loads *inside web content only*, so the user can
+    explicitly continue to an HTTP-only site after the HTTPS-first
+    interstitial. The app's own networking stays under ATS.
+    No NSAllowsArbitraryLoads.
+  -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+  </dict>
+  <!-- Camera/microphone prompts for web pages (getUserMedia); macOS
+       terminates the app at the prompt without them. -->
+  <key>NSCameraUsageDescription</key>
+  <string>Websites you visit can ask to use the camera. You will be asked each time.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Websites you visit can ask to use the microphone. You will be asked each time.</string>
+</dict>
+</plist>

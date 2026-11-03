@@ -58,7 +58,8 @@ fn scan_allowing(dirs: &[&str], ext: &str, forbidden: &[&str], allowed: &[(&str,
 /// Owner sign-off 2026-10-29: user scripts/styles and black-and-white mode,
 /// injected into the isolated client world from this one file only; and
 /// 2026-10-30: the page console hook and its message handler (C13).
-const INJECTION_FILE: &str = "crates/snorkle-content/src/ios/injection.rs";
+// Shared by the iPadOS and macOS hosts since 2026-11-03 (moved from `ios/`).
+const INJECTION_FILE: &str = "crates/snorkle-content/src/webkit/injection.rs";
 
 #[test]
 fn no_webkit_page_to_native_channels() {
