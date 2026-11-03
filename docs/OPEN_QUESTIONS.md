@@ -418,9 +418,45 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     `loading="lazy"` one is switched to `eager`. Lazy loaders that keep the real URL in
     `data-src` until the image scrolls into view are not triggered by pointing; containers kept
     at opacity 0 still hide their images.
-67. **[verify] Page zoom** (2026-11-02). Applied as `WKWebView.pageZoom` (iOS 14+, hand-written
-    `setPageZoom:` taking a CGFloat, see `bindings.rs`), when changed and right after a tab's web
-    view is created. Assumed: the value survives navigations and process swaps within the same
-    web view (it is a view property, not per document); if it resets on cross-site navigation,
-    re-apply it on commit. Levels are Safari's (50–300%). No keyboard shortcuts (⌘+/⌘−/⌘0)
-    yet. Popups open at 100%.
+67. **[verify] Page scale** (2026-11-02; reworked 2026-11-03). Reported: `pageZoom` scaled text
+    rather than giving the page more room. Now the web view is laid out at pane size / scale and
+    drawn with a scale transform (bounds, center and transform; autoresizing only at 100%).
+    Check: at 80% a site that served a large layout to the narrow window gets its wider one;
+    taps, text selection (the menu uses pane width / `innerWidth`, so it should line up), find,
+    pull to refresh and the fit-width check after a resize all behave; text stays sharp enough
+    (WebKit draws at the view's own scale, then the compositor scales it). Popups open at 100%.
+    No keyboard shortcuts yet.
+68. **[verify] Google Calendar and Drive freezing** (reported 2026-11-03, with ad blocking off).
+    Not reproduced (no device). Most likely cause found: the in-app console's page hook (on by
+    default in debug builds) ran `JSON.stringify` on every argument of every `console.*` call
+    before truncating, and posted every call to native, so an app logging large objects or
+    logging in a loop stalled its own main thread. The hook now uses a bounded formatter and
+    stops after 100 messages per 10 s per frame. Check first: does the freeze still happen with
+    Console → Record off? If it does, the hook was not the cause; next suspects are the dark
+    mode detector (video scan; the full shadow-root search now runs only at load) and hide
+    media's pointer tracker.
+69. **[verify] ⌘T after returning from another app** (reported 2026-11-03). Assumed cause: iPadOS
+    left no first responder, so key commands were not delivered until a tap. On
+    `UIApplicationDidBecomeActiveNotification` the host finds the first responder (public API:
+    an action sent to nil, recorded by a method added to `UIResponder`) and, if there is none,
+    makes the chrome's web view first responder; the console logs which (`keys: app active
+    again …`). The chrome also refocuses an open palette or find bar on `visibilitychange`, and
+    asks for focus once more if the first request came too early. If ⌘T still fails, the log
+    line says whether a responder existed.
+70. **[verify] Offline copies** (2026-11-03). Assumed: `loadData:` with the
+    `application/x-webarchive` MIME type and the page's URL as base URL shows the archive, its
+    navigation action carries that base URL (the core allows it as its own load), and
+    `webView:decidePolicyForNavigationAction:preferences:decisionHandler:` (now implemented; WebKit
+    calls it instead of the variant without preferences) can turn JavaScript off for it. The
+    archive is WebKit's serialisation of the live page, so script-built content should be in
+    it; pages that need scripts to show anything stay blank. Not covered: bookmarks never opened
+    since this change (a copy is made on visit), private tabs, and copies of pages behind a
+    sign-in are only as fresh as the last visit.
+71. **[verify] Image menu** (2026-11-03). Trackpad right-click and two-finger click should fire
+    `contextmenu` in WKWebView; long press uses touch events (0.5 s, under 10 pt of movement), and
+    `-webkit-touch-callout: none` on images removes iOS's own callout (so a linked image's link
+    callout is gone too). Images behind a sign-in fail (no cookies), and plain-http images fail
+    under ATS. "Save Image" in the share sheet needs `NSPhotoLibraryAddUsageDescription` (added).
+72. **[verify] Appearance** (2026-11-03). The window's interface style also reaches content views
+    that have no override, so pages see `prefers-color-scheme` follow the app's setting (dark
+    pages mode still forces dark on its views).

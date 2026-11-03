@@ -481,6 +481,52 @@ pub async fn find_in_page(
     Ok(text.ok().flatten().and_then(|t| snorkle_core::find::parse_position(&t)))
 }
 
+/// Image menu: Copy, Share or Download the image at `url` (an http(s)
+/// URL from the page's report, re-validated here). The image is fetched
+/// by the host (`http::fetch_image`), then put on the pasteboard, shared
+/// from `x`…`h` (window points), or exported to Files.
+#[tauri::command]
+pub async fn image_action(
+    url: String,
+    action: snorkle_core::imagemenu::ImageAction,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    let parsed = Url::parse(&url).map_err(|_| "Not a web image.".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || url.len() > snorkle_core::imagemenu::MAX_URL_CHARS {
+        return Err("Not a web image.".into());
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let target = parsed.clone();
+    snorkle_content::dispatch_main(move || {
+        snorkle_content::http::fetch_image(&target, Box::new(move |r| drop(tx.send(r))));
+    });
+    let fetched = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(35)))
+        .await
+        .map_err(|_| "The image could not be loaded.".to_string())?
+        .map_err(|_| "The image took too long to load.".to_string())??;
+    let (data, mime) = fetched;
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        let mut result = Err("The image could not be used.".to_string());
+        with_host(|host| result = host.image_result(action, &parsed, data, &mime, (x, y, w, h)));
+        let _ = tx.send(result);
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(5)))
+        .await
+        .map_err(|_| "The image could not be used.".to_string())?
+        .unwrap_or(Ok(()))
+}
+
+/// The app's appearance (Settings → General; the chrome stores it).
+#[tauri::command]
+pub fn set_appearance(mode: String) {
+    let mode = snorkle_content::Appearance::from_name(&mode);
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_appearance(mode)));
+}
+
 /// Gives the chrome's web view keyboard focus (after a shortcut, a page or
 /// nothing may have it), so the input the chrome focuses next gets typing.
 #[tauri::command]
@@ -633,8 +679,14 @@ pub fn clear_console(s: S<'_>) {
 /// Deletes one kind of website data (Settings): "cache", "cookies",
 /// "site_data" or "logins".
 #[tauri::command]
-pub fn clear_website_data(kind: String) -> Result<(), String> {
+pub fn clear_website_data(s: S<'_>, kind: String) -> Result<(), String> {
     use snorkle_content::DataKind;
+    // "Cache" also deletes the offline copies of pins and bookmarks.
+    if kind == "cache" {
+        if let Some(store) = s.store.as_ref() {
+            store.clear_offline_copies();
+        }
+    }
     let kind = match kind.as_str() {
         "cache" => DataKind::Cache,
         "cookies" => DataKind::Cookies,
@@ -689,6 +741,8 @@ pub struct PinEntry {
     /// `data:image/png;base64,…` made by the app from the sandboxed
     /// snapshot, or `None` (the chrome shows a letter tile).
     icon: Option<String>,
+    /// Emoji chosen to show instead of the favicon.
+    emoji: Option<String>,
 }
 
 #[tauri::command]
@@ -702,7 +756,8 @@ pub fn list_pins(s: S<'_>) -> Vec<PinEntry> {
             let icon = snorkle_core::storage::favicon_host(&p.url)
                 .and_then(|h| store.icon(&h))
                 .and_then(|png| snorkle_core::storage::png_data_url(&png));
-            Some(PinEntry { url: p.url, title: p.title, display, icon })
+            let emoji = store.pin_emoji(&p.url);
+            Some(PinEntry { url: p.url, title: p.title, display, icon, emoji })
         })
         .collect()
 }
@@ -750,6 +805,14 @@ pub async fn move_pin(s: S<'_>, url: String, index: usize) -> Result<(), String>
         Some(store) => store.move_pin(&url, index).map_err(|e| e.to_string()),
         None => Ok(()),
     }
+}
+
+/// Sets (or with `None` removes) the emoji a pin shows instead of its
+/// favicon ("Use Emoji for Icon"; validated by `storage::clean_emoji`).
+#[tauri::command]
+pub async fn set_pin_emoji(s: S<'_>, url: String, emoji: Option<String>) -> Result<bool, String> {
+    let Some(store) = s.store.clone() else { return Ok(false) };
+    store.set_pin_emoji(&url, emoji.as_deref()).map_err(|e| e.to_string())
 }
 
 /// Removes a pin; with `bookmark_index`, moves it into the bookmarks bar

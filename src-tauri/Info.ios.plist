@@ -6,6 +6,11 @@
 -->
 <plist version="1.0">
 <dict>
+  <!-- Image menu → Share Image: the share sheet's "Save Image" adds the
+       image to Photos, which iOS refuses (terminating the app) without a
+       purpose string. Add-only access; the app never reads the library. -->
+  <key>NSPhotoLibraryAddUsageDescription</key>
+  <string>Save images from web pages to your photo library when you choose Save Image.</string>
   <!-- Default-browser requirement: declare the http and https schemes. -->
   <key>CFBundleURLTypes</key>
   <array>

@@ -265,11 +265,38 @@ Bookmarking a tab (⌘D, the ⋯ menu, or dragging it into the bookmarks) moves 
 bookmark: the tab becomes that bookmark's tab (`Browser::bind_launcher`) instead of a second tab
 appearing when the bookmark is opened. Un-bookmarking makes it an ordinary tab again.
 
-**Page zoom** (⋯ menu: −, the level, +; the level resets to 100%) is per tab. The core keeps it
-on the tab (`Tab::zoom`, one of `tabs::ZOOM_LEVELS`, 50–300%), saves it with the session
+**Page scale** (⋯ menu: −, the level, +; the level resets to 100%) is per tab. The core keeps it
+on the tab (`Tab::zoom`, one of `tabs::ZOOM_LEVELS`, 50–150%), saves it with the session
 (`SessionTab::zoom`, snapped to a level when read back; private tabs are never saved) and emits
-`Effect::SetZoom`, which the host applies as `WKWebView.pageZoom`, both when it changes and right
-after a web view is created for the tab (restore, discard and reload).
+`Effect::SetZoom`, both when it changes and right after a web view is created for the tab
+(restore, discard and reload). The host lays the web view out at its pane's size divided by the
+scale and draws it with a matching scale transform (`place_view`), so at 80% the page gets a
+viewport 1.25 times wider (more CSS pixels, as on a larger screen) and everything is drawn
+smaller; sites that serve an enlarged layout to a narrow iPad window get their wider layout. (Until
+2026-11-03 this was `WKWebView.pageZoom`, which scaled text and boxes inside the same viewport.)
+
+**Pins:** up to 12 (three rows of four). Right-click or ⌘-click on a pin opens its menu: Return to
+Bookmark (moves it to the top of the bookmarks) and Use Emoji for Icon (an emoji shown instead of
+the favicon, stored in `pin-emoji.json`, validated by `storage::clean_emoji`). **Appearance**
+(Settings → General: System, Light, Dark) sets the chrome's colours (`data-theme`) and the
+window's `overrideUserInterfaceStyle`, so system UI and content views without dark pages mode
+follow it.
+
+**Offline copies:** when a pinned or bookmarked page finishes loading, the host saves it as a web
+archive (`createWebArchiveData`), at most every 10 minutes per page, under the pin's or
+bookmark's URL (also when the site redirected: the tab remembers which item it was opened from,
+`Tab::landing`) or under the page's own URL if that is pinned or bookmarked. Copies live in
+`offline/` (≤ 25 MB each, ≤ 400 MB in all, oldest deleted first; dropped when the item is
+removed; Settings → Cache deletes them). When that URL later fails with a network error, the core
+accepts the copy once (`Browser::use_offline_copy`) and the host loads it with
+`loadData:MIMEType:…baseURL:` and JavaScript off for that navigation; the address bar shows an
+"Offline copy" pill, the copy is not written to history, and the next load replaces it.
+
+**Image menu:** right-click, ⌘-click (not on a linked image) or a 0.5 s press on an image in a
+page offers Copy Image, Share…, Download… and Copy Address (C21). Copy, Share and Download fetch
+the image natively (ephemeral session, no cookies, `image/*` only, ≤ 25 MB): Copy puts it on the
+pasteboard, Share opens the share sheet with it as a file, Download opens the Files export
+picker. iOS's own long-press callout is turned off for images.
 
 The share button (inside the address field, at its right end) opens the system share sheet for the
 page's committed URL, as a popover from the button (so Instapaper and other share extensions

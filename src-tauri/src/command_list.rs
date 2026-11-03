@@ -36,7 +36,9 @@ pub const COMMANDS: &[&str] = &[
     "find_in_page",
     "end_find",
     "focus_chrome",
+    "set_appearance",
     "share_page",
+    "image_action",
     "zoom_page",
     "read_selection",
     "define_term",
@@ -68,4 +70,5 @@ pub const COMMANDS: &[&str] = &[
     "pin_bookmark",
     "move_pin",
     "unpin",
+    "set_pin_emoji",
 ];

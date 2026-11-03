@@ -15,6 +15,7 @@
 
 use std::cell::Cell;
 use std::ffi::c_void;
+use std::ptr::NonNull;
 use std::rc::Rc;
 
 use block2::Block;
@@ -29,7 +30,7 @@ use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate, UIKeyModifi
 use objc2_web_kit::{
     WKFrameInfo, WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
     WKNavigationResponse, WKNavigationResponsePolicy, WKNavigationType, WKPermissionDecision, WKSecurityOrigin,
-    WKUIDelegate, WKWebViewConfiguration, WKWindowFeatures,
+    WKUIDelegate, WKWebViewConfiguration, WKWebpagePreferences, WKWindowFeatures,
 };
 use snorkle_core::browser::{NavErrorKind, NavKind, PopupStyle, Verdict};
 use snorkle_core::policy::Frame;
@@ -110,6 +111,25 @@ define_class!(
         ) {
             let policy = unsafe { self.policy_for(action) };
             handler.call((policy,));
+        }
+
+        /// Called by WebKit instead of the method above when implemented
+        /// (iOS 13+): the same policy, and JavaScript off for the main-frame
+        /// load of an offline copy (`ContentHost::load_offline`).
+        #[unsafe(method(webView:decidePolicyForNavigationAction:preferences:decisionHandler:))]
+        fn decide_policy_with_preferences(
+            &self,
+            web_view: &WKWebView,
+            action: &WKNavigationAction,
+            preferences: &WKWebpagePreferences,
+            handler: &Block<dyn Fn(WKNavigationActionPolicy, NonNull<WKWebpagePreferences>)>,
+        ) {
+            let policy = unsafe { self.policy_for(action) };
+            let main = unsafe { action.targetFrame() }.is_some_and(|f| unsafe { f.isMainFrame() });
+            if main && super::take_offline_load(web_view as *const WKWebView as *const AnyObject) {
+                unsafe { preferences.setAllowsContentJavaScript(false) };
+            }
+            handler.call((policy, NonNull::from(preferences)));
         }
 
         #[unsafe(method(webView:decidePolicyForNavigationResponse:decisionHandler:))]

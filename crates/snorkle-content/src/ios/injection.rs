@@ -36,6 +36,10 @@
 //!   handler. String bodies only, passed to `ContentEvents::selection`,
 //!   which parses them strictly (`selection::parse_report`). The selected
 //!   text is read with [`read_now`] only when the user picks an action.
+//! - Image menu (channel C21, every page, owner request 2026-11-03): a
+//!   constant watcher (`snorkle_core::imagemenu::watch_js`) added with the
+//!   selection watcher posts an image's URL and position to the same
+//!   handler; `imagemenu::parse_report` parses it strictly.
 
 #![allow(non_snake_case)]
 
@@ -234,7 +238,7 @@ pub fn make_scripts(
     let selection = selection.map(|events| unsafe {
         let watcher = WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
             WKUserScript::alloc(mtm),
-            &NSString::from_str(&snorkle_core::selection::watch_js()),
+            &NSString::from_str(&(snorkle_core::selection::watch_js() + &snorkle_core::imagemenu::watch_js())),
             WKUserScriptInjectionTime::AtDocumentEnd,
             true,
             &world,

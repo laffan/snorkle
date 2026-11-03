@@ -33,7 +33,7 @@
   let confirmAction = null; // { tab, run } while a confirmation is shown
   let bookmarks = [];
   let pins = [];
-  const MAX_PINS = 4;
+  const MAX_PINS = 12; // three rows of four (storage::MAX_PINS)
   // View modes (session-only, kept in Rust): app-wide on/off, and tabs
   // exempted from a mode ("Disable for this tab").
   let viewModes = {
@@ -265,6 +265,10 @@
     renderScriptsMark(tab);
     renderZoom(tab);
     $('private-pill').hidden = !(tab && tab.private);
+    // A pin's or bookmark's saved copy, shown because the network failed.
+    const offline = $('offline-pill');
+    offline.hidden = !(tab && tab.offline_saved_ms);
+    if (!offline.hidden) offline.title = `No connection: this is the copy saved ${new Date(tab.offline_saved_ms).toLocaleString()}. Scripts are off. Reload to try the live page.`;
 
     const d = tab && tab.url;
     const sec = $('security');
@@ -472,7 +476,7 @@
     const grid = $('pins');
     grid.replaceChildren();
     if (!pins.length) {
-      grid.appendChild(el('div', 'hint', 'Drag up to 4 tabs or bookmarks here.'));
+      grid.appendChild(el('div', 'hint', `Drag up to ${MAX_PINS} tabs or bookmarks here.`));
       return;
     }
     pins.forEach((p, index) => {
@@ -483,7 +487,9 @@
       const open = el('button', 'open');
       open.setAttribute('aria-label', `Open ${p.title || p.display.registrable}`);
       const prefab = prefabIcon(p.url);
-      if (prefab) {
+      if (p.emoji) {
+        open.appendChild(el('span', 'emoji', p.emoji));
+      } else if (prefab) {
         const img = el('img', 'prefab');
         img.alt = '';
         img.src = prefab;
@@ -501,7 +507,12 @@
       } else {
         open.appendChild(letterTile(p.display));
       }
-      open.addEventListener('click', () => { if (!suppressClick) openLink(p.url); });
+      open.addEventListener('click', (ev) => {
+        if (suppressClick) return;
+        if (ev.metaKey) { openPinPop(p, node); return; } // ⌘-click: the pin menu
+        openLink(p.url);
+      });
+      node.addEventListener('contextmenu', (ev) => { ev.preventDefault(); cancelPending(); openPinPop(p, node); });
       const rm = el('button', 'unpin', '\u00D7');
       rm.setAttribute('aria-label', 'Unpin');
       rm.addEventListener('click', (ev) => {
@@ -514,6 +525,59 @@
     });
     if (state) renderLauncherSelection();
   }
+
+  // Pin menu: Return to Bookmark, Use Emoji for Icon (right-click or
+  // ⌘-click on a pin). Placed under the pin, inside the sidebar.
+  let pinMenu = null;
+  function openPinPop(p, node) {
+    closeMenu();
+    pinMenu = p;
+    const pop = $('pin-pop');
+    const side = $('sidebar').getBoundingClientRect();
+    pop.style.top = Math.round(node.getBoundingClientRect().bottom - side.top + 6) + 'px';
+    $('pin-emoji-form').hidden = true;
+    $('pin-emoji-hint').hidden = true;
+    $('pin-emoji').hidden = false;
+    $('pin-emoji-clear').hidden = !p.emoji;
+    pop.hidden = false;
+    syncMenuOpen();
+  }
+  function closePinPop() {
+    if ($('pin-pop').hidden) return;
+    $('pin-pop').hidden = true;
+    $('pin-emoji-input').blur();
+    pinMenu = null;
+    syncMenuOpen();
+  }
+  $('pin-to-bookmark').addEventListener('click', () => {
+    const p = pinMenu;
+    closePinPop();
+    if (p) invoke('unpin', { url: p.url, bookmarkIndex: 0 }).then(() => Promise.all([loadPins(), loadBookmarks()]));
+  });
+  $('pin-emoji').addEventListener('click', () => {
+    $('pin-emoji').hidden = true;
+    $('pin-emoji-form').hidden = false;
+    $('pin-emoji-hint').hidden = false;
+    const input = $('pin-emoji-input');
+    input.value = (pinMenu && pinMenu.emoji) || '';
+    focusInput(input, true);
+  });
+  $('pin-emoji-form').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const p = pinMenu;
+    const emoji = $('pin-emoji-input').value.trim();
+    if (!p || !emoji) return;
+    T.core.invoke('set_pin_emoji', { url: p.url, emoji }).then((ok) => {
+      if (!ok) { toast('Use one emoji (no spaces).'); return; }
+      closePinPop();
+      loadPins();
+    }).catch((e) => toast(String(e)));
+  });
+  $('pin-emoji-clear').addEventListener('click', () => {
+    const p = pinMenu;
+    closePinPop();
+    if (p) invoke('set_pin_emoji', { url: p.url, emoji: null }).then(loadPins);
+  });
 
   // ---- bookmarks bar ------------------------------------------------------
 
@@ -778,6 +842,23 @@
     try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ }
   }
 
+  // Appearance (Settings → General): system, light or dark. The chrome's
+  // colours follow `data-theme`; the host sets the window's interface
+  // style, so system UI (share sheet, keyboard) and pages that follow the
+  // system match.
+  function applyAppearance(mode) {
+    if (!['system', 'light', 'dark'].includes(mode)) mode = 'system';
+    if (mode === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = mode;
+    $('appearance').value = mode;
+    T.core.invoke('set_appearance', { mode }).catch(() => {});
+  }
+  applyAppearance(pref('appearance') || 'system');
+  $('appearance').addEventListener('change', () => {
+    setPref('appearance', $('appearance').value);
+    applyAppearance($('appearance').value);
+  });
+
   function loadSidebarPrefs() {
     sidebarMode = pref('sidebarMode') === 'flyout' ? 'flyout' : 'attached';
     sidebarShown = !narrow && sidebarMode === 'attached' && pref('sidebarOpen') !== '0';
@@ -974,7 +1055,7 @@
   function closeMenu() { menuOpen = false; $('menu-pop').hidden = true; syncMenuOpen(); }
   // Keeps the chrome fully opaque while any of its menus is open.
   function syncMenuOpen() {
-    const open = menuOpen || !$('vm-pop').hidden || !$('actions-pop').hidden || findOpen || !$('confirm-pop').hidden;
+    const open = menuOpen || !$('vm-pop').hidden || !$('pin-pop').hidden || !$('actions-pop').hidden || findOpen || !$('confirm-pop').hidden;
     document.body.classList.toggle('menu-open', open);
   }
 
@@ -1437,7 +1518,7 @@
       if (f && pill) f.h = Math.max(1, pill.y - f.y);
       if (f) out.push(f);
     }
-    for (const id of ['actions-pop', 'confirm-pop', 'sel-pop', 'toast', 'os-banner']) {
+    for (const id of ['actions-pop', 'confirm-pop', 'sel-pop', 'img-pop', 'toast', 'os-banner']) {
       const e = $(id);
       if (e.hidden) continue;
       const h = hole(e, 15);
@@ -1592,9 +1673,11 @@
   }
   $('actions-toggle').addEventListener('click', () => setActions($('actions-pop').hidden));
 
-  // Page zoom (⋯ menu): per tab, decided and saved by the core. The menu
-  // stays open so the buttons can be pressed repeatedly.
-  const ZOOM_MIN = 50, ZOOM_MAX = 300;
+  // Page scale (⋯ menu): per tab, decided and saved by the core; the
+  // content host lays the page out for a larger (or smaller) window and
+  // draws it scaled. The menu stays open so the buttons can be pressed
+  // repeatedly.
+  const ZOOM_MIN = 50, ZOOM_MAX = 150;
   function renderZoom(tab) {
     const z = tab ? tab.zoom : 100;
     const page = !!(tab && tab.url);
@@ -2277,8 +2360,18 @@
   function focusInput(input, select) {
     const go = () => { input.focus({ preventScroll: true }); if (select) input.select(); };
     go();
-    T.core.invoke('focus_chrome').catch(() => {}).finally(() => { go(); requestAnimationFrame(go); });
+    const ask = () => T.core.invoke('focus_chrome').catch(() => {}).finally(() => { go(); requestAnimationFrame(go); });
+    // Right after the app returns from another app, the first request can
+    // come too early for UIKit: ask once more if focus did not land.
+    ask().then(() => setTimeout(() => { if (!input.hidden && document.activeElement !== input) ask(); }, 150));
   }
+
+  // Back from another app: an open palette or find bar gets focus again.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (paletteOpen) focusInput($('palette-input'));
+    else if (findOpen) focusInput($('find-input'));
+  });
 
   function closePalette() {
     paletteOpen = false;
@@ -2692,14 +2785,18 @@
     reportLayout();
   }
 
-  function showSelection(tab, r) {
+  function showSelection(tab, r) { placeOverPage($('sel-pop'), tab, r); }
+
+  // Shows a menu above (or below) a rectangle reported by a page, in the
+  // page's visual-viewport coordinates (`vw` wide), converted to window
+  // points with the pane's scale.
+  function placeOverPage(pop, tab, r) {
     const pane = paneBox(tab);
     const k = pane.w / r.vw;
     const sx = pane.x + r.x * k;
     const sy = pane.y + r.y * k;
     const sw = r.w * k;
     const sh = r.h * k;
-    const pop = $('sel-pop');
     pop.hidden = false;
     const pw = pop.offsetWidth;
     const ph = pop.offsetHeight;
@@ -2746,6 +2843,46 @@
     const term = selection.text.replace(/\s+/g, ' ').trim().slice(0, 100);
     hideSelection();
     invoke('define_term', { term, x: r.left, y: r.top, w: r.width, h: r.height });
+  });
+
+  // ---- image menu (C21) ---------------------------------------------------
+  //
+  // The page's image watcher reports an image's address and where it was
+  // asked for. Copy, Share and Download have the host fetch the image (no
+  // cookies); Copy Address copies the URL.
+  let imageMenu = null; // { tab, url }
+  function hideImageMenu() {
+    if (!imageMenu && $('img-pop').hidden) return;
+    imageMenu = null;
+    $('img-pop').hidden = true;
+    reportLayout();
+  }
+  T.event.listen('image_menu', (e) => {
+    const { tab, url, rect } = e.payload;
+    if (!url || !rect) { if (imageMenu && imageMenu.tab === tab) hideImageMenu(); return; }
+    const shown = state && (tab === state.active || (state.split && (tab === state.split.left || tab === state.split.right)));
+    if (!shown || paletteOpen || modalOpen || panel) return;
+    hideSelection();
+    imageMenu = { tab, url };
+    placeOverPage($('img-pop'), tab, rect);
+  });
+  for (const [id, action] of [['img-copy', 'copy'], ['img-share', 'share'], ['img-download', 'download']]) {
+    $(id).addEventListener('click', () => {
+      if (!imageMenu) return;
+      const r = $('img-pop').getBoundingClientRect();
+      const url = imageMenu.url;
+      hideImageMenu();
+      if (action === 'copy') toast('Copying image…');
+      T.core.invoke('image_action', { url, action, x: r.left, y: r.top, w: r.width, h: r.height })
+        .then(() => { if (action === 'copy') toast('Image copied.'); })
+        .catch((err) => toast(String(err)));
+    });
+  }
+  $('img-copy-url').addEventListener('click', () => {
+    if (!imageMenu) return;
+    const url = imageMenu.url;
+    hideImageMenu();
+    navigator.clipboard.writeText(url).then(() => toast('Image address copied.'), () => toast('Could not copy (clipboard unavailable).'));
   });
 
   // Share: the system share sheet for this page, pointing at the button.
@@ -2817,6 +2954,8 @@
   document.addEventListener('pointerdown', (ev) => {
     if (menuOpen && !$('menu-pop').contains(ev.target) && ev.target !== $('menu')) closeMenu();
     if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
+    if (!$('pin-pop').hidden && !$('pin-pop').contains(ev.target)) closePinPop();
+    if (!$('img-pop').hidden && !$('img-pop').contains(ev.target)) hideImageMenu();
     if (!$('actions-pop').hidden && !$('actions').contains(ev.target)) setActions(false);
     // Taps outside close the overlaid sidebar (narrow) and the flyout.
     if ((narrow || flyoutMode()) && sidebarShown && !$('sidebar').contains(ev.target)) setSidebar(false);
@@ -2829,6 +2968,8 @@
     else if (findOpen) closeFind();
     else if (flyoutMode() && sidebarShown) setSidebar(false);
     else if (!$('actions-pop').hidden) setActions(false);
+    else if (!$('pin-pop').hidden) closePinPop();
+    else if (!$('img-pop').hidden) hideImageMenu();
     else if (menuOpen) closeMenu();
     else if (modalOpen) setModal(false);
     else if (scriptsOpen) setScripts(false);

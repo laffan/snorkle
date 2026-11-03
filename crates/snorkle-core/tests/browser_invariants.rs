@@ -299,7 +299,7 @@ fn page_zoom_is_per_tab_and_saved_with_the_session() {
     webkit_load(&mut b, other, "https://b.example/");
 
     let out = b.zoom(t, ZoomStep::In);
-    assert!(out.contains(&Effect::SetZoom { tab: t, percent: 115 }));
+    assert!(out.contains(&Effect::SetZoom { tab: t, percent: 110 }));
     assert!(out.iter().any(|e| matches!(e, Effect::PersistSession(_))));
     b.zoom(t, ZoomStep::In);
     let view = b.view();
@@ -326,8 +326,61 @@ fn page_zoom_is_per_tab_and_saved_with_the_session() {
     b.navigate_input(p, "https://c.example/", 2).unwrap();
     webkit_load(&mut b, p, "https://c.example/");
     let out = b.zoom(p, ZoomStep::Out);
-    assert!(out.contains(&Effect::SetZoom { tab: p, percent: 85 }));
+    assert!(out.contains(&Effect::SetZoom { tab: p, percent: 90 }));
     assert!(!out.iter().any(|e| matches!(e, Effect::PersistSession(_))), "private tabs are never saved");
+}
+
+#[test]
+fn offline_copy_replaces_a_network_error_once() {
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(t, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, t, "https://a.example/");
+    let page = u("https://news.example/");
+    // Not after a different kind of failure, or for another URL.
+    assert!(!b.use_offline_copy(t, &page, 5).0, "no error shown");
+    b.navigate_trusted(t, page.clone(), 1);
+    b.on_provisional_start(t);
+    b.on_fail(t, true, NavErrorKind::Network, Some(page.clone()), "offline");
+    assert!(!b.use_offline_copy(t, &u("https://other.example/"), 5).0);
+    let (ok, _) = b.use_offline_copy(t, &page, 5);
+    assert!(ok);
+    assert!(b.view().tabs[0].notice.is_none(), "the error gives way to the copy");
+    // The copy's load (base URL = the page) is the browser's own.
+    let (v, _) = b.decide_navigation(t, &page, Frame::Main, NavKind::Other, 2);
+    assert_eq!(v, Verdict::Allow);
+    b.on_provisional_start(t);
+    b.on_commit(t, page.clone());
+    let out = b.on_finish(t);
+    assert_eq!(b.view().tabs[0].offline_saved_ms, Some(5), "the address bar says it is a copy");
+    assert!(!out.iter().any(|e| matches!(e, Effect::RecordHistory { .. })), "not a visit");
+    assert!(b.shows_offline_copy(t));
+    // The next load replaces it.
+    b.on_provisional_start(t);
+    assert_eq!(b.view().tabs[0].offline_saved_ms, None);
+    // A copy whose own load fails is not tried again.
+    b.on_fail(t, true, NavErrorKind::Network, Some(page.clone()), "offline");
+    assert!(b.use_offline_copy(t, &page, 5).0);
+    b.on_provisional_start(t);
+    b.on_fail(t, true, NavErrorKind::Other, Some(page.clone()), "bad archive");
+    assert!(!b.shows_offline_copy(t));
+    b.on_fail(t, true, NavErrorKind::Network, Some(page.clone()), "offline");
+    assert!(!b.use_offline_copy(t, &page, 5).0, "tried already since the last commit");
+    // Never in private tabs.
+    let (p, _) = b.new_tab(Profile::Private, 3);
+    b.navigate_trusted(p, page.clone(), 3);
+    b.on_provisional_start(p);
+    b.on_fail(p, true, NavErrorKind::Network, Some(page.clone()), "offline");
+    assert!(!b.use_offline_copy(p, &page, 5).0);
+}
+
+#[test]
+fn opening_a_launcher_marks_its_landing_load() {
+    let mut b = browser(4);
+    let (t, _) = b.open_launcher("https://nytimes.com/", u("https://nytimes.com/"), 0);
+    assert_eq!(b.landing(t).as_deref(), Some("https://nytimes.com/"));
+    webkit_load(&mut b, t, "https://www.nytimes.com/");
+    assert_eq!(b.landing(t), None, "cleared when that load finishes");
 }
 
 #[test]
@@ -344,7 +397,7 @@ fn saved_zoom_is_snapped_to_a_level() {
     };
     let mut b = browser(4);
     b.restore_session(&session, 0);
-    assert_eq!(b.view().tabs[0].zoom, 300);
+    assert_eq!(b.view().tabs[0].zoom, 150);
 }
 
 #[test]

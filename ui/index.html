@@ -34,9 +34,9 @@
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <span class="spacer"></span>
-      <button id="color" class="icon mode" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
-      <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg></button>
-      <button id="images" class="icon mode" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/></svg></button>
+      <button id="color" class="icon mode" aria-label="Show pages in color" title="Show pages in color" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm2.5-4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm5 .5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg></button>
+      <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><path d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg></button>
+      <button id="images" class="icon mode" aria-label="Show images and video" title="Show images and video" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4zM9 11.2a1.7 1.7 0 1 0 0-3.4 1.7 1.7 0 0 0 0 3.4zM5 18h14v-2.2l-4-4-4.5 4.2-2.2-1.8L5 16.4z"/></svg></button>
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
       <button id="menu-new-tab" role="menuitem">New Tab <span class="kbd">⌘T</span></button>
@@ -50,6 +50,18 @@
     <div id="vm-pop" class="popup vm-pop" role="menu" hidden>
       <div id="vm-title" class="vm-title"></div>
       <button id="vm-tab" role="menuitem"></button>
+    </div>
+    <!-- Right-click or ⌘-click on a pin. -->
+    <div id="pin-pop" class="popup pin-pop" role="menu" hidden>
+      <button id="pin-to-bookmark" role="menuitem">Return to Bookmark</button>
+      <button id="pin-emoji" role="menuitem">Use Emoji for Icon…</button>
+      <button id="pin-emoji-clear" role="menuitem" hidden>Use Site Icon</button>
+      <form id="pin-emoji-form" class="pin-emoji-form" hidden>
+        <input id="pin-emoji-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+               maxlength="32" placeholder="🙂" aria-label="Emoji for this pin">
+        <button class="button primary" type="submit">Use</button>
+      </form>
+      <p id="pin-emoji-hint" class="muted small pin-emoji-hint" hidden>Type an emoji: the 🌐 key switches to the emoji keyboard; ⌃⌘Space opens the picker.</p>
     </div>
     <div id="sidebar-resize" class="resize-edge" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
     <!-- The sidebar's toggle, attached to its right edge (it moves with
@@ -96,6 +108,7 @@
           <svg id="lock" class="lock" viewBox="0 0 24 24" width="14" height="14" aria-label="Secure connection" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" hidden><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg>
           <span id="security" class="security"></span>
           <span id="private-pill" class="pill" hidden>Private</span>
+          <span id="offline-pill" class="pill" hidden>Offline copy</span>
           <span id="sheet-pill" class="pill" hidden title="A window this site opened, shown over the page">Pop-up</span>
           <span id="url-sub" class="sub"></span><span id="url-reg" class="reg"></span><span id="url-port" class="port"></span>
           <span id="url-warn" class="warn" hidden title="This address uses characters that look like other letters; shown in its encoded form.">!</span>
@@ -105,7 +118,7 @@
         <button id="share" class="icon omni-share" aria-label="Share this page" title="Share"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M8 11H6.5A1.5 1.5 0 0 0 5 12.5v7A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16"/></svg></button>
       </div>
       <div id="actions" class="page-actions">
-        <button id="actions-toggle" class="icon" aria-expanded="false" aria-controls="actions-pop" aria-haspopup="menu" aria-label="Page actions" title="Ads, bookmark, site scripts, zoom"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+        <button id="actions-toggle" class="icon" aria-expanded="false" aria-controls="actions-pop" aria-haspopup="menu" aria-label="Page actions" title="Ads, bookmark, site scripts, scale"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
         <!-- Floats over the page (a hole, like the pill). -->
         <div id="actions-pop" class="popup actions-pop" role="menu" aria-label="Page actions" hidden>
           <button id="shield" role="menuitem"><span class="label"></span><span class="state"></span></button>
@@ -113,16 +126,17 @@
           <div class="menu-sep" role="separator"></div>
           <button id="scripts-btn" role="menuitem" aria-haspopup="dialog"><span class="label">Site Scripts</span><span class="state">{ }</span></button>
           <div class="menu-sep" role="separator"></div>
-          <!-- Page zoom for this tab (kept with the tab across launches). -->
-          <div id="zoom-row" class="zoom-row" role="group" aria-label="Page zoom">
-            <span class="label">Zoom</span>
-            <button id="zoom-out" class="zoom-btn" aria-label="Zoom out" title="Zoom out">&#x2212;</button>
-            <button id="zoom-level" class="zoom-level" aria-label="Reset zoom to 100%" title="Reset to 100%">100%</button>
-            <button id="zoom-in" class="zoom-btn" aria-label="Zoom in" title="Zoom in">+</button>
+          <!-- Page scale for this tab (kept with the tab across launches):
+               smaller gives the page a wider window, as on a larger screen. -->
+          <div id="zoom-row" class="zoom-row" role="group" aria-label="Page scale">
+            <span class="label">Scale</span>
+            <button id="zoom-out" class="zoom-btn" aria-label="Smaller (wider page)" title="Smaller: the page gets a wider window">&#x2212;</button>
+            <button id="zoom-level" class="zoom-level" aria-label="Reset scale to 100%" title="Reset to 100%">100%</button>
+            <button id="zoom-in" class="zoom-btn" aria-label="Larger" title="Larger">+</button>
           </div>
         </div>
       </div>
-      <button id="headers" class="icon mode" aria-label="Headers view for this tab" title="Headers view (this tab)" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M8 12h12M12 18h8"/></svg></button>
+      <button id="headers" class="icon mode" aria-label="Headers view for this tab" title="Headers view (this tab)" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><rect x="3" y="4.5" width="18" height="3.2" rx="1.6"/><rect x="7" y="10.4" width="14" height="3.2" rx="1.6"/><rect x="11" y="16.3" width="10" height="3.2" rx="1.6"/></svg></button>
       <button id="chat-btn" class="icon mode" aria-label="Chat about this page" title="AI chat about this page" aria-pressed="false" aria-controls="chat"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-11.1 6.6L4 19.5l1.4-4.4A7.5 7.5 0 1 1 20 11.5z"/></svg></button>
       <button id="unsplit" class="pillbtn" hidden title="Close split view">Unsplit</button>
       <button id="sheet-close" class="pillbtn" hidden title="Close this pop-up window and return to the page">Close Pop-up</button>
@@ -215,6 +229,18 @@
               <button data-launch-mode="dark" data-on="false" aria-pressed="false">Off</button>
             </div>
           </div>
+          <h3 class="settings-sub">Appearance</h3>
+          <div class="option">
+            <div>
+              <div class="option-title">Appearance</div>
+              <div class="muted small">The browser's own colours, menus and keyboard. Pages follow it too when they have a dark theme (dark pages mode is separate).</div>
+            </div>
+            <select id="appearance" aria-label="Appearance">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
           <h3 class="settings-sub">Layout</h3>
           <div class="option">
             <div>
@@ -284,7 +310,7 @@
       <div class="option">
         <div>
           <div class="option-title">Cache</div>
-          <div class="muted small">Cached files and offline copies. Sites load slower the next time.</div>
+          <div class="muted small">Cached files and offline copies, including the copies of pinned and bookmarked pages kept for when there is no connection. Sites load slower the next time.</div>
         </div>
         <button class="button clear-data" data-kind="cache">Delete</button>
       </div>
@@ -419,6 +445,15 @@
     <button id="sel-google" role="menuitem">Google This</button>
     <button id="sel-ask" role="menuitem">Ask AI</button>
     <button id="sel-define" role="menuitem">Define</button>
+  </div>
+
+  <!-- Right-click, ⌘-click or long-press on an image in a page (C21). The
+       image's address is never shown; it is only fetched for an action. -->
+  <div id="img-pop" class="sel-pop" role="menu" aria-label="Image" hidden>
+    <button id="img-copy" role="menuitem">Copy Image</button>
+    <button id="img-share" role="menuitem">Share…</button>
+    <button id="img-download" role="menuitem">Download…</button>
+    <button id="img-copy-url" role="menuitem">Copy Address</button>
   </div>
 
   <div id="drop-line" hidden></div>

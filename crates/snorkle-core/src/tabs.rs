@@ -152,13 +152,32 @@ pub struct Tab {
     /// View modes turned off for this tab ("Disable for this tab"); saved
     /// with the session.
     pub view_exempt: Vec<crate::viewmodes::Kind>,
-    /// Page zoom in percent (one of [`ZOOM_LEVELS`]); saved with the
-    /// session.
+    /// Page scale in percent (one of [`ZOOM_LEVELS`]); saved with the
+    /// session. Below 100 the page gets a wider viewport (it is laid out
+    /// for a larger window and drawn smaller), above 100 a narrower one.
     pub zoom: u16,
+    /// The page shown (or about to be) is the saved offline copy of a pin
+    /// or bookmark, loaded because the network failed.
+    pub offline: Option<OfflineCopy>,
+    /// An offline copy was tried since the last commit (it is not tried
+    /// again if its own load fails).
+    pub offline_tried: bool,
+    /// While the load started by opening its pin or bookmark runs: that
+    /// item's URL (its offline copy is saved under it, also when the site
+    /// redirects). Cleared when that load finishes or fails.
+    pub landing: Option<String>,
 }
 
-/// Page zoom levels, in percent (the steps of the ⋯ menu's − and +).
-pub const ZOOM_LEVELS: [u16; 11] = [50, 75, 85, 100, 115, 125, 150, 175, 200, 250, 300];
+/// An offline copy in a tab: when it was saved, and whether its load has
+/// committed (until then the next provisional start is its own).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OfflineCopy {
+    pub saved_ms: u64,
+    pub committed: bool,
+}
+
+/// Page scale levels, in percent (the steps of the ⋯ menu's − and +).
+pub const ZOOM_LEVELS: [u16; 9] = [50, 67, 75, 80, 90, 100, 110, 125, 150];
 pub const DEFAULT_ZOOM: u16 = 100;
 
 /// The zoom level nearest to `percent` (for values read from disk).
@@ -166,7 +185,7 @@ pub fn clean_zoom(percent: u16) -> u16 {
     ZOOM_LEVELS.iter().copied().min_by_key(|z| z.abs_diff(percent)).unwrap_or(DEFAULT_ZOOM)
 }
 
-/// A change of page zoom from the ⋯ menu.
+/// A change of page scale from the ⋯ menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ZoomStep {
@@ -212,6 +231,9 @@ impl Tab {
             sheet: false,
             view_exempt: Vec::new(),
             zoom: DEFAULT_ZOOM,
+            offline: None,
+            offline_tried: false,
+            landing: None,
             launcher: None,
         }
     }
@@ -235,14 +257,14 @@ mod tests {
 
     #[test]
     fn zoom_steps() {
-        assert_eq!(ZoomStep::In.apply(100), 115);
-        assert_eq!(ZoomStep::Out.apply(100), 85);
+        assert_eq!(ZoomStep::In.apply(100), 110);
+        assert_eq!(ZoomStep::Out.apply(100), 90);
         assert_eq!(ZoomStep::Out.apply(50), 50, "stays at the smallest");
-        assert_eq!(ZoomStep::In.apply(300), 300, "stays at the largest");
-        assert_eq!(ZoomStep::Reset.apply(250), 100);
+        assert_eq!(ZoomStep::In.apply(150), 150, "stays at the largest");
+        assert_eq!(ZoomStep::Reset.apply(75), 100);
         assert_eq!(clean_zoom(0), 50);
-        assert_eq!(clean_zoom(9999), 300);
-        assert_eq!(clean_zoom(112), 115);
-        assert_eq!(ZoomStep::In.apply(112), 125, "an off-level value snaps first");
+        assert_eq!(clean_zoom(9999), 150);
+        assert_eq!(clean_zoom(118), 125);
+        assert_eq!(ZoomStep::Out.apply(118), 110, "an off-level value snaps first");
     }
 }

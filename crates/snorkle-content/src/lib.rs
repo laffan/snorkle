@@ -87,6 +87,25 @@ pub enum DataKind {
     Logins,
 }
 
+/// The app's appearance (Settings → General): the window's interface style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Appearance {
+    System,
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    /// From the chrome's setting ("light", "dark"; anything else: system).
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "light" => Appearance::Light,
+            "dark" => Appearance::Dark,
+            _ => Appearance::System,
+        }
+    }
+}
+
 /// Browser keyboard shortcuts handled natively (the app's main menu,
 /// `ios::menu`, with the content containers' key commands as a fallback,
 /// `ios::keys`); the chrome UI performs them.
@@ -368,6 +387,11 @@ pub type RulesDone = Box<dyn FnOnce(Result<usize, String>) + Send>;
 /// Completion of a page-text read (AI chat): the script's string result,
 /// page-controlled and bounded to [`MAX_PAGE_TEXT_BYTES`], or `None`.
 pub type TextDone = Box<dyn FnOnce(Option<String>) + Send>;
+/// Completion of an image fetch (image menu): bytes and MIME type, or a
+/// message for the user. Runs on a background queue.
+pub type ImageDone = Box<dyn FnOnce(Result<(Vec<u8>, String), String>) + Send>;
+/// Completion of an offline-copy save: the page's web archive, or `None`.
+pub type DataDone = Box<dyn FnOnce(Option<Vec<u8>>) + Send>;
 /// Largest page-text result read back from a page.
 pub const MAX_PAGE_TEXT_BYTES: usize = snorkle_core::ai::MAX_PAGE_REPORT;
 

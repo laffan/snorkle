@@ -41,16 +41,41 @@ pub const PAGE_HANDLER_NAME: &str = "snorkleConsole";
 /// capture is on. Forwards `console.*` calls and uncaught errors as one
 /// string: a level letter (d, l, i, w, e) followed by the text. Constant
 /// code; it takes no input from the app.
+///
+/// It runs inside the page's own calls to `console.*`, so it must stay
+/// cheap whatever the page logs (2026-11-03, Google Calendar and Drive
+/// froze): arguments are summarised with a bounded formatter (at most 20
+/// entries per object or array, two levels deep, strings cut to 2,000
+/// characters; DOM nodes by name only; never `JSON.stringify`, which walks
+/// a whole object graph), and at most [`PAGE_BURST`] messages per
+/// [`PAGE_WINDOW_MS`] are formatted and posted per frame (one notice when
+/// the limit is reached), so a page that logs in a loop costs nothing
+/// beyond that.
 pub const PAGE_HOOK_JS: &str = r#"(function(){
 var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.snorkleConsole;
 if(!h||window.__snorkleConsole)return;
 Object.defineProperty(window,'__snorkleConsole',{value:true});
-var post=h.postMessage.bind(h);
-function fmt(a){try{if(a instanceof Error)return a.name+': '+a.message+(a.stack?'\n'+a.stack:'');if(typeof a==='string')return a;var j=JSON.stringify(a);return j===undefined?String(a):j;}catch(e){try{return String(a);}catch(e2){return '[unprintable]';}}}
-function send(l,args){try{post(l+Array.prototype.map.call(args,fmt).join(' ').slice(0,4000));}catch(e){}}
+var post=h.postMessage.bind(h),win=0,cnt=0,has=Object.prototype.hasOwnProperty;
+function cut(s,n){return s.length>n?s.slice(0,n)+'\u2026':s;}
+function fmt(a,d){try{
+if(a===null||a===undefined)return String(a);var t=typeof a;
+if(t==='string')return cut(a,d?200:2000);
+if(t!=='object'&&t!=='function')return String(a);
+if(a instanceof Error)return a.name+': '+cut(String(a.message),500)+(a.stack?'\n'+cut(String(a.stack),2000):'');
+if(t==='function')return 'function '+(a.name||'');
+if(typeof Node!=='undefined'&&a instanceof Node)return '<'+String(a.nodeName||'node').toLowerCase()+'>';
+if(d>=2)return Array.isArray(a)?'[\u2026]':'{\u2026}';
+var out=[],n=0;
+if(Array.isArray(a)){for(var i=0;i<a.length&&i<20;i++)out.push(fmt(a[i],d+1));return '['+out.join(', ')+(a.length>20?', \u2026 ('+a.length+')':'')+']';}
+for(var k in a){if(!has.call(a,k))continue;if(++n>20){out.push('\u2026');break;}out.push(k+': '+fmt(a[k],d+1));}
+return '{'+out.join(', ')+'}';
+}catch(e){return '[unprintable]';}}
+function send(l,args){try{var now=Date.now();if(now-win>10000){win=now;cnt=0;}
+if(++cnt>100){if(cnt===101)post('w[Snorkle] This page logs a lot: its console messages are not recorded for the next few seconds.');return;}
+var parts=[];for(var i=0;i<args.length&&i<20;i++)parts.push(fmt(args[i],0));post(l+parts.join(' ').slice(0,4000));}catch(e){}}
 ['debug','log','info','warn','error'].forEach(function(n){var o=console[n];console[n]=function(){send(n==='debug'?'d':n.charAt(0),arguments);return o.apply(console,arguments);};});
-window.addEventListener('error',function(e){send('e',['Uncaught '+(e.error?fmt(e.error):e.message)+(e.filename?' ('+e.filename+':'+e.lineno+')':'')]);});
-window.addEventListener('unhandledrejection',function(e){send('e',['Unhandled rejection: '+fmt(e.reason)]);});
+window.addEventListener('error',function(e){send('e',['Uncaught '+(e.error?fmt(e.error,0):e.message)+(e.filename?' ('+e.filename+':'+e.lineno+')':'')]);});
+window.addEventListener('unhandledrejection',function(e){send('e',['Unhandled rejection: '+fmt(e.reason,0)]);});
 })();"#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -266,5 +291,8 @@ mod tests {
     fn hook_posts_to_the_named_handler_only() {
         assert!(PAGE_HOOK_JS.contains(&format!("messageHandlers.{PAGE_HANDLER_NAME}")));
         assert!(!PAGE_HOOK_JS.contains("eval("));
+        assert!(!PAGE_HOOK_JS.contains("JSON.stringify"), "bounded formatter only");
+        assert!(PAGE_HOOK_JS.contains("if(++cnt>100)"), "page-side rate limit, same as PAGE_BURST");
+        assert_eq!(PAGE_BURST, 100);
     }
 }

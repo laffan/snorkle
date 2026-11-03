@@ -77,6 +77,26 @@ impl ContentHost {
 
     pub fn focus_chrome(&mut self) {}
 
+    pub fn set_appearance(&mut self, _appearance: crate::Appearance) {}
+
+    /// No pages render off iOS: nothing to save.
+    pub fn save_offline(&mut self, _tab: TabId, done: crate::DataDone) {
+        done(None);
+    }
+
+    pub fn load_offline(&mut self, _tab: TabId, _url: &url::Url, _data: Vec<u8>) {}
+
+    pub fn image_result(
+        &mut self,
+        _action: snorkle_core::imagemenu::ImageAction,
+        _url: &url::Url,
+        _data: Vec<u8>,
+        _mime: &str,
+        _from: (f64, f64, f64, f64),
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     pub fn set_shortcuts(&mut self, _bindings: Vec<crate::KeyBinding>, _suspend: bool) {}
 
     pub fn share(&mut self, _url: &str, _from: (f64, f64, f64, f64)) {}
@@ -124,6 +144,10 @@ pub fn os_version() -> OsVersion {
 pub mod http {
     pub fn send(_req: snorkle_core::ai::HttpRequest, done: crate::HttpDone) {
         done(Err("AI requests run on iPadOS only (this is the desktop preview).".into()));
+    }
+
+    pub fn fetch_image(_url: &url::Url, done: crate::ImageDone) {
+        done(Err("Images can be saved on iPadOS only (this is the desktop preview).".into()));
     }
 }
 

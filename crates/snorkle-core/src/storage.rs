@@ -16,7 +16,7 @@
 //! - Writes are atomic (temp file + rename) and are performed off the main
 //!   thread by the caller.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -34,7 +34,7 @@ pub const MAX_HISTORY: usize = 5_000;
 pub const MAX_BOOKMARKS: usize = 5_000;
 pub const MAX_SESSION_TABS: usize = 500;
 /// Pinned grid at the top of the sidebar.
-pub const MAX_PINS: usize = 4;
+pub const MAX_PINS: usize = 12;
 /// Largest favicon PNG accepted from the favicon fetcher or from disk.
 pub const MAX_ICON_BYTES: usize = 64 * 1024;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -104,6 +104,47 @@ struct Data {
     pins: Vec<Bookmark>,
     chats: Vec<ChatRecord>,
     launch_modes: crate::viewmodes::LaunchModes,
+    /// Emoji shown instead of a pin's favicon, by pin URL.
+    pin_emoji: BTreeMap<String, String>,
+    /// Offline copies of pinned and bookmarked pages (index of `offline/`).
+    offline: Vec<OfflineEntry>,
+}
+
+/// Offline copies (web archives) of pinned and bookmarked pages, in
+/// `offline/`, one file per URL, listed in `offline/index.json`.
+const OFFLINE_DIR: &str = "offline";
+const OFFLINE_INDEX: &str = "index.json";
+/// Largest offline copy kept, in bytes.
+pub const MAX_OFFLINE_COPY_BYTES: usize = 25 * 1024 * 1024;
+/// All offline copies together; the oldest are deleted first.
+pub const MAX_OFFLINE_TOTAL_BYTES: u64 = 400 * 1024 * 1024;
+/// A page's copy is refreshed at most this often.
+pub const OFFLINE_REFRESH_MS: u64 = 10 * 60 * 1000;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OfflineEntry {
+    pub url: String,
+    /// File name in `offline/`: 16 hex digits + `.webarchive`.
+    pub file: String,
+    pub saved_ms: u64,
+    pub bytes: u64,
+}
+
+/// File name of a URL's offline copy (FNV-1a of the URL; the index maps
+/// the URL, so a collision only replaces the other copy).
+fn offline_file(url: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in url.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}.webarchive")
+}
+
+fn valid_offline_file(name: &str) -> bool {
+    name.len() == 16 + ".webarchive".len()
+        && name.ends_with(".webarchive")
+        && name[..16].bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 /// Chat archive: one file per chat in this directory.
@@ -193,6 +234,27 @@ pub struct AiUsageEvent {
 /// Sites with detected heading rules kept.
 pub const MAX_HEADING_RULE_SITES: usize = 500;
 const PINS_FILE: &str = "pins.json";
+/// Emoji chosen for pins ("Use Emoji for Icon"), by pin URL.
+const PIN_EMOJI_FILE: &str = "pin-emoji.json";
+/// Characters (code points) an icon emoji may have: enough for joined
+/// sequences (families, flags, skin tones).
+pub const MAX_EMOJI_CHARS: usize = 12;
+
+/// An emoji (or a short symbol) to show instead of a pin's favicon:
+/// trimmed, at most [`MAX_EMOJI_CHARS`] code points and 64 bytes, no
+/// whitespace, control or bidi-override characters. Zero-width joiners and
+/// variation selectors are kept (emoji sequences need them). The chrome
+/// shows it with `textContent`.
+pub fn clean_emoji(s: &str) -> Option<String> {
+    let t = s.trim();
+    let bad = |c: char| {
+        c.is_control()
+            || c.is_whitespace()
+            || matches!(c, '\u{061C}' | '\u{200B}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+    };
+    (!t.is_empty() && t.len() <= 64 && t.chars().count() <= MAX_EMOJI_CHARS && !t.chars().any(bad))
+        .then(|| t.to_string())
+}
 /// Versioned: older caches are deleted and icons fetched again (v1: raw
 /// snapshot encoding the chrome could fail to display; v2: icons offset
 /// by the snapshot view's desktop layout).
@@ -262,6 +324,11 @@ impl Store {
         ai_usage.drain(..excess);
         let chats = load_chats(&dir.join(CHATS_DIR));
         let launch_modes = load_or_reset(&dir.join(LAUNCH_MODES_FILE));
+        let mut pin_emoji: BTreeMap<String, String> = load_or_reset(&dir.join(PIN_EMOJI_FILE));
+        pin_emoji.retain(|url, e| pins.iter().any(|p| &p.url == url) && clean_emoji(e).as_deref() == Some(e.as_str()));
+        let offline = load_offline(&dir.join(OFFLINE_DIR), |u| {
+            pins.iter().any(|p| p.url == u) || bookmarks.iter().any(|b| b.url == u)
+        });
         Ok(Store {
             dir,
             inner: Mutex::new(Data {
@@ -274,6 +341,8 @@ impl Store {
                 pins,
                 chats,
                 launch_modes,
+                pin_emoji,
+                offline,
             }),
         })
     }
@@ -391,13 +460,117 @@ impl Store {
 
     /// Removes a pin and returns it.
     pub fn remove_pin(&self, url: &str) -> std::io::Result<Option<Bookmark>> {
-        let (removed, snapshot) = {
+        let (removed, snapshot, emoji) = {
             let mut d = self.data();
             let removed = d.pins.iter().position(|b| b.url == url).map(|i| d.pins.remove(i));
-            (removed, serde_json::to_vec(&d.pins)?)
+            let emoji = d.pin_emoji.remove(url).map(|_| serde_json::to_vec(&d.pin_emoji)).transpose()?;
+            (removed, serde_json::to_vec(&d.pins)?, emoji)
         };
         atomic_write(&self.dir.join(PINS_FILE), &snapshot)?;
+        if let Some(emoji) = emoji {
+            atomic_write(&self.dir.join(PIN_EMOJI_FILE), &emoji)?;
+        }
         Ok(removed)
+    }
+
+    /// Whether `url` (a committed page URL) is pinned or bookmarked and its
+    /// offline copy is missing or older than [`OFFLINE_REFRESH_MS`].
+    pub fn offline_copy_wanted(&self, url: &str, now_ms: u64) -> bool {
+        let d = self.data();
+        let saved = d.pins.iter().any(|p| p.url == url) || d.bookmarks.iter().any(|b| b.url == url);
+        saved
+            && d.offline
+                .iter()
+                .find(|e| e.url == url)
+                .is_none_or(|e| now_ms.saturating_sub(e.saved_ms) >= OFFLINE_REFRESH_MS)
+    }
+
+    /// Stores the offline copy of a pinned or bookmarked page, replacing
+    /// its previous one; deletes the oldest copies beyond
+    /// [`MAX_OFFLINE_TOTAL_BYTES`]. False when `url` is neither pinned nor
+    /// bookmarked or the copy is empty or too large.
+    pub fn save_offline_copy(&self, url: &str, data: &[u8], now_ms: u64) -> std::io::Result<bool> {
+        if data.is_empty() || data.len() > MAX_OFFLINE_COPY_BYTES {
+            return Ok(false);
+        }
+        let dir = self.dir.join(OFFLINE_DIR);
+        let file = offline_file(url);
+        let (index, evicted) = {
+            let mut d = self.data();
+            if !(d.pins.iter().any(|p| p.url == url) || d.bookmarks.iter().any(|b| b.url == url)) {
+                return Ok(false);
+            }
+            fs::create_dir_all(&dir)?;
+            atomic_write(&dir.join(&file), data)?;
+            d.offline.retain(|e| e.url != url && e.file != file);
+            d.offline.push(OfflineEntry { url: url.to_string(), file, saved_ms: now_ms, bytes: data.len() as u64 });
+            d.offline.sort_by_key(|e| std::cmp::Reverse(e.saved_ms));
+            let mut total = 0u64;
+            let mut evicted = Vec::new();
+            d.offline.retain(|e| {
+                total += e.bytes;
+                let keep = total <= MAX_OFFLINE_TOTAL_BYTES;
+                if !keep {
+                    evicted.push(e.file.clone());
+                }
+                keep
+            });
+            (serde_json::to_vec(&d.offline)?, evicted)
+        };
+        for f in evicted {
+            let _ = fs::remove_file(dir.join(f));
+        }
+        atomic_write(&dir.join(OFFLINE_INDEX), &index)?;
+        Ok(true)
+    }
+
+    /// The offline copy of `url` and when it was saved, if there is one and
+    /// the page is still pinned or bookmarked.
+    pub fn offline_copy(&self, url: &str) -> Option<(Vec<u8>, u64)> {
+        let entry = {
+            let d = self.data();
+            let saved = d.pins.iter().any(|p| p.url == url) || d.bookmarks.iter().any(|b| b.url == url);
+            d.offline.iter().find(|e| e.url == url && saved).cloned()?
+        };
+        let path = self.dir.join(OFFLINE_DIR).join(&entry.file);
+        if fs::metadata(&path).ok()?.len() > MAX_OFFLINE_COPY_BYTES as u64 {
+            return None;
+        }
+        Some((fs::read(path).ok()?, entry.saved_ms))
+    }
+
+    /// Deletes every offline copy (Settings → Cache).
+    pub fn clear_offline_copies(&self) {
+        self.data().offline.clear();
+        let _ = fs::remove_dir_all(self.dir.join(OFFLINE_DIR));
+    }
+
+    /// The emoji shown instead of a pin's favicon, if one was chosen.
+    pub fn pin_emoji(&self, url: &str) -> Option<String> {
+        self.data().pin_emoji.get(url).cloned()
+    }
+
+    /// Sets (or with `None` removes) a pin's emoji icon. False when `url`
+    /// is not pinned or the emoji is not acceptable ([`clean_emoji`]).
+    pub fn set_pin_emoji(&self, url: &str, emoji: Option<&str>) -> std::io::Result<bool> {
+        let snapshot = {
+            let mut d = self.data();
+            if !d.pins.iter().any(|p| p.url == url) {
+                return Ok(false);
+            }
+            match emoji {
+                Some(e) => {
+                    let Some(e) = clean_emoji(e) else { return Ok(false) };
+                    d.pin_emoji.insert(url.to_string(), e);
+                }
+                None => {
+                    d.pin_emoji.remove(url);
+                }
+            }
+            serde_json::to_vec(&d.pin_emoji)?
+        };
+        atomic_write(&self.dir.join(PIN_EMOJI_FILE), &snapshot)?;
+        Ok(true)
     }
 
     /// Removes a bookmark and returns it (to move it into the pinned grid).
@@ -724,6 +897,28 @@ pub fn png_data_url(png: &[u8]) -> Option<String> {
     Some(out)
 }
 
+/// Reads the offline index, keeping entries with a valid file name, an
+/// existing file and a URL that `keep` accepts (still pinned or
+/// bookmarked); deletes every other file in the folder.
+fn load_offline(dir: &Path, keep: impl Fn(&str) -> bool) -> Vec<OfflineEntry> {
+    let mut index: Vec<OfflineEntry> = load_or_reset(&dir.join(OFFLINE_INDEX));
+    index.retain(|e| valid_offline_file(&e.file) && keep(&e.url) && dir.join(&e.file).is_file());
+    if let Ok(entries) = fs::read_dir(dir) {
+        for f in entries.flatten() {
+            let name = f.file_name().to_string_lossy().to_string();
+            if name != OFFLINE_INDEX && !index.iter().any(|e| e.file == name) {
+                let _ = fs::remove_file(f.path());
+            }
+        }
+    }
+    if let Ok(bytes) = serde_json::to_vec(&index) {
+        if dir.is_dir() {
+            let _ = atomic_write(&dir.join(OFFLINE_INDEX), &bytes);
+        }
+    }
+    index
+}
+
 fn load_or_reset<T: DeserializeOwned + Default>(path: &Path) -> T {
     let Ok(meta) = fs::metadata(path) else { return T::default() };
     let parsed = if meta.len() > MAX_FILE_BYTES {
@@ -953,10 +1148,68 @@ mod tests {
     }
 
     #[test]
+    fn offline_copies() {
+        let dir = tmpdir("offline");
+        let url = "https://news.example/";
+        {
+            let s = Store::open(&dir).unwrap();
+            assert!(!s.offline_copy_wanted(url, 0), "not pinned or bookmarked");
+            assert!(!s.save_offline_copy(url, b"archive", 0).unwrap());
+            s.insert_bookmark(url, "News", 0, 0).unwrap();
+            assert!(s.offline_copy_wanted(url, 0));
+            assert!(!s.save_offline_copy(url, &[], 0).unwrap(), "empty");
+            assert!(s.save_offline_copy(url, b"archive", 1_000).unwrap());
+            assert!(!s.offline_copy_wanted(url, 1_000 + OFFLINE_REFRESH_MS - 1), "fresh");
+            assert!(s.offline_copy_wanted(url, 1_000 + OFFLINE_REFRESH_MS));
+            assert_eq!(s.offline_copy(url), Some((b"archive".to_vec(), 1_000)));
+            fs::write(dir.join(OFFLINE_DIR).join("stray.txt"), b"x").unwrap();
+        }
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.offline_copy(url).map(|c| c.1), Some(1_000), "kept across launches");
+        assert!(!dir.join(OFFLINE_DIR).join("stray.txt").exists(), "unlisted files are deleted");
+        s.take_bookmark(url).unwrap();
+        assert!(s.offline_copy(url).is_none(), "only while bookmarked");
+        let s = Store::open(&dir).unwrap();
+        assert!(fs::read_dir(dir.join(OFFLINE_DIR)).unwrap().count() == 1, "only the index is left");
+        s.insert_pin(url, "News", 0, 0).unwrap();
+        s.save_offline_copy(url, b"a2", 5).unwrap();
+        s.clear_offline_copies();
+        assert!(s.offline_copy(url).is_none() && !dir.join(OFFLINE_DIR).exists());
+        assert!(valid_offline_file(&offline_file(url)) && !valid_offline_file("../x.webarchive"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pin_emoji() {
+        assert_eq!(clean_emoji(" 📰 ").as_deref(), Some("📰"));
+        assert_eq!(
+            clean_emoji("👨\u{200D}👩\u{200D}👧").as_deref(),
+            Some("👨\u{200D}👩\u{200D}👧"),
+            "joined sequences survive"
+        );
+        for bad in ["", "  ", "a b", "\u{202E}x", "x\u{7}y", &"😀".repeat(MAX_EMOJI_CHARS + 1)] {
+            assert!(clean_emoji(bad).is_none(), "{bad:?}");
+        }
+        let dir = tmpdir("pin-emoji");
+        {
+            let s = Store::open(&dir).unwrap();
+            s.insert_pin("https://n.example/", "n", 0, 0).unwrap();
+            assert!(!s.set_pin_emoji("https://other.example/", Some("📰")).unwrap(), "only for pins");
+            assert!(!s.set_pin_emoji("https://n.example/", Some("not one")).unwrap());
+            assert!(s.set_pin_emoji("https://n.example/", Some("📰")).unwrap());
+        }
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.pin_emoji("https://n.example/").as_deref(), Some("📰"));
+        s.remove_pin("https://n.example/").unwrap();
+        assert!(s.pin_emoji("https://n.example/").is_none(), "removed with the pin");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn pins_are_capped_and_movable() {
         let dir = tmpdir("pins");
         let s = Store::open(&dir).unwrap();
-        for i in 0..6 {
+        for i in 0..MAX_PINS + 2 {
             s.insert_pin(&format!("https://p{i}.example/"), "p", 99, 0).unwrap();
         }
         assert_eq!(s.pins().len(), MAX_PINS);
@@ -964,7 +1217,7 @@ mod tests {
         s.move_pin("https://p3.example/", 0).unwrap();
         assert_eq!(s.pins()[0].url, "https://p3.example/");
         assert!(s.remove_pin("https://p3.example/").unwrap().is_some());
-        assert_eq!(s.pins().len(), 3);
+        assert_eq!(s.pins().len(), MAX_PINS - 1);
         assert!(s.insert_bookmark("https://b.example/", "b", 0, 0).unwrap());
         assert_eq!(s.take_bookmark("https://b.example/").unwrap().unwrap().title, "b");
         assert!(s.bookmarks().is_empty());

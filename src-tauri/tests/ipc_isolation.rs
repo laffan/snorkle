@@ -73,10 +73,14 @@ fn args(cmd: &str) -> serde_json::Value {
         "scroll_to_heading" => json!({ "tab": 1, "index": 0 }),
         "find_in_page" => json!({ "tab": 1, "query": "x", "step": "start" }),
         "share_page" => json!({ "tab": 1, "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0 }),
+        "image_action" => {
+            json!({ "url": "https://example.com/a.png", "action": "copy", "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0 })
+        }
         "define_term" => json!({ "term": "x", "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0 }),
         "set_shortcuts" => json!({ "bindings": [], "suspend": false }),
         "search_google" => json!({ "query": "x", "private": false }),
         "focus_chrome" | "get_shortcuts" => json!({}),
+        "set_appearance" => json!({ "mode": "dark" }),
         "set_tab_headers" => json!({ "tab": 1, "on": true }),
         "zoom_page" => json!({ "tab": 1, "step": "in" }),
         "delete_user_script" => json!({ "domain": "example.com" }),
@@ -86,6 +90,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "pin_tab" => json!({ "tab": 1, "index": 0 }),
         "pin_bookmark" | "move_pin" => json!({ "url": "https://example.com/", "index": 0 }),
         "unpin" => json!({ "url": "https://example.com/", "bookmarkIndex": null }),
+        "set_pin_emoji" => json!({ "url": "https://example.com/", "emoji": null }),
         "get_state" | "list_bookmarks" | "clear_history" => json!({}),
         _ => json!({ "tab": 1 }),
     }

@@ -63,7 +63,9 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::find_in_page,
         commands::end_find,
         commands::focus_chrome,
+        commands::set_appearance,
         commands::share_page,
+        commands::image_action,
         commands::zoom_page,
         commands::read_selection,
         commands::define_term,
@@ -95,6 +97,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::pin_bookmark,
         commands::move_pin,
         commands::unpin,
+        commands::set_pin_emoji,
     ])
 }
 
@@ -167,6 +170,10 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             }
             ChromeEvent::Selection(tab, rect) => {
                 handle.emit_to(CHROME_LABEL, "selection", serde_json::json!({ "tab": tab, "rect": rect }))
+            }
+            ChromeEvent::ImageMenu(tab, menu) => {
+                let (url, rect) = menu.map_or((None, None), |(u, r)| (Some(u), Some(r)));
+                handle.emit_to(CHROME_LABEL, "image_menu", serde_json::json!({ "tab": tab, "url": url, "rect": rect }))
             }
         };
     });

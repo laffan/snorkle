@@ -26,11 +26,11 @@ use std::rc::Rc;
 use objc2::ffi::{class_addMethod, object_getClass};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Imp, ProtocolObject, Sel};
-use objc2::{sel, MainThreadMarker};
+use objc2::{msg_send, sel, ClassType, MainThreadMarker};
 use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
     UIApplication, UICommand, UIKeyCommand, UIKeyInputEscape, UIKeyModifierFlags, UIMenuBuilder, UIMenuClose,
-    UIMenuFind, UIMenuSystem,
+    UIMenuFind, UIMenuSystem, UIResponder, UIView, UIViewController, UIWindow,
 };
 
 use crate::{shortcut_index, ContentEvents, KeyBinding, Shortcut, MOD_ALT, MOD_CTRL, MOD_SHIFT, SHORTCUTS};
@@ -45,6 +45,10 @@ thread_local! {
     /// The editor is recording a key: no shortcut runs; every candidate
     /// combination is reported instead.
     static RECORDING: Cell<bool> = const { Cell::new(false) };
+    /// The receiver of the last `snorkleNoteResponder:` (see
+    /// [`ensure_responder`]).
+    static NOTED: Cell<*const AnyObject> = const { Cell::new(std::ptr::null()) };
+    static NOTE_ADDED: Cell<bool> = const { Cell::new(false) };
     /// The key commands currently offered (rebuilt when bindings change).
     static COMMANDS: RefCell<Option<Retained<NSArray<UIKeyCommand>>>> = const { RefCell::new(None) };
 }
@@ -206,6 +210,53 @@ unsafe extern "C-unwind" fn build_menu(_this: *mut AnyObject, _cmd: Sel, builder
         Err(e) => format!("menu: could not edit the menu bar: {}", e.map(|e| format!("{e:?}")).unwrap_or_default()),
     };
     with_events(|e| e.note(&note));
+}
+
+unsafe extern "C-unwind" fn note_responder(this: *mut AnyObject, _cmd: Sel, _sender: *mut AnyObject) {
+    NOTED.with(|n| n.set(this));
+}
+
+/// If nothing that takes key input is first responder (iPadOS can leave
+/// it so after the app returns from another app, and then key commands are
+/// not delivered until a tap), makes `fallback` first responder. Finds
+/// the first responder with public API only: an action sent to a nil
+/// target goes to the first responder, and `snorkleNoteResponder:` (added
+/// to `UIResponder` here) records who received it; a window, the
+/// application or its delegate receiving it means there was none. Returns
+/// a note for the console.
+pub fn ensure_responder(mtm: MainThreadMarker, fallback: Option<&UIView>) -> &'static str {
+    unsafe {
+        if !NOTE_ADDED.with(Cell::get) {
+            let imp: Imp = std::mem::transmute::<unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject), Imp>(
+                note_responder,
+            );
+            let cls = UIResponder::class() as *const AnyClass as *mut AnyClass;
+            // SAFETY: the function matches the type encoding.
+            class_addMethod(cls, sel!(snorkleNoteResponder:), imp, c"v@:@".as_ptr());
+            NOTE_ADDED.with(|a| a.set(true));
+        }
+        NOTED.with(|n| n.set(std::ptr::null()));
+        let app = UIApplication::sharedApplication(mtm);
+        let handled: bool = msg_send![&*app, sendAction: sel!(snorkleNoteResponder:), to: Option::<&AnyObject>::None, from: Option::<&AnyObject>::None, forEvent: Option::<&AnyObject>::None];
+        let found = NOTED.with(Cell::get);
+        let real = handled
+            && found.as_ref().is_some_and(|r| {
+                let view: bool = msg_send![r, isKindOfClass: UIView::class()];
+                let controller: bool = msg_send![r, isKindOfClass: UIViewController::class()];
+                let window: bool = msg_send![r, isKindOfClass: UIWindow::class()];
+                (view || controller) && !window
+            });
+        NOTED.with(|n| n.set(std::ptr::null()));
+        if real {
+            return "keys: app active again; a view still has keyboard focus";
+        }
+        match fallback {
+            Some(v) if v.becomeFirstResponder() => {
+                "keys: app active again with no keyboard focus; gave it to the chrome"
+            }
+            _ => "keys: app active again with no keyboard focus; the chrome could not take it",
+        }
+    }
 }
 
 /// Installs the shortcuts on the app delegate's class. Main thread.

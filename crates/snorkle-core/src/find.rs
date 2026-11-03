@@ -102,7 +102,8 @@ return (st.cur+1)+'/'+st.r.length;
 }
 
 /// Removes the highlights and the find state (closing the bar).
-pub const CLEAR_JS: &str = "(function(){if(typeof CSS!=='undefined'&&CSS.highlights){CSS.highlights.delete('snorkle-find');\
+pub const CLEAR_JS: &str =
+    "(function(){if(typeof CSS!=='undefined'&&CSS.highlights){CSS.highlights.delete('snorkle-find');\
 CSS.highlights.delete('snorkle-find-current');}var s=document.getElementById('__snorkle_find');if(s)s.remove();\
 delete window.__snorkleFind;})();";
 

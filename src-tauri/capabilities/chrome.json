@@ -42,7 +42,9 @@
     "allow-find-in-page",
     "allow-end-find",
     "allow-focus-chrome",
+    "allow-set-appearance",
     "allow-share-page",
+    "allow-image-action",
     "allow-zoom-page",
     "allow-read-selection",
     "allow-define-term",
@@ -74,6 +76,7 @@
     "allow-pin-tab",
     "allow-pin-bookmark",
     "allow-move-pin",
-    "allow-unpin"
+    "allow-unpin",
+    "allow-set-pin-emoji"
   ]
 }

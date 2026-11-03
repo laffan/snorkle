@@ -43,11 +43,11 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{msg_send, sel, MainThreadMarker, MainThreadOnly};
-use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use objc2_foundation::{
     NSArray, NSDate, NSDictionary, NSKeyValueObservingOptions, NSNotification, NSNotificationCenter,
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSProcessInfo, NSSet, NSString,
-    NSURLRequest, NSURL, NSUUID,
+    NSURLRequest, NSURL, NSUUID, NSData, NSError,
 };
 use objc2_core_graphics::CGPath;
 use objc2_quartz_core::{
@@ -55,10 +55,10 @@ use objc2_quartz_core::{
     CAMediaTiming, CAMediaTimingFunction, CAShapeLayer, CATransaction,
 };
 use objc2_ui_kit::{
-    UIActivityViewController, UIApplication, UIApplicationDidEnterBackgroundNotification,
+    UIActivityViewController, UIApplication, UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification,
     UIApplicationDidReceiveMemoryWarningNotification, UIBezierPath, UIColor, UIControlEvents, UIRectCorner,
     UIReferenceLibraryViewController, UIRefreshControl, UITapGestureRecognizer, UIView, UIViewAutoresizing,
-    UIUserInterfaceStyle, UIViewController,
+    UIUserInterfaceStyle, UIViewController, UIDocumentPickerViewController, UIImage, UIPasteboard,
 };
 use objc2_web_kit::{
     WKContentMode, WKInactiveSchedulingPolicy, WKUserContentController,
@@ -92,6 +92,10 @@ struct View {
     web: Retained<WKWebView>,
     controller: Retained<WKUserContentController>,
     pane: Cell<Pane>,
+    /// Page scale (⋯ menu): the web view is laid out at its pane's size
+    /// divided by this and drawn scaled by it, so a scale below 1 gives the
+    /// page a wider viewport (more CSS pixels) with everything smaller.
+    scale: Cell<f64>,
     _tap: Retained<TapFocus>,
     _tap_recognizer: Retained<UITapGestureRecognizer>,
     _refresh: Retained<RefreshTarget>,
@@ -141,7 +145,8 @@ pub struct ContentHost {
     /// Where the chrome floats over the content area (window coordinates).
     holes: keys::Holes,
     /// The chrome's own web view (Tauri's), to give it keyboard focus.
-    chrome: Option<Retained<UIView>>,
+    /// The chrome's web view (shared with the did-become-active observer).
+    chrome: Rc<RefCell<Option<Retained<UIView>>>>,
 }
 
 impl ContentHost {
@@ -175,6 +180,24 @@ impl ContentHost {
             &bg,
         ));
 
+        // Back from another app, iPadOS may leave nothing first responder
+        // until the next tap, and then key commands (the shortcuts, e.g.
+        // ⌘T) are not delivered: give the chrome first-responder status in
+        // that case (a page or the chrome that still has it keeps it).
+        let chrome: Rc<RefCell<Option<Retained<UIView>>>> = Rc::default();
+        let (ev, ch) = (events.clone(), chrome.clone());
+        let active = RcBlock::new(move |_n: NonNull<NSNotification>| {
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            let note = menu::ensure_responder(mtm, ch.borrow().as_deref());
+            ev.note(note);
+        });
+        observers.push(center.addObserverForName_object_queue_usingBlock(
+            Some(UIApplicationDidBecomeActiveNotification),
+            None,
+            Some(&queue),
+            &active,
+        ));
+
         menu::install(mtm, events.clone());
         let holes = keys::Holes::default();
         // A container too, so it also leaves the holes (and their touches) out.
@@ -187,7 +210,7 @@ impl ContentHost {
             mtm,
             backdrop,
             holes,
-            chrome: None,
+            chrome,
             root,
             top: Cell::new(0.0),
             left: Cell::new(0.0),
@@ -258,7 +281,7 @@ impl ContentHost {
         let sheet = self.views.values().find(|v| v.pane.get() == Pane::Sheet && !v.container.isHidden());
         match sheet {
             Some(v) => {
-                self.place(&self.backdrop, self.content_frame());
+                self.place(&self.backdrop, self.content_frame(), 1.0);
                 self.root.bringSubviewToFront(&self.backdrop);
                 self.root.bringSubviewToFront(&v.container);
                 self.backdrop.setHidden(false);
@@ -292,19 +315,19 @@ impl ContentHost {
         let glide = animate.filter(|_| holes.len() == self.holes.borrow().len());
         *self.holes.borrow_mut() = holes;
         let grew = self.content_frame().size.width > before + 0.5;
-        let moves: Vec<(Retained<UIView>, CGRect)> =
-            self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()))).collect();
+        let moves: Vec<(Retained<UIView>, CGRect, f64)> =
+            self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()), v.scale.get())).collect();
         if let Some(lag) = animate {
             let holes = self.holes.borrow().clone();
             let block = RcBlock::new(move || {
-                for (view, frame) in &moves {
-                    place_view(view, *frame, &holes, glide);
+                for (view, frame, scale) in &moves {
+                    place_view(view, *frame, &holes, glide, *scale);
                 }
             });
             UIView::animateWithDuration_animations((GLIDE_SECONDS - lag).max(0.05), &block, self.mtm);
         } else {
-            for (view, frame) in &moves {
-                self.place(view, *frame);
+            for (view, frame, scale) in &moves {
+                self.place(view, *frame, *scale);
             }
         }
         for v in self.views.values() {
@@ -318,10 +341,10 @@ impl ContentHost {
         self.sync_backdrop();
     }
 
-    /// Sets a container's frame (and its web view's, which normally follows
-    /// by autoresizing) and cuts the holes out of it.
-    fn place(&self, view: &UIView, frame: CGRect) {
-        place_view(view, frame, &self.holes.borrow(), None);
+    /// Sets a container's frame (and its web view's, scaled by `scale`)
+    /// and cuts the holes out of it.
+    fn place(&self, view: &UIView, frame: CGRect, scale: f64) {
+        place_view(view, frame, &self.holes.borrow(), None, scale);
     }
 
     /// Replaces everything injected (user scripts, view modes with per-tab
@@ -372,15 +395,113 @@ impl ContentHost {
     /// # Safety
     /// `view` must be a valid `UIView*` that outlives the host, or null.
     pub unsafe fn set_chrome_view(&mut self, view: *mut c_void) {
-        self.chrome = unsafe { Retained::retain(view.cast::<UIView>()) };
+        *self.chrome.borrow_mut() = unsafe { Retained::retain(view.cast::<UIView>()) };
     }
 
     /// Gives the chrome's web view keyboard focus, so an input the chrome
     /// focuses after a shortcut (new-tab palette, find) receives typing
     /// even when a page, or nothing, was first responder.
     pub fn focus_chrome(&mut self) {
-        if let Some(v) = &self.chrome {
+        if let Some(v) = self.chrome.borrow().as_ref() {
             v.becomeFirstResponder();
+        }
+    }
+
+    /// Saves the tab's page as a web archive (an offline copy of a pinned
+    /// or bookmarked page); `done` gets its bytes, or `None` (failed, or
+    /// larger than `storage::MAX_OFFLINE_COPY_BYTES`).
+    pub fn save_offline(&mut self, tab: TabId, done: crate::DataDone) {
+        let Some(v) = self.views.get(&tab) else { return done(None) };
+        let done = Cell::new(Some(done));
+        let block = RcBlock::new(move |data: *mut NSData, _error: *mut NSError| {
+            let Some(done) = done.take() else { return };
+            let data = unsafe { data.as_ref() };
+            done(data.filter(|d| d.length() <= snorkle_core::storage::MAX_OFFLINE_COPY_BYTES).map(|d| d.to_vec()));
+        });
+        unsafe { v.web.createWebArchiveDataWithCompletionHandler(&block) };
+    }
+
+    /// Shows an offline copy (web archive) in the tab, with `url` as its
+    /// base URL, and JavaScript off for that load. The core has already
+    /// accepted it (`Browser::use_offline_copy`).
+    pub fn load_offline(&mut self, tab: TabId, url: &Url, data: Vec<u8>) {
+        let Some(v) = self.views.get(&tab) else { return };
+        let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(url.as_str())) else { return };
+        OFFLINE_LOADS.with(|s| s.borrow_mut().insert(Retained::as_ptr(&v.web) as usize));
+        let data = NSData::with_bytes(&data);
+        unsafe {
+            v.web.loadData_MIMEType_characterEncodingName_baseURL(
+                &data,
+                &NSString::from_str("application/x-webarchive"),
+                &NSString::from_str("utf-8"),
+                &nsurl,
+            );
+        }
+    }
+
+    /// Image menu, once the image was fetched (`http::fetch_image`): Copy
+    /// puts it on the pasteboard; Share opens the share sheet with it (as a
+    /// file, from `from`, window points); Download opens the Files export
+    /// picker for a copy. Files are written to a temporary folder that is
+    /// emptied on the next use.
+    pub fn image_result(
+        &mut self,
+        action: snorkle_core::imagemenu::ImageAction,
+        url: &Url,
+        data: Vec<u8>,
+        mime: &str,
+        from: (f64, f64, f64, f64),
+    ) -> Result<(), String> {
+        use snorkle_core::imagemenu::{download_name, ImageAction};
+        if action == ImageAction::Copy {
+            let image = UIImage::imageWithData(&NSData::with_bytes(&data)).ok_or("This kind of image cannot be copied.")?;
+            unsafe { UIPasteboard::generalPasteboard().setImage(Some(&image)) };
+            return Ok(());
+        }
+        let dir = std::env::temp_dir().join("snorkle-images");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(download_name(url, mime));
+        std::fs::write(&path, &data).map_err(|e| e.to_string())?;
+        let file = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        let top = self.top_controller().ok_or("The image could not be shown.")?;
+        let source = rect(from);
+        unsafe {
+            if action == ImageAction::Download {
+                let urls = NSArray::from_retained_slice(&[file]);
+                let picker = UIDocumentPickerViewController::initForExportingURLs_asCopy(
+                    UIDocumentPickerViewController::alloc(self.mtm),
+                    &urls,
+                    true,
+                );
+                top.presentViewController_animated_completion(&picker, true, None);
+            } else {
+                let items: Retained<NSArray> =
+                    NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(file))]);
+                let vc = UIActivityViewController::initWithActivityItems_applicationActivities(
+                    UIActivityViewController::alloc(self.mtm),
+                    &items,
+                    None,
+                );
+                let Some(pop) = vc.popoverPresentationController() else { return Err("The share sheet is unavailable.".into()) };
+                pop.setSourceView(Some(&self.root));
+                pop.setSourceRect(source);
+                top.presentViewController_animated_completion(&vc, true, None);
+            }
+        }
+        Ok(())
+    }
+
+    /// Light, dark or the system's appearance for the whole window: the
+    /// chrome, system UI it presents and content views (a content view in
+    /// dark pages mode keeps its own dark override).
+    pub fn set_appearance(&mut self, appearance: crate::Appearance) {
+        if let Some(window) = self.root.window() {
+            window.setOverrideUserInterfaceStyle(match appearance {
+                crate::Appearance::System => UIUserInterfaceStyle::Unspecified,
+                crate::Appearance::Light => UIUserInterfaceStyle::Light,
+                crate::Appearance::Dark => UIUserInterfaceStyle::Dark,
+            });
         }
     }
 
@@ -566,7 +687,7 @@ impl ContentHost {
                 Effect::ShowView { tab, pane } => {
                     if let Some(v) = self.views.get(tab) {
                         v.pane.set(*pane);
-                        self.place(&v.container, self.pane_frame(*pane));
+                        self.place(&v.container, self.pane_frame(*pane), v.scale.get());
                         self.root.bringSubviewToFront(&v.container);
                         v.container.setHidden(false);
                         set_corner_radius(&v.container, if *pane == Pane::Sheet { 12.0 } else { 0.0 });
@@ -586,8 +707,9 @@ impl ContentHost {
                 }
                 Effect::SetZoom { tab, percent } => {
                     if let Some(v) = self.views.get(tab) {
-                        // The core only sends levels from 50 to 300 %.
-                        v.web.setPageZoom(f64::from((*percent).clamp(50, 300)) / 100.0);
+                        // The core only sends levels from 50 to 150 %.
+                        v.scale.set(f64::from((*percent).clamp(50, 150)) / 100.0);
+                        self.place(&v.container, self.pane_frame(v.pane.get()), v.scale.get());
                     }
                 }
                 Effect::GoBack(tab) => {
@@ -718,6 +840,7 @@ impl ContentHost {
             web,
             controller,
             pane: Cell::new(Pane::Full),
+            scale: Cell::new(1.0),
             _tap: tap,
             _tap_recognizer: recognizer,
             _refresh: refresh,
@@ -789,6 +912,15 @@ thread_local! {
     static WEB_VIEW_TABS: RefCell<HashMap<usize, TabId>> = RefCell::new(HashMap::new());
     /// Popup web views returned to WebKit, waiting for `Effect::AdoptPopup`.
     static PENDING_POPUPS: RefCell<HashMap<TabId, WebViewParts>> = RefCell::new(HashMap::new());
+    /// Web views (by address) about to load an offline copy: its navigation
+    /// runs with JavaScript off (see `delegates.rs`).
+    static OFFLINE_LOADS: RefCell<std::collections::HashSet<usize>> = RefCell::new(std::collections::HashSet::new());
+}
+
+/// Whether `web`'s next main-frame navigation is an offline copy (and
+/// forgets it).
+pub(crate) fn take_offline_load(web: *const AnyObject) -> bool {
+    OFFLINE_LOADS.with(|s| s.borrow_mut().remove(&(web as usize)))
 }
 
 /// The tab of a mounted web view, by address.
@@ -821,10 +953,23 @@ impl Drop for ContentHost {
 }
 
 /// Sets a container's frame and its web view's, and cuts `holes` out.
-fn place_view(view: &UIView, frame: CGRect, holes: &[Hole], glide: Option<f64>) {
+/// The web view gets the container's size divided by `scale` and a scale
+/// transform, so it fills the container exactly (bounds and center, since
+/// `frame` is undefined on a transformed view).
+fn place_view(view: &UIView, frame: CGRect, holes: &[Hole], glide: Option<f64>, scale: f64) {
     view.setFrame(frame);
+    let b = view.bounds();
+    let s = if scale.is_finite() && (0.25..=4.0).contains(&scale) { scale } else { 1.0 };
     for sub in view.subviews().iter() {
-        sub.setFrame(view.bounds());
+        // Autoresizing works on frames: only while unscaled.
+        sub.setAutoresizingMask(if s == 1.0 {
+            UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight
+        } else {
+            UIViewAutoresizing::None
+        });
+        sub.setTransform(CGAffineTransform { a: s, b: 0.0, c: 0.0, d: s, tx: 0.0, ty: 0.0 });
+        sub.setBounds(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(b.size.width / s, b.size.height / s)));
+        sub.setCenter(CGPoint::new(b.size.width / 2.0, b.size.height / 2.0));
     }
     apply_mask(view, holes, glide);
 }

@@ -60,8 +60,9 @@ pub enum Effect {
         pane: Pane,
     },
     HideView(TabId),
-    /// Set the web view's page zoom (`percent` / 100). Also follows
-    /// `CreateView` for a tab whose zoom is not 100 %.
+    /// Set the web view's page scale (`percent` / 100: the page is laid out
+    /// for its pane divided by that and drawn scaled by it). Also follows
+    /// `CreateView` for a tab whose scale is not 100 %.
     SetZoom {
         tab: TabId,
         percent: u16,
@@ -186,6 +187,9 @@ pub struct TabView {
     pub launcher: Option<String>,
     /// Page zoom in percent.
     pub zoom: u16,
+    /// Set while the tab shows a saved offline copy: when it was saved
+    /// (Unix ms).
+    pub offline_saved_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -535,6 +539,9 @@ impl Browser {
             let shown = self.tab(id).and_then(|t| t.committed_url.clone());
             if shown.as_ref() != Some(&url) {
                 out.extend(self.navigate_trusted(id, url, now));
+                if let Some(t) = self.tab_mut(id) {
+                    t.landing = Some(key.to_string());
+                }
                 out.push(Effect::NotifyChrome);
             }
             return (id, out);
@@ -543,6 +550,7 @@ impl Browser {
         let id = self.new_tab_into(Profile::Default, now, &mut out);
         if let Some(t) = self.tab_mut(id) {
             t.launcher = Some(key.to_string());
+            t.landing = Some(key.to_string());
         }
         out.extend(self.navigate_trusted(id, url, now));
         out.push(Effect::NotifyChrome);
@@ -579,7 +587,7 @@ impl Browser {
         if private { Vec::new() } else { vec![Effect::PersistSession(self.session())] }
     }
 
-    /// Changes a tab's page zoom (⋯ menu). Saved with the session (not for
+    /// Changes a tab's page scale (⋯ menu). Saved with the session (not for
     /// private tabs); a tab without a web view gets it when one is created.
     pub fn zoom(&mut self, id: TabId, step: crate::tabs::ZoomStep) -> Vec<Effect> {
         let Some(t) = self.tab_mut(id) else { return Vec::new() };
@@ -597,6 +605,42 @@ impl Browser {
         }
         out.push(Effect::NotifyChrome);
         out
+    }
+
+    /// The network failed for `url` in `id` and an offline copy of it
+    /// (saved at `saved_ms`) exists: the host is about to load the copy
+    /// (with JavaScript off) in place of the error. Only for a live,
+    /// non-private tab whose failed load was its main page, and never for a
+    /// copy that itself failed. Clears the notice and expects the copy's
+    /// load (its base URL is `url`) as the browser's own. Returns false when
+    /// the copy must not be used.
+    pub fn use_offline_copy(&mut self, id: TabId, url: &Url, saved_ms: u64) -> (bool, Vec<Effect>) {
+        let mut out = Vec::new();
+        let Some(t) = self.tab_mut(id) else { return (false, out) };
+        let failed_here =
+            matches!(&t.notice, Some(Notice::LoadError { certificate: false, url: u, .. }) if u == url.as_str());
+        if t.life != Life::Live || t.is_private() || t.offline.is_some() || t.offline_tried || !failed_here {
+            return (false, out);
+        }
+        t.notice = None;
+        t.loading = true;
+        t.expected_load = Some((url.clone(), Source::Typed));
+        t.offline = Some(crate::tabs::OfflineCopy { saved_ms, committed: false });
+        t.offline_tried = true;
+        self.sync_visibility(&mut out);
+        out.push(Effect::NotifyChrome);
+        (true, out)
+    }
+
+    /// The pin or bookmark URL whose opening started the tab's current load
+    /// (see `Tab::landing`).
+    pub fn landing(&self, id: TabId) -> Option<String> {
+        self.tab(id).and_then(|t| t.landing.clone())
+    }
+
+    /// Whether the tab shows an offline copy (its page is not saved again).
+    pub fn shows_offline_copy(&self, id: TabId) -> bool {
+        self.tab(id).is_some_and(|t| t.offline.is_some())
     }
 
     /// Tabs with view-mode exemptions (restored from the session).
@@ -995,6 +1039,10 @@ impl Browser {
         if let Some(t) = self.tab_mut(id) {
             t.provisional = true;
             t.loading = true;
+            // Any load after an offline copy's own replaces it.
+            if t.offline.is_some_and(|o| o.committed) {
+                t.offline = None;
+            }
         }
         vec![Effect::NotifyChrome]
     }
@@ -1010,6 +1058,12 @@ impl Browser {
         t.notice = None;
         t.history_recorded = false;
         t.expected_load = None;
+        t.offline_tried = false;
+        if let Some(o) = t.offline.as_mut() {
+            o.committed = true;
+            // Not a visit: the copy is not written to history.
+            t.history_recorded = true;
+        }
         let private = t.is_private();
         if !private {
             out.push(Effect::PersistSession(self.session()));
@@ -1039,6 +1093,7 @@ impl Browser {
         let mut out = Vec::new();
         let Some(t) = self.tab_mut(id) else { return out };
         t.loading = false;
+        t.landing = None;
         t.provisional = false;
         t.progress = 100;
         if !t.is_private() && !t.history_recorded {
@@ -1062,6 +1117,14 @@ impl Browser {
         let mut out = Vec::new();
         let Some(t) = self.tab_mut(id) else { return out };
         t.loading = false;
+        if provisional {
+            t.landing = None;
+        }
+        // An offline copy that did not load: forget it (`offline_tried`
+        // keeps it from being tried again).
+        if provisional && t.offline.is_some_and(|o| !o.committed) {
+            t.offline = None;
+        }
         if !provisional {
             out.push(Effect::NotifyChrome);
             return out;
@@ -1393,6 +1456,7 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
         sheet_over: t.opener.filter(|_| t.sheet),
         launcher: t.launcher.clone(),
         zoom: t.zoom,
+        offline_saved_ms: t.offline.filter(|o| o.committed).map(|o| o.saved_ms),
     }
 }
 

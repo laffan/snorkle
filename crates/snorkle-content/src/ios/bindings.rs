@@ -13,7 +13,7 @@ use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
 use objc2::{extern_class, extern_methods, MainThreadOnly};
 use objc2_core_foundation::CGRect;
-use objc2_foundation::{NSObjectProtocol, NSString, NSURLRequest, NSURL};
+use objc2_foundation::{NSData, NSError, NSObjectProtocol, NSString, NSURLRequest, NSURL};
 use objc2_ui_kit::{UIResponder, UIScrollView, UIView};
 use objc2_web_kit::{WKNavigation, WKNavigationDelegate, WKUIDelegate, WKWebViewConfiguration};
 
@@ -121,11 +121,28 @@ impl WKWebView {
         #[unsafe(method_family = none)]
         pub unsafe fn setCustomUserAgent(&self, user_agent: Option<&NSString>);
 
-        /// iOS 14+. `@property (nonatomic) CGFloat pageZoom;` (1.0 is
-        /// 100 %); CGFloat is f64 on 64-bit iOS.
-        #[unsafe(method(setPageZoom:))]
+        /// iOS 9+. `- (nullable WKNavigation *)loadData:(NSData *)data
+        /// MIMEType:(NSString *)MIMEType characterEncodingName:(NSString *)
+        /// characterEncodingName baseURL:(NSURL *)baseURL;` (offline copies).
+        #[unsafe(method(loadData:MIMEType:characterEncodingName:baseURL:))]
         #[unsafe(method_family = none)]
-        pub unsafe fn setPageZoom(&self, zoom: f64);
+        pub unsafe fn loadData_MIMEType_characterEncodingName_baseURL(
+            &self,
+            data: &NSData,
+            mime_type: &NSString,
+            encoding: &NSString,
+            base_url: &NSURL,
+        ) -> Option<Retained<WKNavigation>>;
+
+        /// iOS 14+. `- (void)createWebArchiveDataWithCompletionHandler:
+        /// (void (^)(NSData *, NSError *))completionHandler;` One of the two
+        /// arguments is nil.
+        #[unsafe(method(createWebArchiveDataWithCompletionHandler:))]
+        #[unsafe(method_family = none)]
+        pub unsafe fn createWebArchiveDataWithCompletionHandler(
+            &self,
+            completion: &block2::DynBlock<dyn Fn(*mut NSData, *mut NSError)>,
+        );
 
         #[unsafe(method(scrollView))]
         #[unsafe(method_family = none)]

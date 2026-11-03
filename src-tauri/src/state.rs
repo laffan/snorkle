@@ -38,11 +38,19 @@ fn wall_ms() -> u64 {
 }
 
 pub enum StorageJob {
-    History { url: String, title: String },
+    History {
+        url: String,
+        title: String,
+    },
     Session(Session),
     /// Write a pending session now (the app is going to the background,
     /// where iOS may suspend or end it).
     Flush,
+    /// An offline copy (web archive) of a pinned or bookmarked page.
+    OfflineCopy {
+        url: String,
+        data: Vec<u8>,
+    },
 }
 
 /// Chrome notifications. `State` carries the full chrome state (small: one
@@ -62,6 +70,9 @@ pub enum ChromeEvent<'a> {
     HeadingCurrent(TabId, u32),
     /// Where a tab's text selection is (`None`: nothing selected).
     Selection(TabId, Option<snorkle_core::selection::SelectionRect>),
+    /// The image menu for an image in a tab's page (its URL, and where).
+    /// `None`: close it (the page was touched or scrolled).
+    ImageMenu(TabId, Option<(&'a str, snorkle_core::selection::SelectionRect)>),
     /// Console entries were removed (cleared, or the private session ended).
     ConsoleReset,
 }
@@ -232,7 +243,7 @@ impl Shared {
         }
     }
 
-    fn storage(&self, job: StorageJob) {
+    pub(crate) fn storage(&self, job: StorageJob) {
         if let Some(tx) = &self.storage_tx {
             let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(job);
         }
@@ -317,6 +328,9 @@ fn spawn_storage_worker(store: Arc<Store>) -> Sender<StorageJob> {
                         let due = pending.take().map(|(_, d)| d).unwrap_or_else(|| Instant::now() + SESSION_DELAY);
                         pending = Some((s, due));
                     }
+                    Some(StorageJob::OfflineCopy { url, data }) => {
+                        let _ = store.save_offline_copy(&url, &data, wall_ms());
+                    }
                     Some(StorageJob::Flush) | None => {
                         if let Some((s, _)) = pending.take() {
                             let _ = store.save_session(&s);
@@ -364,6 +378,55 @@ impl Events {
     }
 }
 
+impl Events {
+    /// After a page of a pin or bookmark finished loading: saves its
+    /// offline copy (under the pin's or bookmark's URL when the tab was
+    /// opened from it, else under the page's URL if that is pinned or
+    /// bookmarked), at most every `storage::OFFLINE_REFRESH_MS`.
+    fn save_offline_copy(&self, tab: TabId, landing: Option<String>, page: Option<String>) {
+        let Some(store) = self.shared.store.clone() else { return };
+        let now = wall_ms();
+        let Some(key) = landing.into_iter().chain(page).find(|k| store.offline_copy_wanted(k, now)) else { return };
+        let shared = self.shared.clone();
+        snorkle_content::dispatch_main(move || {
+            with_host(|h| {
+                h.save_offline(
+                    tab,
+                    Box::new(move |data| match data {
+                        Some(data) => {
+                            shared.log(
+                                console::Level::Info,
+                                Some(tab),
+                                &format!("offline copy saved: {key} ({} KB)", data.len() / 1024),
+                            );
+                            shared.storage(StorageJob::OfflineCopy { url: key, data });
+                        }
+                        None => shared.log(console::Level::Info, Some(tab), &format!("offline copy not saved: {key}")),
+                    }),
+                )
+            })
+        });
+    }
+
+    /// The network failed for `url`: if a pin's or bookmark's offline copy
+    /// exists for it (or for the item the tab was opened from), shows the
+    /// copy instead of the error.
+    fn show_offline_copy(&self, tab: TabId, url: Url, landing: Option<String>) {
+        let Some(store) = self.shared.store.clone() else { return };
+        let Some((data, saved_ms)) =
+            std::iter::once(url.to_string()).chain(landing).find_map(|k| store.offline_copy(&k))
+        else {
+            return;
+        };
+        let (ok, effects) = self.shared.browser().use_offline_copy(tab, &url, saved_ms);
+        self.shared.run(effects);
+        if ok {
+            self.shared.log(console::Level::Info, Some(tab), &format!("offline: showing the saved copy of {url}"));
+            snorkle_content::dispatch_main(move || with_host(|h| h.load_offline(tab, &url, data)));
+        }
+    }
+}
+
 impl ContentEvents for Events {
     fn decide_navigation(&self, tab: TabId, url: &Url, frame: Frame, kind: NavKind) -> Verdict {
         let (verdict, effects) = self.shared.browser().decide_navigation(tab, url, frame, kind, now_ms());
@@ -377,6 +440,18 @@ impl ContentEvents for Events {
     }
     fn selection(&self, tab: Option<TabId>, body: String) {
         let Some(tab) = tab else { return };
+        // The image watcher (C21) posts to the same handler.
+        if snorkle_core::imagemenu::is_image_report(&body) {
+            if snorkle_core::imagemenu::is_hide_report(&body) {
+                (self.shared.emit)(ChromeEvent::ImageMenu(tab, None));
+                return;
+            }
+            match snorkle_core::imagemenu::parse_report(&body) {
+                Some(r) => (self.shared.emit)(ChromeEvent::ImageMenu(tab, Some((r.url.as_str(), r.at)))),
+                None => self.shared.log(console::Level::Warn, Some(tab), "image menu: malformed report ignored"),
+            }
+            return;
+        }
         match snorkle_core::selection::parse_report(&body) {
             Some(rect) => (self.shared.emit)(ChromeEvent::Selection(tab, rect)),
             None => self.shared.log(console::Level::Warn, Some(tab), "selection menu: malformed report ignored"),
@@ -422,10 +497,28 @@ impl ContentEvents for Events {
         self.apply(|b| b.on_commit(tab, url));
     }
     fn finish(&self, tab: TabId) {
+        let (landing, page, skip) = {
+            let b = self.shared.browser();
+            let t = b.tab(tab);
+            let page = t.and_then(|t| t.committed_url.as_ref()).map(|u| u.to_string());
+            let skip = t.is_none_or(|t| t.is_private() || t.notice.is_some()) || b.shows_offline_copy(tab);
+            (b.landing(tab), page, skip)
+        };
         self.apply(|b| b.on_finish(tab));
+        if !skip {
+            self.save_offline_copy(tab, landing, page);
+        }
     }
     fn fail(&self, tab: TabId, provisional: bool, kind: NavErrorKind, failing_url: Option<Url>, message: String) {
+        let landing = self.shared.browser().landing(tab);
+        let offline = provisional && kind == NavErrorKind::Network;
+        let url = failing_url.clone();
         self.apply(|b| b.on_fail(tab, provisional, kind, failing_url, &message));
+        if offline {
+            if let Some(url) = url {
+                self.show_offline_copy(tab, url, landing);
+            }
+        }
     }
     fn url_changed(&self, tab: TabId, url: Url) {
         self.apply(|b| b.on_url_changed(tab, url));

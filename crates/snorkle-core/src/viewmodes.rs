@@ -241,24 +241,27 @@ pub const DARK_CSS: &str = concat!(
 /// skipping elements inside shadow trees, which the style cannot reach.
 /// Videos are looked for in the document and in open shadow roots one
 /// level deep; marks are refreshed when the document changes (at most once
-/// every 0.5 s), when a video's size becomes known, and on resize.
+/// every 0.5 s), when a video's size becomes known, and on resize. The
+/// search for shadow roots walks every element, so it runs only with the
+/// light check (document end, load, 1.5 s); later passes reuse its hosts.
 pub const DARK_DETECT_JS: &str = "(function(){\
 function lum(c){var m=/rgba?\\(([\\d.]+)[, ]+([\\d.]+)[, ]+([\\d.]+)(?:[,/ ]+([\\d.]+%?))?/.exec(c||'');if(!m)return null;\
 if(m[4]!==undefined&&parseFloat(m[4])<(m[4].slice(-1)==='%'?10:0.1))return null;return (0.2126*m[1]+0.7152*m[2]+0.0722*m[3])/255;}\
 function check(){var d=document.documentElement;if(!d)return;var root=lum(getComputedStyle(d).backgroundColor),l=root;\
 if(l===null&&document.body)l=lum(getComputedStyle(document.body).backgroundColor);\
 if(l===null){var cs=String(getComputedStyle(d).colorScheme||'');l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
-d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');boxes();}\
+d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');boxes(true);}\
 if(window.__snorkleDark){window.__snorkleDark.check();return;}\
-var BOX='data-snorkle-media-box',marked=[],timer=0;\
-function videos(){var out=[].slice.call(document.querySelectorAll('video')),all=document.querySelectorAll('*');\
-for(var i=0;i<all.length&&i<30000;i++){var r=all[i].shadowRoot;if(r)out=out.concat([].slice.call(r.querySelectorAll('video')));}return out;}\
+var BOX='data-snorkle-media-box',marked=[],timer=0,hosts=[];\
+function videos(full){var out=[].slice.call(document.querySelectorAll('video'));\
+if(full){hosts=[];var all=document.querySelectorAll('*');for(var i=0;i<all.length&&i<30000;i++){if(all[i].shadowRoot)hosts.push(all[i]);}}\
+hosts.forEach(function(e){var r=e.shadowRoot;if(r&&e.isConnected)out=out.concat([].slice.call(r.querySelectorAll('video')));});return out;}\
 function frame(v){var r=v.getBoundingClientRect();if(r.width<2||r.height<2)return null;var e=v;\
 for(var i=0;i<8;i++){var p=e.parentElement||(e.parentNode&&e.parentNode.host)||null;\
 if(!p||p===document.body||p===document.documentElement)return null;var q=p.getBoundingClientRect();\
 if(Math.abs(q.left-r.left)>4||Math.abs(q.top-r.top)>4||Math.abs(q.right-r.right)>4||Math.abs(q.bottom-r.bottom)>4)return null;\
 if(p.getRootNode()===document)return p;e=p;}return null;}\
-function boxes(){timer=0;var want=[];videos().forEach(function(v){var b=frame(v);if(b&&want.indexOf(b)<0)want.push(b);});\
+function boxes(full){timer=0;var want=[];videos(full===true).forEach(function(v){var b=frame(v);if(b&&want.indexOf(b)<0)want.push(b);});\
 marked.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(BOX);});\
 want.forEach(function(e){if(!e.hasAttribute(BOX))e.setAttribute(BOX,'');});marked=want;}\
 function later(){if(!timer)timer=setTimeout(boxes,500);}\

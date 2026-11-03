@@ -17,6 +17,7 @@ pub mod browser;
 pub mod console;
 pub mod find;
 pub mod idn;
+pub mod imagemenu;
 pub mod input;
 pub mod os;
 pub mod policy;

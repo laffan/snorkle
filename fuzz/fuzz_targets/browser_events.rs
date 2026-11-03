@@ -139,7 +139,7 @@ fuzz_target!(|data: &[u8]| {
             match e {
                 Effect::RecordHistory { url, .. } => assert!(!url.as_str().contains("secret"), "private history leaked"),
                 Effect::PersistSession(s) => assert!(s.tabs.iter().all(|t| !t.url.contains("secret")), "private session leaked"),
-                Effect::SetZoom { percent, .. } => assert!((50..=300).contains(percent), "zoom {percent} out of range"),
+                Effect::SetZoom { percent, .. } => assert!((50..=150).contains(percent), "scale {percent} out of range"),
                 _ => {}
             }
         }
