@@ -662,6 +662,14 @@ pub fn set_swipe_navigation(on: bool) {
     snorkle_content::dispatch_main(move || with_host(|h| h.set_swipe_navigation(on)));
 }
 
+/// Settings → General → Pull to refresh (iPadOS; no-op on macOS). Sent by
+/// the chrome at launch.
+#[tauri::command]
+pub fn set_pull_to_refresh(on: bool) {
+    snorkle_content::set_pull_to_refresh(on);
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_pull_to_refresh(on)));
+}
+
 /// Gives the chrome's web view keyboard focus (after a shortcut, a page or
 /// nothing may have it), so the input the chrome focuses next gets typing.
 #[tauri::command]

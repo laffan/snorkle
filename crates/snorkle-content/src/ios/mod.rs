@@ -91,6 +91,8 @@ struct View {
     _tap: Retained<TapFocus>,
     _tap_recognizer: Retained<UITapGestureRecognizer>,
     _refresh: Retained<RefreshTarget>,
+    /// Attached to the page's scroll view only while pull to refresh is on.
+    refresh_control: Retained<UIRefreshControl>,
     /// Debug builds: observes the page's scroll pan (`ScrollProbe`), with
     /// the recognizer it was added to (the target is removed on drop).
     probe: Option<(Retained<ScrollProbe>, Retained<objc2_ui_kit::UIGestureRecognizer>)>,
@@ -551,6 +553,22 @@ impl ContentHost {
         }
     }
 
+    /// Settings → General → Pull to refresh (also future views, through
+    /// `crate::pull_to_refresh`).
+    pub fn set_pull_to_refresh(&mut self, on: bool) {
+        for v in self.views.values() {
+            let scroll = unsafe { v.web.scrollView() };
+            if on {
+                scroll.setRefreshControl(Some(&v.refresh_control));
+            } else {
+                if v.refresh_control.isRefreshing() {
+                    v.refresh_control.endRefreshing();
+                }
+                scroll.setRefreshControl(None);
+            }
+        }
+    }
+
     pub fn set_appearance(&mut self, appearance: crate::Appearance) {
         if let Some(window) = self.root.window() {
             window.setOverrideUserInterfaceStyle(match appearance {
@@ -837,7 +855,9 @@ impl ContentHost {
         let refresh = RefreshTarget::new(mtm, TabIvars::new(tab, self.events.clone()));
         let control = UIRefreshControl::new(mtm);
         control.addTarget_action_forControlEvents(Some(&refresh), sel!(refresh:), UIControlEvents::ValueChanged);
-        web.scrollView().setRefreshControl(Some(&control));
+        if crate::pull_to_refresh() {
+            web.scrollView().setRefreshControl(Some(&control));
+        }
 
         // Debug builds: note each scroll gesture in the console (OPEN_QUESTIONS 109).
         let probe = if cfg!(debug_assertions) {
@@ -858,6 +878,7 @@ impl ContentHost {
             _tap: tap,
             _tap_recognizer: recognizer,
             _refresh: refresh,
+            refresh_control: control,
             probe,
             _nav: nav,
             _ui: ui,

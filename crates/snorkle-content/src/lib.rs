@@ -298,6 +298,19 @@ pub fn set_swipe_navigation(on: bool) {
     SWIPE_NAVIGATION.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Settings → General → Pull to refresh (iPadOS): whether content views get
+/// a `UIRefreshControl` (OPEN_QUESTIONS 109: suspected of turning trackpad
+/// scrolls into back swipes).
+static PULL_TO_REFRESH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn pull_to_refresh() -> bool {
+    PULL_TO_REFRESH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_pull_to_refresh(on: bool) {
+    PULL_TO_REFRESH.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub trait ContentEvents: 'static {
     fn decide_navigation(&self, tab: TabId, url: &Url, frame: Frame, kind: NavKind) -> Verdict;
     fn new_window_request(&self, opener: TabId, url: Url);

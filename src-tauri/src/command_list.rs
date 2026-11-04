@@ -92,4 +92,5 @@ pub const COMMANDS: &[&str] = &[
     "set_blocked_message",
     "tab_icons",
     "set_swipe_navigation",
+    "set_pull_to_refresh",
 ];

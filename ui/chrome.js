@@ -1286,6 +1286,20 @@
     applySwipeNav(on);
   }));
 
+  // Settings → General → Pull to refresh (iPadOS only; remembered here,
+  // sent at launch).
+  function applyPullRefresh(on) {
+    document.querySelectorAll('[data-pull-refresh]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.pullRefresh === 'on') === on)));
+    T.core.invoke('set_pull_to_refresh', { on }).catch(() => {});
+  }
+  $('pull-refresh-option').hidden = macOS;
+  applyPullRefresh(pref('pullRefresh') !== '0');
+  document.querySelectorAll('[data-pull-refresh]').forEach((b) => b.addEventListener('click', () => {
+    const on = b.dataset.pullRefresh === 'on';
+    setPref('pullRefresh', on ? '1' : '0');
+    applyPullRefresh(on);
+  }));
+
   $('appearance').addEventListener('change', () => {
     setPref('appearance', $('appearance').value);
     applyAppearance($('appearance').value);

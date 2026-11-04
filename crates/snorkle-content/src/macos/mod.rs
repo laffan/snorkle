@@ -545,6 +545,9 @@ impl ContentHost {
     /// Light, dark or the system's appearance for the window: the chrome,
     /// system UI it presents and content views (a content view in dark
     /// pages mode keeps its own dark appearance).
+    /// macOS has no pull to refresh.
+    pub fn set_pull_to_refresh(&mut self, _on: bool) {}
+
     /// Settings → General → Swipe between pages (also future views, through
     /// `crate::swipe_navigation`).
     pub fn set_swipe_navigation(&mut self, on: bool) {

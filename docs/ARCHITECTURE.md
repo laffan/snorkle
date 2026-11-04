@@ -351,7 +351,9 @@ has focus inside or a drag runs, the same states that keep its contents from fad
 and emoji show in colour then.
 
 **Swipe between pages** (Settings → General, default on; remembered by the chrome and sent at
-launch, `set_swipe_navigation`): WebKit's back/forward swipe on every content view.
+launch, `set_swipe_navigation`): WebKit's back/forward swipe on every content view. **Pull to refresh**
+(Settings → General, iPadOS, default on; `set_pull_to_refresh`) attaches or removes each page's
+`UIRefreshControl`.
 
 **Scroll probe** (debug builds, iPadOS, 2026-11-04): an extra target on each page's scroll pan
 recognizer notes every pan in the console when it ends: trackpad/mouse (no touches) or touch, the

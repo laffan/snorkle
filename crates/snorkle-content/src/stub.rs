@@ -81,6 +81,8 @@ impl ContentHost {
 
     pub fn set_swipe_navigation(&mut self, _on: bool) {}
 
+    pub fn set_pull_to_refresh(&mut self, _on: bool) {}
+
     /// No pages render off iOS: nothing to save.
     pub fn save_offline(&mut self, _tab: TabId, done: crate::DataDone) {
         done(None);

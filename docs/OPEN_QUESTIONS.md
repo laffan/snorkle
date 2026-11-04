@@ -651,5 +651,8 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
      refresh (2026-11-01). Debug builds now log each pan (scroll probe): a sideways gesture or a
      held Shift means the input is wrong before WebKit; a vertical gesture with a sideways page
      move or a Back navigation points at WebKit or our view setup. Settings → General → Swipe
-     between pages turns WebKit's back swipe off as a workaround.
+     between pages turns WebKit's back swipe off as a workaround. Owner report 2026-11-04: with
+     swipe off, trackpad scrolling is correct, so WebKit's back-swipe recognizer was taking vertical
+     trackpad pans. Suspect: the `UIRefreshControl` on the page's scroll view; Settings → General →
+     Pull to refresh (iPadOS) now turns it off to test with swipe on.
 

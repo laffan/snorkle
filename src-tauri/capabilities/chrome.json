@@ -100,6 +100,7 @@
     "allow-edit-blocked",
     "allow-set-blocked-message",
     "allow-tab-icons",
-    "allow-set-swipe-navigation"
+    "allow-set-swipe-navigation",
+    "allow-set-pull-to-refresh"
   ]
 }

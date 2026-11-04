@@ -119,6 +119,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::set_blocked_message,
         commands::tab_icons,
         commands::set_swipe_navigation,
+        commands::set_pull_to_refresh,
     ])
 }
 
