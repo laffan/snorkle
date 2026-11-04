@@ -69,6 +69,16 @@ unzip -q "$ipa" -d "$tmp"
 app=$(ls -d "$tmp"/Payload/*.app | head -n 1)
 [ -n "$app" ] || { echo "no .app inside $ipa" >&2; exit 1; }
 
+# Check the installed artifact, not just the source plist: an old generated
+# project or an Xcode override must not silently lose the input declaration.
+indirect=$(/usr/libexec/PlistBuddy -c 'Print :UIApplicationSupportsIndirectInputEvents' "$app/Info.plist" 2>/dev/null || true)
+if [ "$indirect" != true ]; then
+  echo "The built app does not enable native trackpad input (UIApplicationSupportsIndirectInputEvents)." >&2
+  echo "Check that Xcode is using the Info.plist merged from src-tauri/Info.ios.plist, then rebuild." >&2
+  exit 1
+fi
+echo "Trackpad input: native indirect input enabled in the built app."
+
 # What the app is actually signed with, and what its profile allows.
 ents=$(codesign -d --entitlements - --xml "$app" 2>/dev/null || codesign -d --entitlements :- "$app" 2>/dev/null || true)
 prof=$(security cms -D -i "$app/embedded.mobileprovision" 2>/dev/null || true)

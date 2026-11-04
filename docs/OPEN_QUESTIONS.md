@@ -651,8 +651,14 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
      refresh (2026-11-01). Debug builds now log each pan (scroll probe): a sideways gesture or a
      held Shift means the input is wrong before WebKit; a vertical gesture with a sideways page
      move or a Back navigation points at WebKit or our view setup. Settings → General → Swipe
-     between pages turns WebKit's back swipe off as a workaround. Owner report 2026-11-04: with
-     swipe off, trackpad scrolling is correct, so WebKit's back-swipe recognizer was taking vertical
-     trackpad pans. Suspect: the `UIRefreshControl` on the page's scroll view; Settings → General →
-     Pull to refresh (iPadOS) now turns it off to test with swipe on.
+     between pages turns WebKit's back swipe off for diagnosis. Updated owner report 2026-11-04:
+     neither that setting nor Pull to refresh fixes scrolling. It also fails in the chrome's
+     Settings modal. Portrait works; returning to landscape breaks it again. A horizontal trackpad
+     gesture was logged as a vertical pan (x 0, y nonzero), with no modifier keys held. This points
+     to an orientation mismatch before the individual web views, not page scrolling code or a
+     held Shift key. Candidate fix: explicitly enable `UIApplicationSupportsIndirectInputEvents`
+     in `Info.ios.plist` for native UIKit trackpad input across the app. `ios:build` checks that the
+     built IPA contains the enabled flag before installing it. **Not yet verified on an iPad**;
+     see `tests/device/trackpad.md`. If it persists with the flag confirmed, investigate window/scene
+     orientation and the root hover recognizer; do not swap scroll axes to mask the problem.
 

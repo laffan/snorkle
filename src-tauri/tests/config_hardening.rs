@@ -144,6 +144,16 @@ fn tauri_dependency_has_no_dynamic_acl() {
 }
 
 #[test]
+fn ios_opts_into_native_trackpad_input() {
+    let plist = fs::read_to_string(root().join("Info.ios.plist")).unwrap();
+    let compact: String = plist.split_whitespace().collect();
+    assert!(
+        compact.contains("<key>UIApplicationSupportsIndirectInputEvents</key><true/>"),
+        "both chrome and content must use UIKit's native indirect-input handling"
+    );
+}
+
+#[test]
 fn ios_plist_keeps_ats_for_app_and_requests_no_restricted_data() {
     let plist = fs::read_to_string(root().join("Info.ios.plist")).unwrap();
     assert!(plist.contains("<key>NSAllowsArbitraryLoadsInWebContent</key>"));
