@@ -1263,7 +1263,7 @@
     setSidebarState(sidebarMode, open);
   }
 
-  // ⌘\ / ⌘S / clicking the toggle: attached → show or hide; flyout (hidden
+  // ⌘\ / clicking the toggle: attached → show or hide; flyout (hidden
   // or showing) → attached and shown.
   function toggleSidebar() {
     if (narrow || sidebarMode === 'attached') setSidebarState(sidebarMode, !sidebarShown);
@@ -3048,7 +3048,7 @@
 
   // ---- keyboard shortcuts -------------------------------------------------
   //
-  // ⌘T new tab, ⌘S toggle sidebar, ⌘1–⌘5 the first five sidebar items
+  // ⌘T new tab, ⌘\ toggle sidebar, ⌘1–⌘5 the first five sidebar items
   // (pins, then bookmarks, then tabs). Handled here when the chrome has
   // keyboard focus; when a page has focus, native UIKeyCommands forward the
   // same names via the `shortcut` event.
@@ -3099,7 +3099,7 @@
     } else if (name === 'find') {
       openFind();
     } else if (name === 'split_columns' || name === 'split_rows') {
-      // ⌘D / ⌘⇧D: a new empty tab beside (or below) this one, ready for an
+      // ⌘S / ⌘⇧S: a new empty tab beside (or below) this one, ready for an
       // address; in a split, its layout changes instead.
       const orientation = name === 'split_columns' ? 'columns' : 'rows';
       T.core.invoke('split_new', { orientation })
@@ -3224,7 +3224,7 @@
   $('confirm-alt').addEventListener('click', () => { if (confirmAction && confirmAction.alt) confirmAction.alt(); });
   $('confirm-cancel').addEventListener('click', closeConfirm);
 
-  // ⌥⌘D (and the ⋯ menu's Bookmark row): bookmarks the page, moving this
+  // ⌘D (and the ⋯ menu's Bookmark row): bookmarks the page, moving this
   // tab into the bookmark; on a bookmark's own tab, removes the bookmark
   // and the tab becomes an ordinary tab again.
   const BOOKMARK_RESULT = {

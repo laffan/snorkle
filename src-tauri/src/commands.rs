@@ -599,7 +599,7 @@ pub fn set_split_ratio(s: S<'_>, permille: u16) {
     with_browser(&s, |b| b.set_split_ratio(permille));
 }
 
-/// ⌘D / ⌘⇧D: split the view with a new empty tab (returned), or change
+/// ⌘S / ⌘⇧S: split the view with a new empty tab (returned), or change
 /// the layout of the split the active tab is in (`None`).
 #[tauri::command]
 pub fn split_new(s: S<'_>, orientation: snorkle_core::browser::SplitOrientation) -> Option<u64> {

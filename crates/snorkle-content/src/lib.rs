@@ -147,8 +147,8 @@ pub enum Shortcut {
     /// Next / previous match of the find bar (opens it if closed).
     FindNext,
     FindPrevious,
-    /// Split the view with an empty tab: side by side (⌘D) or one above
-    /// the other (⌘⇧D); in a split, change its layout.
+    /// Split the view with an empty tab: side by side (⌘S) or one above
+    /// the other (⌘⇧S); in a split, change its layout.
     SplitColumns,
     SplitRows,
     /// The n-th item in the sidebar (pins, bookmarks, then tabs).
@@ -189,9 +189,9 @@ const fn def(
 pub const SHORTCUTS: &[ShortcutDef] = &[
     def("new_tab", ShortcutMenu::File, "New Tab", "t", 0, Shortcut::NewTab),
     def("reopen_tab", ShortcutMenu::File, "Reopen Closed Tab", "t", MOD_SHIFT, Shortcut::ReopenTab),
-    def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", MOD_ALT, Shortcut::Bookmark),
-    def("split_columns", ShortcutMenu::View, "Split Side by Side", "d", 0, Shortcut::SplitColumns),
-    def("split_rows", ShortcutMenu::View, "Split Top and Bottom", "d", MOD_SHIFT, Shortcut::SplitRows),
+    def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", 0, Shortcut::Bookmark),
+    def("split_columns", ShortcutMenu::View, "Split Side by Side", "s", 0, Shortcut::SplitColumns),
+    def("split_rows", ShortcutMenu::View, "Split Top and Bottom", "s", MOD_SHIFT, Shortcut::SplitRows),
     def("close_tab", ShortcutMenu::Close, "Close Tab", "w", 0, Shortcut::CloseTab),
     def("find", ShortcutMenu::Find, "Find on Page", "f", 0, Shortcut::Find),
     def("find_next", ShortcutMenu::Find, "Find Next", "g", 0, Shortcut::FindNext),
@@ -594,11 +594,15 @@ mod tests {
         assert_eq!(defaults.len(), SHORTCUTS.len());
         assert_eq!(
             shortcut_index("bookmark").map(|i| &defaults[i]),
-            Some(&KeyBinding { key: "d".into(), mods: MOD_ALT })
+            Some(&KeyBinding { key: "d".into(), mods: 0 })
         );
         assert_eq!(
             shortcut_index("split_columns").map(|i| &defaults[i]),
-            Some(&KeyBinding { key: "d".into(), mods: 0 })
+            Some(&KeyBinding { key: "s".into(), mods: 0 })
+        );
+        assert_eq!(
+            shortcut_index("split_rows").map(|i| &defaults[i]),
+            Some(&KeyBinding { key: "s".into(), mods: MOD_SHIFT })
         );
         let b = effective_bindings(&[("new_tab".into(), "N".into(), MOD_SHIFT)]).unwrap();
         assert_eq!(b[0], KeyBinding { key: "n".into(), mods: MOD_SHIFT });

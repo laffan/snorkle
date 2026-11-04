@@ -242,7 +242,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   `SplitView::orientation`), and the host places each container in its part, with an 8 pt gap.
   The chrome draws a divider in the gap (no page covers it, so it needs no cut-out); dragging it
   sets the pair's ratio (`SplitView::ratio`, first pane 20–80%, `Browser::set_split_ratio`),
-  which the core sends to the host (`Effect::SetSplitRatio`) before placing a pair's panes. ⌘D (side by side) and ⌘⇧D (top and bottom) open an empty tab of the active tab's
+  which the core sends to the host (`Effect::SetSplitRatio`) before placing a pair's panes. ⌘S (side by side) and ⌘⇧S (top and bottom; ⌘D / ⌘⇧D from 2026-11-03 to 2026-11-04) open an empty tab of the active tab's
   profile as the second pane (right or below) and focus its address bar
   (`Browser::split_new`); in a pair they only change its layout, never adding a third pane. The panes on screen are protected from discard; pairs not on screen can
   be discarded and are restored together when chosen. Choosing a tab outside any pair shows it
@@ -296,9 +296,9 @@ offers every accepted ⌘ combination and Escape and reports the one pressed. Sh
 closed tab, ⌘W close tab (a
 pin's tab never; a bookmark's tab after a confirmation, removing the bookmark; if the tab has left the
 bookmark's page, the confirmation offers Return to Original URL first), ⌘F find, ⌘G /
-⌘⇧G next / previous match, ⌘S or
-⌘\ sidebar, ⌘⇧\ right panels, ⌘D / ⌘⇧D split side by side / top and bottom, ⌥⌘D bookmark (on a
-bookmark's tab: un-bookmark; it was ⌘D until 2026-11-03), ⌘I images,
+⌘⇧G next / previous match, ⌘\ sidebar, ⌘⇧\ right panels, ⌘S / ⌘⇧S split side by side / top
+and bottom, ⌘D bookmark (on a bookmark's tab: un-bookmark; ⌥⌘D from 2026-11-03 to 2026-11-04,
+when ⌘D split the view), ⌘I images,
 ⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or ⌘-click its toggle; its toggle tab reaches 3 pt
 into the sidebar, over the resize edge's line, and in attached mode with the sidebar hidden and a
 pointer device it shows only while the pointer is within 100 pt of it: a hover recognizer on the
@@ -365,7 +365,7 @@ URL button is enabled only when the text matches. The core refuses the change un
 it receives is exact. This is a commitment device, not a security boundary (the file is in the
 app's container). The message is free to change.
 
-Bookmarking a tab (⌥⌘D, the ⋯ menu, or dragging it into the bookmarks) moves it into the
+Bookmarking a tab (⌘D, the ⋯ menu, or dragging it into the bookmarks) moves it into the
 bookmark: the tab becomes that bookmark's tab (`Browser::bind_launcher`) instead of a second tab
 appearing when the bookmark is opened. Un-bookmarking makes it an ordinary tab again.
 

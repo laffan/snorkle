@@ -136,7 +136,7 @@ pub const SPLIT_RATIO_MIN: u16 = 200;
 pub const SPLIT_RATIO_MAX: u16 = 800;
 
 /// How a pair is laid out: side by side (a vertical divider; ⌘D and
-/// dragging a tab onto another) or one above the other (⌘⇧D).
+/// dragging a tab onto another) or one above the other (⌘⇧S).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SplitOrientation {
@@ -470,7 +470,7 @@ impl Browser {
         out
     }
 
-    /// ⌘D (columns) and ⌘⇧D (rows). With the active tab in a pair: lays
+    /// ⌘S (columns) and ⌘⇧S (rows). With the active tab in a pair: lays
     /// the pair out that way (nothing if it already is; never a third
     /// pane). Otherwise: opens an empty tab of the active tab's profile and
     /// pairs it with the active tab, the new tab second (right or below)
