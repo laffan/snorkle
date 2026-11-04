@@ -633,3 +633,14 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
 106. **[verify] Attached URL bar.** On iPadOS the bar's height includes the home-indicator inset
      (`env(safe-area-inset-bottom)`); with the software keyboard up, pages and the bar behave as
      they did with the pill (the keyboard is over both).
+107. **[decide] Tab favicons and privacy.** Each site visited in a non-private tab now has its
+     `favicon.ico` fetched once (from the sandboxed favicon view, no cookies) and the host is
+     stored in `icons-v3/` until Settings → Cache is cleared; before, only pinned sites were. The
+     site already saw the visit, so the extra request reveals little, but the stored icons are a
+     list of hosts visited that history clearing does not remove.
+108. **[verify] ⌘T sometimes does nothing** (reported 2026-11-04). Not reproduced from the code.
+     Now logged per route (Menu → Console): if a press that did nothing has no
+     `shortcut new_tab` line, the key never reached Snorkle's key command (most likely the page,
+     or the chrome's web view with nothing focused, consumed it); if it has one, the palette
+     failed to open.
+

@@ -339,6 +339,19 @@ Page; other rows open the page as before. Search (`search_history`) matches titl
 the saved text (with a snippet). Images are not saved. Settings → Cache does not delete saved text
 (it belongs to history).
 
+**Tab favicons** (2026-11-04): each tab row shows its site's icon, fetched and stored the same way
+as pins' (F1: a sandboxed, script-free web view loads `https://<host>/favicon.ico`; the app keeps
+only a PNG it redrew itself, `icons-v3/`). The chrome asks `tab_icons` when its tabs' addresses
+change; Rust maps each tab to its host from the committed URL and returns stored icons the chrome
+lacks, and queues a fetch (once per host per session) only for non-private tabs, so a private
+visit is never fetched or written to disk. An `icons` event follows each stored icon. Bundled
+icons (Google sites, YouTube) and letter tiles are used as for pins.
+
+**Shortcut routes** (2026-11-04): every shortcut the chrome runs is logged in the console (Browser
+entries) with its route, `native` (the key command, as the `shortcut` event) or `chrome` (the
+chrome's own keydown), and repeats of one press are logged as such. ⌘T while the palette is
+already open keeps what was typed.
+
 **Attached URL bar** (⋯ → Attach URL Bar, 2026-11-04; remembered in the chrome's
 `localStorage`): the pill becomes a full-width bar along the bottom of the page area (between the
 sidebar and any docked right panel). It is no longer a hole: the chrome reports its height as the

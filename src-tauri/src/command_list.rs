@@ -90,4 +90,5 @@ pub const COMMANDS: &[&str] = &[
     "block_site",
     "edit_blocked",
     "set_blocked_message",
+    "tab_icons",
 ];

@@ -117,6 +117,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::block_site,
         commands::edit_blocked,
         commands::set_blocked_message,
+        commands::tab_icons,
     ])
 }
 
@@ -198,6 +199,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::Toast(m) => handle.emit_to(CHROME_LABEL, "toast", m),
             ChromeEvent::Shortcut(name) => handle.emit_to(CHROME_LABEL, "shortcut", name),
             ChromeEvent::PinsChanged => handle.emit_to(CHROME_LABEL, "pins", ()),
+            ChromeEvent::IconsChanged => handle.emit_to(CHROME_LABEL, "icons", ()),
             ChromeEvent::Console(entry) => handle.emit_to(CHROME_LABEL, "console", entry),
             ChromeEvent::ConsoleReset => handle.emit_to(CHROME_LABEL, "console_reset", ()),
             ChromeEvent::Downloads(list) => handle.emit_to(CHROME_LABEL, "downloads", list),

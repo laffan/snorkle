@@ -1161,3 +1161,50 @@ pub async fn set_blocked_message(s: S<'_>, message: String) -> Result<BlockedSta
     })
     .map(|(_, st)| st)
 }
+
+// ---- tab favicons ----------------------------------------------------------
+
+/// Favicons for the tab list: which host each tab's page is on, and the
+/// stored icons of those hosts the chrome does not have yet (`have`).
+#[derive(Serialize)]
+pub struct TabIcons {
+    /// Tab id → favicon host (tabs on an https page only).
+    tabs: std::collections::HashMap<u64, String>,
+    /// Host → `data:image/png;base64,…`.
+    icons: std::collections::HashMap<String, String>,
+}
+
+/// Hosts come from the core's committed URLs, not from the caller. Missing
+/// icons are fetched (once per session) for non-private tabs only, so a
+/// private visit is never fetched or written to disk; a private tab still
+/// shows an icon already stored for its host.
+#[tauri::command]
+pub async fn tab_icons(s: S<'_>, have: Vec<String>) -> Result<TabIcons, String> {
+    let have: std::collections::HashSet<String> = have.into_iter().take(1000).collect();
+    let pages: Vec<(u64, String, bool)> = {
+        let b = s.browser();
+        b.tab_ids()
+            .into_iter()
+            .filter_map(|id| {
+                let t = b.tab(id)?;
+                let host = snorkle_core::storage::favicon_host(t.committed_url.as_ref()?.as_str())?;
+                Some((id.0, host, t.is_private()))
+            })
+            .collect()
+    };
+    let mut out = TabIcons { tabs: Default::default(), icons: Default::default() };
+    let Some(store) = s.store.clone() else { return Ok(out) };
+    for (id, host, private) in pages {
+        if !have.contains(&host) && !out.icons.contains_key(&host) {
+            match store.icon(&host).and_then(|png| snorkle_core::storage::png_data_url(&png)) {
+                Some(url) => {
+                    out.icons.insert(host.clone(), url);
+                }
+                None if !private => crate::pins::fetch_icon(&s, host.clone()),
+                None => {}
+            }
+        }
+        out.tabs.insert(id, host);
+    }
+    Ok(out)
+}

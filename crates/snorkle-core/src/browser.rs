@@ -318,6 +318,11 @@ impl Browser {
         self.tabs.iter_mut().find(|t| t.id == id)
     }
 
+    /// Every tab, in sidebar order.
+    pub fn tab_ids(&self) -> Vec<TabId> {
+        self.tabs.iter().map(|t| t.id).collect()
+    }
+
     pub fn active(&self) -> Option<TabId> {
         self.active
     }

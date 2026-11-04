@@ -71,6 +71,8 @@ pub enum ChromeEvent<'a> {
     Shortcut(&'a str),
     /// Pinned grid content (e.g. a favicon) changed.
     PinsChanged,
+    /// A favicon was stored: the chrome asks for tab icons again.
+    IconsChanged,
     /// A new console entry.
     Console(&'a console::Entry),
     /// A tab's page outline changed (headers view).

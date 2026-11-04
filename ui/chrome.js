@@ -158,11 +158,57 @@
     return (state.splits || []).find((p) => p.left === id || p.right === id) || null;
   }
 
+  // Tab favicons (2026-11-04): Rust says which favicon host each tab is
+  // on and sends icons this chrome has not seen yet (`tab_icons`), fetching
+  // missing ones for non-private tabs; `icons` events say one arrived.
+  // Cached here by host for the session.
+  const tabIcons = { hosts: new Map(), icons: new Map(), version: 0 };
+  let tabIconsKey = '';
+  let tabIconsTimer = 0;
+  function refreshTabIcons(force) {
+    const key = state ? state.tabs.map((t) => `${t.id}=${t.url ? t.url.full : ''}`).join('|') : '';
+    if (!force && key === tabIconsKey) return;
+    tabIconsKey = key;
+    clearTimeout(tabIconsTimer);
+    tabIconsTimer = setTimeout(() => {
+      T.core.invoke('tab_icons', { have: [...tabIcons.icons.keys()] }).then((r) => {
+        tabIcons.hosts = new Map(Object.entries(r.tabs).map(([id, h]) => [Number(id), h]));
+        for (const [h, url] of Object.entries(r.icons)) {
+          if (typeof url === 'string' && url.startsWith('data:image/png;base64,')) tabIcons.icons.set(h, url);
+        }
+        tabIcons.version++;
+        if (state) renderTabs();
+      }).catch(() => {});
+    }, 250);
+  }
+
+  // A tab's icon: a bundled one for some Google sites and YouTube, the
+  // site's favicon, else its letter (an empty square for a new tab).
+  function tabIcon(t) {
+    const prefab = t.url && prefabIcon(t.url.full);
+    const fav = tabIcons.icons.get(tabIcons.hosts.get(t.id));
+    if (prefab || fav) {
+      const img = el('img', 'tab-icon');
+      img.alt = '';
+      img.addEventListener('error', () => img.replaceWith(t.url ? tabLetter(t) : el('span', 'tab-icon')));
+      img.src = prefab || fav;
+      return img;
+    }
+    return t.url ? tabLetter(t) : el('span', 'tab-icon');
+  }
+  function tabLetter(t) {
+    const l = letterTile(t.url);
+    l.classList.add('tab-icon');
+    return l;
+  }
+
   function renderTabs() {
+    refreshTabIcons(false);
     const key = JSON.stringify([
-      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable, t.sheet_over]),
+      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable, t.sheet_over, tabIcons.hosts.get(t.id)]),
       state.active,
       state.splits,
+      tabIcons.version,
     ]);
     if (key === tabsKey) return;
     tabsKey = key;
@@ -247,6 +293,7 @@
     node.dataset.tab = String(t.id);
     node.setAttribute('role', 'tab');
     node.setAttribute('aria-selected', String(selected));
+    node.appendChild(tabIcon(t));
     const open = el('button', 'open');
     open.appendChild(el('span', 't', t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
     if (t.url) {
@@ -2986,6 +3033,9 @@
   }
 
   function openPalette() {
+    // Already open (the same ⌘T arriving by both routes, or pressed again):
+    // keep what has been typed and only make sure the field has focus.
+    if (paletteOpen) { focusInput($('palette-input')); return; }
     closeMenu();
     if (narrow) setSidebar(false);
     paletteOpen = true;
@@ -3068,7 +3118,11 @@
   // A shortcut can arrive twice for one key press (the native menu command
   // and this page's own keydown, depending on what has focus).
   let lastShortcut = { name: '', at: 0 };
-  function runShortcut(name) {
+  // `via`: 'native' (a key command while a page or nothing had focus, sent
+  // as the `shortcut` event) or 'chrome' (this page's keydown). Both are
+  // logged (Menu → Console, Browser), so a press that does nothing shows
+  // which route it took, or that it never arrived.
+  function runShortcut(name, via = 'native') {
     // The shortcut editor's recording, done natively (record:<mods>:<key>).
     if (name.startsWith('record:')) {
       if (!recordingKey) return;
@@ -3079,8 +3133,12 @@
       return;
     }
     const now = performance.now();
-    if (name === lastShortcut.name && now - lastShortcut.at < 60) return;
+    if (name === lastShortcut.name && now - lastShortcut.at < 60) {
+      chromeLog('debug', `shortcut ${name} via ${via}: same press, already handled`);
+      return;
+    }
     lastShortcut = { name, at: now };
+    chromeLog('debug', `shortcut ${name} via ${via}`);
     if (name === 'new_tab') {
       openPalette();
     } else if (name === 'close_tab') {
@@ -3353,7 +3411,7 @@
     const name = hit ? hit.action : null;
     if (!name) return;
     ev.preventDefault();
-    runShortcut(name);
+    runShortcut(name, 'chrome');
   });
 
   // ---- keyboard shortcuts (Settings → Keyboard) ------------------------------
@@ -3761,6 +3819,7 @@
   T.event.listen('toast', (e) => toast(String(e.payload)));
   T.event.listen('shortcut', (e) => runShortcut(String(e.payload)));
   T.event.listen('pins', () => loadPins());
+  T.event.listen('icons', () => refreshTabIcons(true));
   T.event.listen('console', (e) => addConsole(e.payload));
   T.event.listen('console_reset', () => loadConsole());
   T.core.invoke('get_state').then((s) => { state = s; render(); });
