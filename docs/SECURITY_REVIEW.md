@@ -82,6 +82,7 @@ Sign-off log:
 
 | Date | Change | Approved by |
 |---|---|---|
+| 2026-11-04 | Candidate landscape trackpad fix: adopt Tao's single-window iOS scene lifecycle; verify the scene declaration in the built IPA; extend the debug-only native scroll probe with scene orientation and window-coordinate vectors. No new page-to-native channel. Device scrolling, launch/resume and external-link behavior remain unverified | Owner (continued bug report); **written sign-off pending** |
 | 2026-11-04 | Explicit `UIApplicationSupportsIndirectInputEvents=true` in `Info.ios.plist` for app-wide native trackpad input; device build checks the flag in the IPA before installation. No new permission, entitlement or page-to-native channel. Landscape regression remains subject to physical-iPad verification (`tests/device/trackpad.md`) | Owner (bug report in session); **written sign-off pending** |
 | 2026-10-29 | Content web views built with objc2-web-kit instead of wry (Tauri/wry cannot host child webviews on iOS) | Owner (in session) |
 | 2026-10-30 | Popups keep `window.opener` (C5) to fix OAuth logins, owner request; favicons via sandboxed snapshot (F1), owner choice; native keyboard shortcuts (C12) | Owner (in session) |

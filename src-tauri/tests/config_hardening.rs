@@ -154,6 +154,16 @@ fn ios_opts_into_native_trackpad_input() {
 }
 
 #[test]
+fn ios_uses_taos_single_window_scene() {
+    let plist = fs::read_to_string(root().join("Info.ios.plist")).unwrap();
+    let compact: String = plist.split_whitespace().collect();
+    assert!(compact.contains("<key>UIApplicationSceneManifest</key><dict>"));
+    assert!(compact.contains("<key>UIApplicationSupportsMultipleScenes</key><false/>"));
+    assert!(compact.contains("<key>UIWindowSceneSessionRoleApplication</key><array>"));
+    assert!(compact.contains("<key>UISceneDelegateClassName</key><string>TaoSceneDelegate</string>"));
+}
+
+#[test]
 fn ios_plist_keeps_ats_for_app_and_requests_no_restricted_data() {
     let plist = fs::read_to_string(root().join("Info.ios.plist")).unwrap();
     assert!(plist.contains("<key>NSAllowsArbitraryLoadsInWebContent</key>"));

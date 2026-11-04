@@ -188,9 +188,27 @@ define_class!(
                     i.start.set((offset.x, offset.y));
                     i.touches.set(g.numberOfTouches());
                     i.mods.set(g.modifierFlags());
+                    if let Some(window) = view.window() {
+                        let scene: Option<Retained<AnyObject>> = unsafe { msg_send![&*window, windowScene] };
+                        let orientation: isize = scene.as_ref().map_or(0, |scene| unsafe {
+                            msg_send![&**scene, interfaceOrientation]
+                        });
+                        // Public UIKit coordinates only. Comparing the window and
+                        // view vectors helps distinguish event rotation from layout.
+                        i.tab.events.note(&format!(
+                            "scroll orientation tab {}: scene {}, interface {} (1 portrait, 2 upside-down, 3 landscape-left, 4 landscape-right)",
+                            i.tab.tab.0, scene.is_some(), orientation,
+                        ));
+                    }
                 }
                 UIGestureRecognizerState::Ended | UIGestureRecognizerState::Cancelled => {
                     let t: objc2_core_foundation::CGPoint = unsafe { msg_send![g, translationInView: &*view] };
+                    if let Some(window) = view.window() {
+                        let w: objc2_core_foundation::CGPoint = unsafe { msg_send![g, translationInView: &*window] };
+                        i.tab.events.note(&format!(
+                            "scroll window vector tab {}: x {:+.0} y {:+.0}", i.tab.tab.0, w.x, w.y,
+                        ));
+                    }
                     let (sx, sy) = i.start.get();
                     let m = i.mods.get();
                     let mut held = Vec::new();

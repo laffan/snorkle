@@ -11,6 +11,26 @@
        relying on touch compatibility events. No new permissions or IPC. -->
   <key>UIApplicationSupportsIndirectInputEvents</key>
   <true/>
+  <!-- Use Tao's scene lifecycle so the window is created with its scene's
+       orientation. Keep a single app window; Tao supplies the scene delegate.
+       SECURITY-REVIEW: changes window lifecycle, not permissions or IPC. -->
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
+    <key>UISceneConfigurations</key>
+    <dict>
+      <key>UIWindowSceneSessionRoleApplication</key>
+      <array>
+        <dict>
+          <key>UISceneConfigurationName</key>
+          <string>Default Configuration</string>
+          <key>UISceneDelegateClassName</key>
+          <string>TaoSceneDelegate</string>
+        </dict>
+      </array>
+    </dict>
+  </dict>
   <!-- Image menu → Share Image: the share sheet's "Save Image" adds the
        image to Photos, which iOS refuses (terminating the app) without a
        purpose string. Add-only access; the app never reads the library. -->

@@ -656,9 +656,16 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
      Settings modal. Portrait works; returning to landscape breaks it again. A horizontal trackpad
      gesture was logged as a vertical pan (x 0, y nonzero), with no modifier keys held. This points
      to an orientation mismatch before the individual web views, not page scrolling code or a
-     held Shift key. Candidate fix: explicitly enable `UIApplicationSupportsIndirectInputEvents`
-     in `Info.ios.plist` for native UIKit trackpad input across the app. `ios:build` checks that the
-     built IPA contains the enabled flag before installing it. **Not yet verified on an iPad**;
-     see `tests/device/trackpad.md`. If it persists with the flag confirmed, investigate window/scene
-     orientation and the root hover recognizer; do not swap scroll axes to mask the problem.
+     held Shift key. The owner tested the explicit `UIApplicationSupportsIndirectInputEvents`
+     opt-in (`9cb5dd3`): **no improvement**. Horizontal gestures still report vertical pans.
+     Next candidate: declare a single-window `UIApplicationSceneManifest` with `TaoSceneDelegate`.
+     In pinned tao 0.37.2, the manifest makes startup wait for scene connection, and the window is
+     attached to that scene before its root controller is installed. Without it, startup takes the
+     legacy application-delegate path. This may resolve a scene/window coordinate mismatch but is
+     **not yet verified on an iPad**. `ios:build` checks the scene declaration in the actual IPA.
+     Debug scroll logs now include live scene orientation and pan vectors in window coordinates.
+     See `tests/device/trackpad.md`, including lifecycle and external-link checks. If this also fails,
+     compare those vectors and inspect the root hover recognizer before considering an explicit
+     orientation-aware indirect-input correction; swapping page offsets alone would miss Settings,
+     nested scroll areas, inertia and history gestures.
 

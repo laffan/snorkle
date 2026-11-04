@@ -78,6 +78,13 @@ if [ "$indirect" != true ]; then
   exit 1
 fi
 echo "Trackpad input: native indirect input enabled in the built app."
+scene_delegate=$(/usr/libexec/PlistBuddy -c 'Print :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneDelegateClassName' "$app/Info.plist" 2>/dev/null || true)
+multiple_scenes=$(/usr/libexec/PlistBuddy -c 'Print :UIApplicationSceneManifest:UIApplicationSupportsMultipleScenes' "$app/Info.plist" 2>/dev/null || true)
+if [ "$scene_delegate" != TaoSceneDelegate ] || [ "$multiple_scenes" != false ]; then
+  echo "The built app does not declare the expected single-window Tao scene. Check the merged Info.plist and rebuild." >&2
+  exit 1
+fi
+echo "Window orientation: single-window Tao scene declared in the built app."
 
 # What the app is actually signed with, and what its profile allows.
 ents=$(codesign -d --entitlements - --xml "$app" 2>/dev/null || codesign -d --entitlements :- "$app" 2>/dev/null || true)
