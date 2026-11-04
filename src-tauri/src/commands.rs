@@ -654,6 +654,14 @@ pub fn set_appearance(mode: String) {
     snorkle_content::dispatch_main(move || with_host(|h| h.set_appearance(mode)));
 }
 
+/// Settings → General → Swipe between pages: WebKit's back/forward swipe
+/// on every page (now and later). Sent by the chrome at launch.
+#[tauri::command]
+pub fn set_swipe_navigation(on: bool) {
+    snorkle_content::set_swipe_navigation(on);
+    snorkle_content::dispatch_main(move || with_host(|h| h.set_swipe_navigation(on)));
+}
+
 /// Gives the chrome's web view keyboard focus (after a shortcut, a page or
 /// nothing may have it), so the input the chrome focuses next gets typing.
 #[tauri::command]
@@ -1164,12 +1172,15 @@ pub async fn set_blocked_message(s: S<'_>, message: String) -> Result<BlockedSta
 
 // ---- tab favicons ----------------------------------------------------------
 
-/// Favicons for the tab list: which host each tab's page is on, and the
-/// stored icons of those hosts the chrome does not have yet (`have`).
+/// Favicons for the tab list and the bookmarks: which host each tab's page
+/// and each bookmark is on, and the stored icons of those hosts the chrome
+/// does not have yet (`have`).
 #[derive(Serialize)]
 pub struct TabIcons {
     /// Tab id → favicon host (tabs on an https page only).
     tabs: std::collections::HashMap<u64, String>,
+    /// Bookmark URL → favicon host (https bookmarks only).
+    bookmarks: std::collections::HashMap<String, String>,
     /// Host → `data:image/png;base64,…`.
     icons: std::collections::HashMap<String, String>,
 }
@@ -1192,19 +1203,30 @@ pub async fn tab_icons(s: S<'_>, have: Vec<String>) -> Result<TabIcons, String> 
             })
             .collect()
     };
-    let mut out = TabIcons { tabs: Default::default(), icons: Default::default() };
+    let mut out = TabIcons { tabs: Default::default(), bookmarks: Default::default(), icons: Default::default() };
     let Some(store) = s.store.clone() else { return Ok(out) };
-    for (id, host, private) in pages {
-        if !have.contains(&host) && !out.icons.contains_key(&host) {
-            match store.icon(&host).and_then(|png| snorkle_core::storage::png_data_url(&png)) {
-                Some(url) => {
-                    out.icons.insert(host.clone(), url);
-                }
-                None if !private => crate::pins::fetch_icon(&s, host.clone()),
-                None => {}
-            }
+    let want = |host: &String, private: bool, icons: &mut std::collections::HashMap<String, String>| {
+        if have.contains(host) || icons.contains_key(host) {
+            return;
         }
+        match store.icon(host).and_then(|png| snorkle_core::storage::png_data_url(&png)) {
+            Some(url) => {
+                icons.insert(host.clone(), url);
+            }
+            None if !private => crate::pins::fetch_icon(&s, host.clone()),
+            None => {}
+        }
+    };
+    for (id, host, private) in pages {
+        want(&host, private, &mut out.icons);
         out.tabs.insert(id, host);
+    }
+    // Bookmarks are never private (private tabs cannot be bookmarked).
+    for b in store.bookmarks() {
+        if let Some(host) = snorkle_core::storage::favicon_host(&b.url) {
+            want(&host, false, &mut out.icons);
+            out.bookmarks.insert(b.url, host);
+        }
     }
     Ok(out)
 }

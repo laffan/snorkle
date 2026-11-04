@@ -643,4 +643,13 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
      `shortcut new_tab` line, the key never reached Snorkle's key command (most likely the page,
      or the chrome's web view with nothing focused, consumed it); if it has one, the palette
      failed to open.
+109. **[verify] Trackpad scrolls go sideways or Back on iPadOS** (reported 2026-11-04; Snorkle only,
+     not Safari; touch scrolling is fine; recent). Not explained by the code: no injected script
+     handles wheel or scroll in a way that redirects it, view modes off changes nothing, and the
+     page-scale transform is a uniform scale. Candidates added in the last updates: the root
+     view's hover recognizer (edge tab, 2026-11-03), the page-scale transform (2026-11-03), pull to
+     refresh (2026-11-01). Debug builds now log each pan (scroll probe): a sideways gesture or a
+     held Shift means the input is wrong before WebKit; a vertical gesture with a sideways page
+     move or a Back navigation points at WebKit or our view setup. Settings → General → Swipe
+     between pages turns WebKit's back swipe off as a workaround.
 

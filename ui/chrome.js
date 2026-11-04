@@ -162,44 +162,56 @@
   // on and sends icons this chrome has not seen yet (`tab_icons`), fetching
   // missing ones for non-private tabs; `icons` events say one arrived.
   // Cached here by host for the session.
-  const tabIcons = { hosts: new Map(), icons: new Map(), version: 0 };
+  const tabIcons = { hosts: new Map(), bookmarks: new Map(), icons: new Map(), version: 0 };
   let tabIconsKey = '';
   let tabIconsTimer = 0;
   function refreshTabIcons(force) {
-    const key = state ? state.tabs.map((t) => `${t.id}=${t.url ? t.url.full : ''}`).join('|') : '';
+    const key = (state ? state.tabs.map((t) => `${t.id}=${t.url ? t.url.full : ''}`).join('|') : '') + '#' + bookmarks.map((b) => b.url).join('|');
     if (!force && key === tabIconsKey) return;
     tabIconsKey = key;
     clearTimeout(tabIconsTimer);
     tabIconsTimer = setTimeout(() => {
       T.core.invoke('tab_icons', { have: [...tabIcons.icons.keys()] }).then((r) => {
         tabIcons.hosts = new Map(Object.entries(r.tabs).map(([id, h]) => [Number(id), h]));
+        tabIcons.bookmarks = new Map(Object.entries(r.bookmarks || {}));
+        const bmBefore = bookmarkIconsKey();
         for (const [h, url] of Object.entries(r.icons)) {
           if (typeof url === 'string' && url.startsWith('data:image/png;base64,')) tabIcons.icons.set(h, url);
         }
         tabIcons.version++;
         if (state) renderTabs();
+        if (bookmarkIconsKey() !== bmBefore || Object.keys(r.icons).length) renderBookmarks();
       }).catch(() => {});
     }, 250);
   }
 
-  // A tab's icon: a bundled one for some Google sites and YouTube, the
-  // site's favicon, else its letter (an empty square for a new tab).
-  function tabIcon(t) {
-    const prefab = t.url && prefabIcon(t.url.full);
-    const fav = tabIcons.icons.get(tabIcons.hosts.get(t.id));
+  function bookmarkIconsKey() {
+    return bookmarks.map((b) => (tabIcons.icons.has(tabIcons.bookmarks.get(b.url)) ? 1 : 0)).join('');
+  }
+
+  // A row's icon (tabs and bookmarks): a bundled one for some Google sites
+  // and YouTube, the site's favicon, else its letter (an empty square for
+  // a new tab). `display` is the row's DisplayUrl, `url` its address.
+  function rowIcon(url, display, host) {
+    const prefab = url && prefabIcon(url);
+    const fav = host && tabIcons.icons.get(host);
+    const fallback = () => {
+      if (!display) return el('span', 'tab-icon');
+      const l = letterTile(display);
+      l.classList.add('tab-icon');
+      return l;
+    };
     if (prefab || fav) {
       const img = el('img', 'tab-icon');
       img.alt = '';
-      img.addEventListener('error', () => img.replaceWith(t.url ? tabLetter(t) : el('span', 'tab-icon')));
+      img.addEventListener('error', () => img.replaceWith(fallback()));
       img.src = prefab || fav;
       return img;
     }
-    return t.url ? tabLetter(t) : el('span', 'tab-icon');
+    return fallback();
   }
-  function tabLetter(t) {
-    const l = letterTile(t.url);
-    l.classList.add('tab-icon');
-    return l;
+  function tabIcon(t) {
+    return rowIcon(t.url && t.url.full, t.url, tabIcons.hosts.get(t.id));
   }
 
   function renderTabs() {
@@ -996,6 +1008,7 @@
       const node = el('div', 'bm');
       node.dataset.index = String(index);
       node.dataset.url = b.url;
+      node.appendChild(rowIcon(b.url, b.display, tabIcons.bookmarks.get(b.url)));
       const open = el('button', 'open');
       open.appendChild(el('span', 't', b.title || b.display.registrable));
       const host = el('span', 'h');
@@ -1018,6 +1031,7 @@
       list.appendChild(node);
     });
     if (state) { renderLauncherSelection(); renderToolbar(activeTab()); }
+    refreshTabIcons(false);
   }
 
   // ---- drag and drop ------------------------------------------------------
@@ -1259,6 +1273,19 @@
     T.core.invoke('set_appearance', { mode }).catch(() => {});
   }
   applyAppearance(pref('appearance') || 'system');
+  // Settings → General → Swipe between pages (WebKit's back/forward swipe
+  // on pages; remembered here, sent at launch).
+  function applySwipeNav(on) {
+    document.querySelectorAll('[data-swipe-nav]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.swipeNav === 'on') === on)));
+    T.core.invoke('set_swipe_navigation', { on }).catch(() => {});
+  }
+  applySwipeNav(pref('swipeNav') !== '0');
+  document.querySelectorAll('[data-swipe-nav]').forEach((b) => b.addEventListener('click', () => {
+    const on = b.dataset.swipeNav === 'on';
+    setPref('swipeNav', on ? '1' : '0');
+    applySwipeNav(on);
+  }));
+
   $('appearance').addEventListener('change', () => {
     setPref('appearance', $('appearance').value);
     applyAppearance($('appearance').value);

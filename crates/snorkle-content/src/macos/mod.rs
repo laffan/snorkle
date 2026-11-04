@@ -545,6 +545,14 @@ impl ContentHost {
     /// Light, dark or the system's appearance for the window: the chrome,
     /// system UI it presents and content views (a content view in dark
     /// pages mode keeps its own dark appearance).
+    /// Settings → General → Swipe between pages (also future views, through
+    /// `crate::swipe_navigation`).
+    pub fn set_swipe_navigation(&mut self, on: bool) {
+        for v in self.views.values() {
+            unsafe { v.web.setAllowsBackForwardNavigationGestures(on && CONTENT_VIEW_SPEC.allows_back_forward_gestures) };
+        }
+    }
+
     pub fn set_appearance(&mut self, appearance: crate::Appearance) {
         let named = |name: &NSString| NSAppearance::appearanceNamed(name);
         let a = match appearance {
@@ -798,7 +806,7 @@ pub(crate) unsafe fn build_web_view(
     if web.respondsToSelector(sel!(setInspectable:)) {
         web.setInspectable(spec.inspectable);
     }
-    web.setAllowsBackForwardNavigationGestures(spec.allows_back_forward_gestures);
+    web.setAllowsBackForwardNavigationGestures(spec.allows_back_forward_gestures && crate::swipe_navigation());
     web.setAllowsLinkPreview(spec.allows_link_preview);
     // Pinch to zoom on the trackpad, as on the iPad (off by default on macOS).
     web.setAllowsMagnification(true);

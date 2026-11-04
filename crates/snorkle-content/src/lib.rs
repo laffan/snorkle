@@ -286,6 +286,18 @@ pub fn effective_bindings(overrides: &[(String, String, u8)]) -> Result<Vec<KeyB
 /// Implementations MUST NOT call back into [`ContentHost`] synchronously;
 /// schedule resulting effects with [`dispatch_main`] instead. They must
 /// also be fast: `decide_navigation` blocks the navigation.
+/// Settings → General → Swipe between pages: whether new content views get
+/// WebKit's back/forward swipe (`CONTENT_VIEW_SPEC` must allow it too).
+static SWIPE_NAVIGATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn swipe_navigation() -> bool {
+    SWIPE_NAVIGATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_swipe_navigation(on: bool) {
+    SWIPE_NAVIGATION.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub trait ContentEvents: 'static {
     fn decide_navigation(&self, tab: TabId, url: &Url, frame: Frame, kind: NavKind) -> Verdict;
     fn new_window_request(&self, opener: TabId, url: Url);

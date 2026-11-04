@@ -151,3 +151,87 @@ impl HoverEdge {
         unsafe { msg_send![super(this), init] }
     }
 }
+
+pub struct ProbeIvars {
+    tab: TabIvars,
+    /// At the gesture's start: the scroll view's offset, the number of
+    /// touches (0 for a trackpad or mouse-wheel scroll) and the modifier
+    /// keys UIKit reports as held.
+    start: Cell<(f64, f64)>,
+    touches: Cell<usize>,
+    mods: Cell<objc2_ui_kit::UIKeyModifierFlags>,
+}
+
+define_class!(
+    /// Scroll probe (debug builds, 2026-11-04; trackpad scrolls reported
+    /// sideways or as Back): an extra target on each page's own scroll pan
+    /// recognizer, which only observes it. When a pan ends it notes, in the
+    /// console, how it was made (trackpad or touch), the modifier keys held,
+    /// the direction of the gesture and how far the page moved. Native UI
+    /// events only; pages cannot trigger it.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "SnorkleScrollProbe"]
+    #[ivars = ProbeIvars]
+    pub struct ScrollProbe;
+
+    unsafe impl NSObjectProtocol for ScrollProbe {}
+
+    impl ScrollProbe {
+        #[unsafe(method(panned:))]
+        fn panned(&self, g: &UIGestureRecognizer) {
+            let i = self.ivars();
+            let Some(view) = g.view() else { return };
+            let offset: objc2_core_foundation::CGPoint = unsafe { msg_send![&*view, contentOffset] };
+            match g.state() {
+                UIGestureRecognizerState::Began => {
+                    i.start.set((offset.x, offset.y));
+                    i.touches.set(g.numberOfTouches());
+                    i.mods.set(g.modifierFlags());
+                }
+                UIGestureRecognizerState::Ended | UIGestureRecognizerState::Cancelled => {
+                    let t: objc2_core_foundation::CGPoint = unsafe { msg_send![g, translationInView: &*view] };
+                    let (sx, sy) = i.start.get();
+                    let m = i.mods.get();
+                    let mut held = Vec::new();
+                    for (flag, name) in [
+                        (objc2_ui_kit::UIKeyModifierFlags::Shift, "shift"),
+                        (objc2_ui_kit::UIKeyModifierFlags::Command, "cmd"),
+                        (objc2_ui_kit::UIKeyModifierFlags::Alternate, "alt"),
+                        (objc2_ui_kit::UIKeyModifierFlags::Control, "ctrl"),
+                        (objc2_ui_kit::UIKeyModifierFlags::AlphaShift, "capslock"),
+                    ] {
+                        if m.contains(flag) {
+                            held.push(name);
+                        }
+                    }
+                    let how = if i.touches.get() == 0 { "trackpad/mouse" } else { "touch" };
+                    let ended = if g.state() == UIGestureRecognizerState::Cancelled { " (cancelled)" } else { "" };
+                    i.tab.events.note(&format!(
+                        "scroll probe tab {}: {how}{ended}, gesture x {:+.0} y {:+.0}, page moved x {:+.0} y {:+.0}, keys held: {}",
+                        i.tab.tab.0,
+                        t.x,
+                        t.y,
+                        offset.x - sx,
+                        offset.y - sy,
+                        if held.is_empty() { "none".to_string() } else { held.join("+") },
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+);
+
+impl ScrollProbe {
+    pub fn new(mtm: MainThreadMarker, tab: TabIvars) -> Retained<Self> {
+        let ivars = ProbeIvars {
+            tab,
+            start: Cell::new((0.0, 0.0)),
+            touches: Cell::new(0),
+            mods: Cell::new(objc2_ui_kit::UIKeyModifierFlags::empty()),
+        };
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        unsafe { msg_send![super(this), init] }
+    }
+}

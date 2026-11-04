@@ -99,6 +99,7 @@
     "allow-block-site",
     "allow-edit-blocked",
     "allow-set-blocked-message",
-    "allow-tab-icons"
+    "allow-tab-icons",
+    "allow-set-swipe-navigation"
   ]
 }

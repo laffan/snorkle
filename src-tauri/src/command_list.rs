@@ -91,4 +91,5 @@ pub const COMMANDS: &[&str] = &[
     "edit_blocked",
     "set_blocked_message",
     "tab_icons",
+    "set_swipe_navigation",
 ];

@@ -66,7 +66,7 @@ use snorkle_core::userscripts::Injection;
 use url::Url;
 
 pub(crate) use self::bindings::WKWebView;
-use self::gestures::{HoverEdge, HoverIvars, RefreshTarget, TapFocus};
+use self::gestures::{HoverEdge, HoverIvars, RefreshTarget, ScrollProbe, TapFocus};
 use crate::webkit::delegates::{NavDelegate, Observer, TabIvars, UiDelegate, KVO_KEYS};
 use crate::webkit::{injection, rules, stores};
 use crate::{clamp_inset, ContentEvents, DataKind, Hole, CONTENT_VIEW_SPEC, DEFAULT_PROFILE_STORE_ID};
@@ -91,6 +91,9 @@ struct View {
     _tap: Retained<TapFocus>,
     _tap_recognizer: Retained<UITapGestureRecognizer>,
     _refresh: Retained<RefreshTarget>,
+    /// Debug builds: observes the page's scroll pan (`ScrollProbe`), with
+    /// the recognizer it was added to (the target is removed on drop).
+    probe: Option<(Retained<ScrollProbe>, Retained<objc2_ui_kit::UIGestureRecognizer>)>,
     _nav: Retained<NavDelegate>,
     _ui: Retained<UiDelegate>,
     kvo: Retained<Observer>,
@@ -106,6 +109,9 @@ impl Drop for View {
             self.web.setNavigationDelegate(None);
             self.web.setUIDelegate(None);
             self.web.stopLoading();
+            if let Some((probe, pan)) = &self.probe {
+                pan.removeTarget_action(Some(probe), Some(sel!(panned:)));
+            }
         }
         self.container.removeFromSuperview();
     }
@@ -537,6 +543,14 @@ impl ContentHost {
     /// Light, dark or the system's appearance for the whole window: the
     /// chrome, system UI it presents and content views (a content view in
     /// dark pages mode keeps its own dark override).
+    /// Settings → General → Swipe between pages (also future views, through
+    /// `crate::swipe_navigation`).
+    pub fn set_swipe_navigation(&mut self, on: bool) {
+        for v in self.views.values() {
+            unsafe { v.web.setAllowsBackForwardNavigationGestures(on && CONTENT_VIEW_SPEC.allows_back_forward_gestures) };
+        }
+    }
+
     pub fn set_appearance(&mut self, appearance: crate::Appearance) {
         if let Some(window) = self.root.window() {
             window.setOverrideUserInterfaceStyle(match appearance {
@@ -825,6 +839,16 @@ impl ContentHost {
         control.addTarget_action_forControlEvents(Some(&refresh), sel!(refresh:), UIControlEvents::ValueChanged);
         web.scrollView().setRefreshControl(Some(&control));
 
+        // Debug builds: note each scroll gesture in the console (OPEN_QUESTIONS 109).
+        let probe = if cfg!(debug_assertions) {
+            let p = ScrollProbe::new(mtm, TabIvars::new(tab, self.events.clone()));
+            let pan: Retained<objc2_ui_kit::UIGestureRecognizer> = msg_send![&*web.scrollView(), panGestureRecognizer];
+            pan.addTarget_action(&p, sel!(panned:));
+            Some((p, pan))
+        } else {
+            None
+        };
+
         View {
             container,
             web,
@@ -834,6 +858,7 @@ impl ContentHost {
             _tap: tap,
             _tap_recognizer: recognizer,
             _refresh: refresh,
+            probe,
             _nav: nav,
             _ui: ui,
             kvo,
@@ -875,7 +900,7 @@ pub(crate) unsafe fn build_web_view(
     if web.respondsToSelector(sel!(setInspectable:)) {
         web.setInspectable(spec.inspectable);
     }
-    web.setAllowsBackForwardNavigationGestures(spec.allows_back_forward_gestures);
+    web.setAllowsBackForwardNavigationGestures(spec.allows_back_forward_gestures && crate::swipe_navigation());
     web.setAllowsLinkPreview(spec.allows_link_preview);
     if spec.safari_desktop_user_agent {
         web.setCustomUserAgent(Some(&NSString::from_str(&crate::safari_desktop_user_agent(os_version()))));

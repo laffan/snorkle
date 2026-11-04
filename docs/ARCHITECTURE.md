@@ -339,13 +339,24 @@ Page; other rows open the page as before. Search (`search_history`) matches titl
 the saved text (with a snippet). Images are not saved. Settings → Cache does not delete saved text
 (it belongs to history).
 
-**Tab favicons** (2026-11-04): each tab row shows its site's icon, fetched and stored the same way
+**Tab and bookmark favicons** (2026-11-04): each tab and bookmark row shows its site's icon, fetched and stored the same way
 as pins' (F1: a sandboxed, script-free web view loads `https://<host>/favicon.ico`; the app keeps
 only a PNG it redrew itself, `icons-v3/`). The chrome asks `tab_icons` when its tabs' addresses
 change; Rust maps each tab to its host from the committed URL and returns stored icons the chrome
 lacks, and queues a fetch (once per host per session) only for non-private tabs, so a private
 visit is never fetched or written to disk. An `icons` event follows each stored icon. Bundled
-icons (Google sites, YouTube) and letter tiles are used as for pins.
+icons (Google sites, YouTube) and letter tiles are used as for pins. The chrome is greyscale
+through one filter on its root; with a pointer it is lifted (0.3 s) while the sidebar is pointed at,
+has focus inside or a drag runs, the same states that keep its contents from fading, so favicons
+and emoji show in colour then.
+
+**Swipe between pages** (Settings → General, default on; remembered by the chrome and sent at
+launch, `set_swipe_navigation`): WebKit's back/forward swipe on every content view.
+
+**Scroll probe** (debug builds, iPadOS, 2026-11-04): an extra target on each page's scroll pan
+recognizer notes every pan in the console when it ends: trackpad/mouse (no touches) or touch, the
+gesture's translation, how far the page's scroll view moved, and the modifier keys UIKit reports.
+Added to find why trackpad scrolls arrive sideways or go Back (OPEN_QUESTIONS 109).
 
 **Shortcut routes** (2026-11-04): every shortcut the chrome runs is logged in the console (Browser
 entries) with its route, `native` (the key command, as the `shortcut` event) or `chrome` (the

@@ -43,8 +43,16 @@ body.private {
   --warn-bg: #2e2e2e; --side: #111111;
   --edge: #333333; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
 }
-/* Catches anything colourful the palette cannot: favicons, emoji. */
-html { filter: grayscale(1); }
+/* Catches anything colourful the palette cannot: favicons, emoji. With a
+   pointer, favicons and emoji show in colour while the sidebar is in use
+   (the same states that keep its contents from fading: pointed at, focus
+   inside, a drag) and fade back to grey with it (2026-11-04). The filter
+   is on the root, so it cannot be lifted for the sidebar alone; the rest
+   of the chrome is grey by palette and does not change. */
+html { filter: grayscale(1); transition: filter .3s ease-in-out; }
+@media (any-hover: hover) {
+  html:has(#sidebar:hover), html:has(#sidebar:focus-within), html:has(body.dragging) { filter: grayscale(0); }
+}
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -801,10 +809,10 @@ body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
 
 /* Tab favicons (2026-11-04): the site's icon, a bundled one, or its letter,
    left of the title. Clicks go to the row. */
-.tab > .tab-icon { flex: 0 0 18px; width: 18px; height: 18px; margin-left: 10px; border-radius: 4px; object-fit: contain; pointer-events: none; }
-.tab > span.tab-icon.letter { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; }
-.tab > .tab-icon + .open { padding-left: 8px; }
+.tab > .tab-icon, .bm > .tab-icon { flex: 0 0 18px; width: 18px; height: 18px; margin-left: 10px; border-radius: 4px; object-fit: contain; pointer-events: none; }
+:is(.tab, .bm) > span.tab-icon.letter { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; }
+:is(.tab, .bm) > .tab-icon + .open { padding-left: 8px; }
 .tab-group > .tab > .tab-icon { margin-left: 6px; }
 .tab-group > .tab > .tab-icon + .open { padding-left: 6px; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab > img.tab-icon[src^="icons/"] { filter: invert(1); } }
-:root[data-theme="dark"] .tab > img.tab-icon[src^="icons/"] { filter: invert(1); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) :is(.tab, .bm) > img.tab-icon[src^="icons/"] { filter: invert(1); } }
+:root[data-theme="dark"] :is(.tab, .bm) > img.tab-icon[src^="icons/"] { filter: invert(1); }
