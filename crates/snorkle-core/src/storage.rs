@@ -125,6 +125,9 @@ const DOWNLOADS_DIR: &str = "downloads";
 const DOWNLOADS_FILE: &str = "downloads.json";
 /// Finished downloads listed; the oldest records (and files) go first.
 pub const MAX_DOWNLOAD_RECORDS: usize = 500;
+/// All downloaded files together (finished and running, private too);
+/// past this, new downloads are refused and a running one is stopped.
+pub const MAX_DOWNLOADS_TOTAL_BYTES: u64 = 500 * 1024 * 1024;
 /// Characters of a downloaded file's name kept.
 pub const MAX_DOWNLOAD_NAME_CHARS: usize = 120;
 
@@ -598,6 +601,13 @@ impl Store {
         let folder = self.dir.join(DOWNLOADS_DIR).join(id.to_string());
         fs::create_dir_all(&folder)?;
         Ok((id, name.clone(), folder.join(name)))
+    }
+
+    /// The folder downloads are kept in (created if missing).
+    pub fn downloads_root(&self) -> std::io::Result<PathBuf> {
+        let root = self.dir.join(DOWNLOADS_DIR);
+        fs::create_dir_all(&root)?;
+        Ok(root)
     }
 
     /// Where download `id`'s file named `name` is (whether or not it exists).

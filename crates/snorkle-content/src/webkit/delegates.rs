@@ -110,8 +110,14 @@ define_class!(
             action: &WKNavigationAction,
             handler: &Block<dyn Fn(WKNavigationActionPolicy)>,
         ) {
-            let policy = unsafe { self.policy_for(action) };
-            handler.call((policy,));
+            match unsafe { self.policy_for(action) } {
+                ActionDecision::Now(policy) => handler.call((policy,)),
+                ActionDecision::AskDownload(url) => {
+                    let h = handler.copy();
+                    let i = self.ivars();
+                    super::downloads::ask_frame(i.tab, &i.events, url, Box::new(move |allow| h.call((download_or_cancel(allow),))));
+                }
+            }
         }
 
         /// Called by WebKit instead of the method above when implemented
@@ -125,12 +131,25 @@ define_class!(
             preferences: &WKWebpagePreferences,
             handler: &Block<dyn Fn(WKNavigationActionPolicy, NonNull<WKWebpagePreferences>)>,
         ) {
-            let policy = unsafe { self.policy_for(action) };
+            let decision = unsafe { self.policy_for(action) };
             let main = unsafe { action.targetFrame() }.is_some_and(|f| unsafe { f.isMainFrame() });
             if main && crate::platform::take_offline_load(web_view as *const WKWebView as *const AnyObject) {
                 unsafe { preferences.setAllowsContentJavaScript(false) };
             }
-            handler.call((policy, NonNull::from(preferences)));
+            match decision {
+                ActionDecision::Now(policy) => handler.call((policy, NonNull::from(preferences))),
+                ActionDecision::AskDownload(url) => {
+                    let h = handler.copy();
+                    let prefs = objc2::Message::retain(preferences);
+                    let i = self.ivars();
+                    super::downloads::ask_frame(
+                        i.tab,
+                        &i.events,
+                        url,
+                        Box::new(move |allow| h.call((download_or_cancel(allow), NonNull::from(&*prefs)))),
+                    );
+                }
+            }
         }
 
         #[unsafe(method(webView:decidePolicyForNavigationResponse:decisionHandler:))]
@@ -140,28 +159,40 @@ define_class!(
             response: &WKNavigationResponse,
             handler: &Block<dyn Fn(WKNavigationResponsePolicy)>,
         ) {
-            // A main-frame response WebKit cannot show, or that the server
-            // marks as an attachment, becomes a download (`downloads.rs`)
-            // when the app allows it; in a subframe it is cancelled.
+            // A response WebKit cannot show, or that the server marks as an
+            // attachment, becomes a download (`downloads.rs`) when the app
+            // allows it: at once in the main frame; from a subframe only if
+            // the user agrees (2026-11-04).
             let can_show = unsafe { response.canShowMIMEType() };
             let r = unsafe { response.response() };
             let attachment = r
                 .downcast_ref::<NSHTTPURLResponse>()
                 .and_then(|h| h.valueForHTTPHeaderField(&NSString::from_str("Content-Disposition")))
                 .is_some_and(|v| v.to_string().trim_start().to_ascii_lowercase().starts_with("attachment"));
-            let policy = if can_show && !attachment {
-                WKNavigationResponsePolicy::Allow
-            } else {
-                let i = self.ivars();
-                let url = r.URL().as_deref().and_then(to_url);
-                let main = unsafe { response.isForMainFrame() };
-                if main && url.is_some_and(|u| i.events.may_download(i.tab, &u)) {
-                    WKNavigationResponsePolicy::Download
-                } else {
-                    WKNavigationResponsePolicy::Cancel
+            if can_show && !attachment {
+                handler.call((WKNavigationResponsePolicy::Allow,));
+                return;
+            }
+            let i = self.ivars();
+            let url = r.URL().as_deref().and_then(to_url).filter(|u| i.events.may_download(i.tab, u));
+            let main = unsafe { response.isForMainFrame() };
+            match url {
+                Some(_) if main => handler.call((WKNavigationResponsePolicy::Download,)),
+                // From a frame inside the page: the user decides (the
+                // response waits; no answer within a minute blocks it).
+                Some(url) => {
+                    let h = handler.copy();
+                    super::downloads::ask_frame(
+                        i.tab,
+                        &i.events,
+                        url,
+                        Box::new(move |allow| {
+                            h.call((if allow { WKNavigationResponsePolicy::Download } else { WKNavigationResponsePolicy::Cancel },))
+                        }),
+                    );
                 }
-            };
-            handler.call((policy,));
+                None => handler.call((WKNavigationResponsePolicy::Cancel,)),
+            }
         }
 
         /// A link with a `download` attribute became a download.
@@ -251,26 +282,49 @@ define_class!(
     }
 );
 
+/// What to answer a navigation action: now, or after asking the user
+/// whether a frame inside the page may download `url`.
+enum ActionDecision {
+    Now(WKNavigationActionPolicy),
+    AskDownload(Url),
+}
+
+fn download_or_cancel(allow: bool) -> WKNavigationActionPolicy {
+    if allow {
+        WKNavigationActionPolicy::Download
+    } else {
+        WKNavigationActionPolicy::Cancel
+    }
+}
+
 impl NavDelegate {
     pub fn new(mtm: MainThreadMarker, ivars: TabIvars) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
     }
 
-    unsafe fn policy_for(&self, action: &WKNavigationAction) -> WKNavigationActionPolicy {
+    unsafe fn policy_for(&self, action: &WKNavigationAction) -> ActionDecision {
+        match self.policy_now(action) {
+            Ok(policy) => ActionDecision::Now(policy),
+            Err(url) => ActionDecision::AskDownload(url),
+        }
+    }
+
+    unsafe fn policy_now(&self, action: &WKNavigationAction) -> Result<WKNavigationActionPolicy, Url> {
         let Some(url) = action.request().URL().as_deref().and_then(to_url) else {
-            return WKNavigationActionPolicy::Cancel;
+            return Ok(WKNavigationActionPolicy::Cancel);
         };
         // A link with a `download` attribute: a download (`downloads.rs`)
-        // if it was activated in the main frame (or targets a new window)
-        // and the app allows it; otherwise nothing.
+        // if it was clicked and the app allows it: at once in the main
+        // frame (or for a link that targets a new window), from a subframe
+        // only if the user agrees (`Err`: ask).
         if action.respondsToSelector(objc2::sel!(shouldPerformDownload)) && action.shouldPerformDownload() {
             let main_or_new = action.targetFrame().is_none_or(|f| f.isMainFrame());
             let i = self.ivars();
-            let ok = main_or_new
-                && action.navigationType() == WKNavigationType::LinkActivated
-                && i.events.may_download(i.tab, &url);
-            return if ok { WKNavigationActionPolicy::Download } else { WKNavigationActionPolicy::Cancel };
+            if action.navigationType() != WKNavigationType::LinkActivated || !i.events.may_download(i.tab, &url) {
+                return Ok(WKNavigationActionPolicy::Cancel);
+            }
+            return if main_or_new { Ok(WKNavigationActionPolicy::Download) } else { Err(url) };
         }
         // ⌘-click on a link (main frame, or a link that targets a new
         // window): open it in a background tab instead. The modifier flags
@@ -280,21 +334,21 @@ impl NavDelegate {
         if main_or_new && action.navigationType() == WKNavigationType::LinkActivated && command_held(action) {
             let i = self.ivars();
             i.events.background_tab_requested(i.tab, url);
-            return WKNavigationActionPolicy::Cancel;
+            return Ok(WKNavigationActionPolicy::Cancel);
         }
         let frame = match action.targetFrame() {
             // No target frame: a new-window request. WebKit follows up with
             // `createWebViewWithConfiguration`, which runs the policy itself
             // and never creates a web view, so nothing can load here.
-            None => return WKNavigationActionPolicy::Allow,
+            None => return Ok(WKNavigationActionPolicy::Allow),
             Some(f) if f.isMainFrame() => Frame::Main,
             Some(_) => Frame::Sub,
         };
         let i = self.ivars();
-        match i.events.decide_navigation(i.tab, &url, frame, nav_kind(action.navigationType())) {
+        Ok(match i.events.decide_navigation(i.tab, &url, frame, nav_kind(action.navigationType())) {
             Verdict::Allow => WKNavigationActionPolicy::Allow,
             Verdict::Cancel => WKNavigationActionPolicy::Cancel,
-        }
+        })
     }
 }
 

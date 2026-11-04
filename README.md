@@ -107,6 +107,28 @@ Browser App**, the app also needs Apple's managed entitlement `com.apple.develop
 
 Until then, builds must leave the key out, or signing fails.
 
+### Passkeys (both platforms)
+
+Passkeys and security keys fail in Snorkle today (Google reports `passkey_first_auth_factor_error`).
+This is Apple's rule, not a bug in the app: WebKit handles WebAuthn in `WKWebView` by itself, but
+for a third-party browser it only accepts sites that list the app's own App ID, unless the app
+holds a managed entitlement.
+
+- **macOS:** `com.apple.developer.web-browser.public-key-credential` (macOS 13.3+). The developer
+  account's *Account Holder* requests it with Apple's "macOS Browsers Passkeys" form; Apple reviews
+  it against its browser criteria (http/https declared, an address field at launch, pages shown as
+  they are), which Snorkle is built to meet. Once granted: enable it for the App ID, add the key to
+  `src-tauri/macos/Entitlements.plist` (and to the expected keys in
+  `src-tauri/tests/config_hardening.rs`), and build a signed bundle whose provisioning profile
+  carries the capability (`npm run tauri build`; `tauri dev` runs an unsigned binary, where
+  passkeys can never work). The person may then be asked once whether Snorkle may use their
+  passkeys.
+- **iPadOS:** Apple documents the same entitlement for macOS and Mac Catalyst only. On iPadOS the
+  path is assumed to be the default-browser entitlement above (`com.apple.developer.web-browser`);
+  unverified (OPEN_QUESTIONS 101).
+
+Until then, use the site's other sign-in method (on Google: "Try another way").
+
 Minimum OS: iPadOS 26.0 (deployment target and runtime gate). Older patch levels get a warning
 banner; the table lives in `crates/snorkle-core/src/os.rs` and must be updated with each Apple
 security release.

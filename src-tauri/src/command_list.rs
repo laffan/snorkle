@@ -31,6 +31,7 @@ pub const COMMANDS: &[&str] = &[
     "clear_downloads",
     "export_download",
     "share_download",
+    "answer_download_prompt",
     "toggle_site_adblock",
     "bookmark_tab",
     "move_bookmark",

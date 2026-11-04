@@ -31,6 +31,15 @@ pub fn dispatch_main(f: impl FnOnce() + Send + 'static) {
     unsafe { NSOperationQueue::mainQueue().addOperationWithBlock(&block) };
 }
 
+/// Keeps `path` (a folder) out of device backups (iCloud / Finder backups
+/// on iPadOS, Time Machine on macOS). Best effort.
+pub fn exclude_from_backup(path: &std::path::Path) {
+    use objc2_foundation::{NSNumber, NSString, NSURLIsExcludedFromBackupKey, NSURL};
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+    let yes = NSNumber::new_bool(true);
+    let _ = unsafe { url.setResourceValue_forKey_error(Some(&yes), NSURLIsExcludedFromBackupKey) };
+}
+
 pub fn physical_memory() -> u64 {
     NSProcessInfo::processInfo().physicalMemory()
 }

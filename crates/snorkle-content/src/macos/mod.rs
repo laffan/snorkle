@@ -527,6 +527,11 @@ impl ContentHost {
         crate::webkit::downloads::cancel(id);
     }
 
+    /// The user's answer to a download from a frame inside a page.
+    pub fn answer_frame_download(&mut self, ask: u64, allow: bool) {
+        crate::webkit::downloads::answer_frame(ask, allow);
+    }
+
     /// The share menu for one item, pointing at `from` (window points from
     /// the top left).
     fn show_sharing(&mut self, item: Retained<AnyObject>, from: (f64, f64, f64, f64)) {

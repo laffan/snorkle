@@ -102,6 +102,8 @@ impl ContentHost {
     /// No downloads off iOS and macOS.
     pub fn cancel_download(&mut self, _id: u64) {}
 
+    pub fn answer_frame_download(&mut self, _ask: u64, _allow: bool) {}
+
     pub fn export_file(&mut self, _path: &std::path::Path) -> Result<(), String> {
         Err("Files can be saved on iPadOS and macOS only (this is the desktop preview).".into())
     }
@@ -150,6 +152,9 @@ pub fn physical_memory() -> u64 {
 pub fn os_version() -> OsVersion {
     OsVersion::new(27, 0, 0)
 }
+
+/// No backups to keep out of off iOS and macOS.
+pub fn exclude_from_backup(_path: &std::path::Path) {}
 
 /// See `os_version`.
 pub fn webkit_version() -> OsVersion {

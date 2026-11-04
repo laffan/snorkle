@@ -123,7 +123,7 @@ filter lists (none shipped yet), extensions (non-goal), sync (non-goal).
 | Invalid certificates | A2 | No trust override path exists in code. Certificate errors on explicit https are not bypassable. | – |
 | Popups / tabnabbing | A1 | `javaScriptCanOpenWindowsAutomatically = false`. `createWebView` runs the navigation policy, then returns a popup web view built from WebKit's configuration, shown as a tab. WebKit applies `noopener` to `target=_blank` links. The address bar shows each tab's own committed URL. | A popup can navigate its opener (needed for OAuth). That is visible in the address bar, but could still fool an inattentive user. |
 | Opening other apps (`tel:`, `itms-apps:` …) | A1 | Main frame only, with a gesture-classified navigation, and always behind a chrome confirmation prompt. | Gesture detection relies on `WKNavigationType` (OPEN_QUESTIONS #7). |
-| Drive-by downloads | A1 | Since 2026-11-03 downloads are supported (§5h): main frame only, `policy::may_download` (http/https without credentials, the page's own `blob:`/`data:`), at most 5 per tab per minute and 20 at once. Files land in the app's staging folder under an app-chosen, cleaned name; nothing is opened or run; they leave only when the user saves or shares them. macOS marks them quarantined. | A page can still start a download without a click (an attachment response); the rate limit and the visible list bound it. Disk use is not capped. |
+| Drive-by downloads | A1 | Since 2026-11-03 downloads are supported (§5h): main frame (frames inside the page only after the user allows it), `policy::may_download` (http/https without credentials, the page's own `blob:`/`data:`), at most 5 per tab per minute and 20 at once. Files land in the app's staging folder under an app-chosen, cleaned name; nothing is opened or run; they leave only when the user saves or shares them. macOS marks them quarantined. | A page can still start a download without a click (an attachment response); the rate limit, the 500 MB cap and the visible list bound it. |
 | Memory-pressure DoS (crash loops) | A1 | Live-view budget, background TTL, discard on memory warning, bounded auto-reload after WebContent termination (2 per 60 s, then a "page keeps crashing" notice). | Budgets unvalidated on hardware (OPEN_QUESTIONS #3). |
 | Private-mode leakage | A1/A4 | Separate non-persistent store, never written to history/session/bookmarks (enforced in core and fuzzed), store wiped on last private tab close, exceptions cleared. | WebKit-internal caches outside the data store, if any (OPEN_QUESTIONS #9). |
 | Data at rest | A4 | `NSFileProtectionComplete`. No credentials stored by the app; credentials only via iOS Keychain/AutoFill (§6). | – |
@@ -392,7 +392,11 @@ is read when the menu appears (C20).
 
 A main-frame response WebKit cannot show, or one the server marks `Content-Disposition:
 attachment`, and a click on a link with a `download` attribute become a `WKDownload` when
-`ContentEvents::may_download` allows it (§3); in subframes they are cancelled. The download
+`ContentEvents::may_download` allows it (§3). From a frame inside the page, WebKit's decision is
+held and the chrome asks "… wants to download a file" with Allow Download / Block above the URL
+bar (one prompt at a time; no answer within 60 s blocks it). All downloaded files together may
+take at most 500 MB: past it new downloads are refused and a running one is stopped. The
+`downloads/` folder is excluded from device backups. The download
 delegate (`snorkle-content/src/webkit/downloads.rs`) asks the app where to write: the app picks
 `downloads/<id>/<name>` in the profile folder (`storage::Store::new_download`; the suggested name is
 reduced to one cleaned path component, `clean_download_name`). Redirects are followed only to URLs

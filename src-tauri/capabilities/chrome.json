@@ -40,6 +40,7 @@
     "allow-clear-downloads",
     "allow-export-download",
     "allow-share-download",
+    "allow-answer-download-prompt",
     "allow-toggle-site-adblock",
     "allow-bookmark-tab",
     "allow-move-bookmark",

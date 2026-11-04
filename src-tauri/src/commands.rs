@@ -1060,3 +1060,10 @@ pub async fn share_download(s: S<'_>, id: u64, x: f64, y: f64, w: f64, h: f64) -
     let path = download_file(&s, id)?;
     on_host(move |host| host.share_file(&path, (x, y, w, h))).await
 }
+
+/// The user's answer to a download from a frame inside a page
+/// (`download_prompt` event). Unknown or expired requests are ignored.
+#[tauri::command]
+pub fn answer_download_prompt(ask: u64, allow: bool) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.answer_frame_download(ask, allow)));
+}

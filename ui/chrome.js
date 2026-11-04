@@ -105,7 +105,7 @@
     // Find and confirmations belong to the tab they were opened on.
     if (findOpen && find.tab !== null && find.tab !== state.active) closeFind();
     if (selection && selection.tab !== state.active && !(state.split && (selection.tab === state.split.left || selection.tab === state.split.right))) hideSelection();
-    if (confirmAction && confirmAction.tab !== state.active && confirmAction.tab !== state.sheet) closeConfirm();
+    if (confirmAction && confirmAction.tab !== null && confirmAction.tab !== state.active && confirmAction.tab !== state.sheet) closeConfirm();
     reportLayout();
   }
 
@@ -2925,7 +2925,7 @@
     }
     const bm = key ? bookmarks.find((b) => b.url === key) : null;
     if (!bm) { invoke('close_tab', { tab: id }); return; }
-    if (confirmAction && confirmAction.tab === id) { confirmAction.run(); return; } // ⌘W again confirms
+    if (confirmAction && confirmAction.shortcut && confirmAction.tab === id) { confirmAction.run(); return; } // ⌘W again confirms
     const name = bm.title || bm.display.registrable;
     const remove = () =>
       T.core.invoke('remove_bookmark', { url: bm.url })
@@ -2945,11 +2945,22 @@
 
   // A small confirmation floating above the pill (a hole, like the pill).
   // ⌘W or the primary button confirms, Escape cancels. `alt` adds a second
-  // action ({ label, run }), which then has the focus (Return).
-  function askConfirm(text, ok, tab, run, alt = null) {
-    confirmAction = { tab, run: () => { closeConfirm(); run(); }, alt: alt && (() => { closeConfirm(); alt.run(); }) };
+  // action ({ label, run }), which then has the focus (Return). Options:
+  // `shortcut: false` (no ⌘W on the primary button), `cancel` (run when
+  // dismissed: Cancel, Escape, a click elsewhere) and `cancelLabel`.
+  function askConfirm(text, ok, tab, run, alt = null, opts = {}) {
+    if (confirmAction) closeConfirm();
+    const shortcut = opts.shortcut !== false;
+    confirmAction = {
+      tab,
+      shortcut,
+      run: () => { closeConfirm(false); run(); },
+      alt: alt && (() => { closeConfirm(false); alt.run(); }),
+      cancel: opts.cancel || null,
+    };
     $('confirm-text').textContent = text;
-    $('confirm-ok').textContent = ok + ' (⌘W)';
+    $('confirm-ok').textContent = shortcut ? ok + ' (⌘W)' : ok;
+    $('confirm-cancel').textContent = opts.cancelLabel || 'Cancel';
     $('confirm-alt').hidden = !alt;
     $('confirm-alt').textContent = alt ? alt.label : '';
     $('confirm-pop').hidden = false;
@@ -2957,13 +2968,50 @@
     syncMenuOpen();
     reportLayout();
   }
-  function closeConfirm() {
+  // `dismissed`: closed without choosing an action (runs `cancel`).
+  function closeConfirm(dismissed = true) {
+    const was = confirmAction;
     confirmAction = null;
     $('confirm-pop').hidden = true;
     $('confirm-alt').hidden = true;
     syncMenuOpen();
     reportLayout();
+    if (dismissed && was && was.cancel) was.cancel();
+    else setTimeout(nextDownloadAsk, 0); // a waiting download prompt comes next
   }
+
+  // Downloads from a frame inside a page wait for the user (2026-11-04):
+  // one prompt at a time; unanswered requests are blocked natively after a
+  // minute, and the prompt goes with them.
+  const downloadAsks = [];
+  function answerDownload(a, allow) {
+    const i = downloadAsks.indexOf(a);
+    if (i < 0) return;
+    downloadAsks.splice(i, 1);
+    clearTimeout(a.timer);
+    invoke('answer_download_prompt', { ask: a.ask, allow });
+    setTimeout(nextDownloadAsk, 0);
+  }
+  function nextDownloadAsk() {
+    if (confirmAction || !downloadAsks.length) return;
+    const a = downloadAsks[0];
+    const who = a.from ? `${a.from}, from a frame inside this page,` : 'A frame inside this page';
+    askConfirm(`${who} wants to download a file.`, 'Allow Download', null, () => answerDownload(a, true), null,
+      { shortcut: false, cancel: () => answerDownload(a, false), cancelLabel: 'Block' });
+  }
+  T.event.listen('download_prompt', (e) => {
+    const p = e.payload || {};
+    const a = { ask: p.ask, from: String(p.from || '') };
+    a.timer = setTimeout(() => {
+      const i = downloadAsks.indexOf(a);
+      if (i < 0) return;
+      downloadAsks.splice(i, 1);
+      if (i === 0 && confirmAction && confirmAction.cancel) closeConfirm(false);
+      nextDownloadAsk();
+    }, 60000);
+    downloadAsks.push(a);
+    nextDownloadAsk();
+  });
   $('confirm-ok').addEventListener('click', () => { if (confirmAction) confirmAction.run(); });
   $('confirm-alt').addEventListener('click', () => { if (confirmAction && confirmAction.alt) confirmAction.alt(); });
   $('confirm-cancel').addEventListener('click', closeConfirm);

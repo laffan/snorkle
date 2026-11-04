@@ -529,6 +529,11 @@ impl ContentHost {
         crate::webkit::downloads::cancel(id);
     }
 
+    /// The user's answer to a download from a frame inside a page.
+    pub fn answer_frame_download(&mut self, ask: u64, allow: bool) {
+        crate::webkit::downloads::answer_frame(ask, allow);
+    }
+
     /// Light, dark or the system's appearance for the whole window: the
     /// chrome, system UI it presents and content views (a content view in
     /// dark pages mode keeps its own dark override).

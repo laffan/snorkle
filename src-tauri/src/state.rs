@@ -88,6 +88,10 @@ pub enum ChromeEvent<'a> {
     ConsoleReset,
     /// The downloads list changed (started, progress, finished, removed).
     Downloads(&'a [DownloadItem]),
+    /// A frame inside a tab's page wants to download a file: the user
+    /// allows or blocks it (`answer_download_prompt`). `from` is the
+    /// download's host (or "" for a file the page made).
+    DownloadPrompt { ask: u64, tab: TabId, from: String },
 }
 
 /// One download, as the chrome lists it (Downloads panel).
@@ -175,6 +179,8 @@ pub struct Shared {
     pub downloads: Mutex<Vec<DownloadItem>>,
     /// Downloads the user cancelled (reported as failed by WebKit).
     pub cancelled_downloads: Mutex<HashSet<u64>>,
+    /// Downloads stopped for going over the storage cap.
+    pub capped_downloads: Mutex<HashSet<u64>>,
     /// When each tab last started downloads (rate limit).
     pub download_starts: Mutex<HashMap<TabId, Vec<Instant>>>,
 }
@@ -202,12 +208,23 @@ impl Shared {
             console_capture: AtomicBool::new(cfg!(debug_assertions)),
             downloads: Mutex::new(downloads),
             cancelled_downloads: Mutex::default(),
+            capped_downloads: Mutex::default(),
             download_starts: Mutex::default(),
         })
     }
 
     pub fn downloads(&self) -> MutexGuard<'_, Vec<DownloadItem>> {
         self.downloads.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Bytes all downloads take (finished files and what running ones
+    /// have received), against `storage::MAX_DOWNLOADS_TOTAL_BYTES`.
+    pub fn download_bytes(&self) -> u64 {
+        self.downloads()
+            .iter()
+            .filter(|d| matches!(d.state, "active" | "done"))
+            .map(|d| d.received.max(if d.state == "done" { d.expected.unwrap_or(0) } else { 0 }))
+            .sum()
     }
 
     /// Sends the downloads list to the chrome.
@@ -761,6 +778,10 @@ impl ContentEvents for Events {
         if shared.store.is_none() || shared.browser().tab(tab).is_none() || !snorkle_core::policy::may_download(url) {
             return false;
         }
+        if shared.download_bytes() >= snorkle_core::storage::MAX_DOWNLOADS_TOTAL_BYTES {
+            shared.toast("Downloads are full (500 MB). Delete some in Downloads to make room.");
+            return false;
+        }
         if shared.downloads().iter().filter(|d| d.state == "active").count() >= MAX_ACTIVE_DOWNLOADS {
             shared.toast("Too many downloads at once. Wait for some to finish.");
             return false;
@@ -788,6 +809,10 @@ impl ContentEvents for Events {
     ) -> Option<(u64, std::path::PathBuf)> {
         let shared = &self.shared;
         let store = shared.store.clone()?;
+        if expected.is_some_and(|n| shared.download_bytes().saturating_add(n) > snorkle_core::storage::MAX_DOWNLOADS_TOTAL_BYTES) {
+            shared.toast("That file does not fit in Downloads (500 MB in all). Delete some to make room.");
+            return None;
+        }
         let private = shared.browser().tab(tab).is_none_or(|t| t.is_private());
         let (id, name, path) = store.new_download(&suggested).ok()?;
         let web = source.filter(|u| matches!(u.scheme(), "http" | "https"));
@@ -826,18 +851,36 @@ impl ContentEvents for Events {
             }
         };
         if changed {
+            let over = self.shared.download_bytes() > snorkle_core::storage::MAX_DOWNLOADS_TOTAL_BYTES;
+            if over && self.shared.capped_downloads.lock().unwrap_or_else(|e| e.into_inner()).insert(id) {
+                snorkle_content::dispatch_main(move || with_host(|h| h.cancel_download(id)));
+            }
             self.shared.emit_downloads();
         }
+    }
+    fn frame_download_requested(&self, tab: TabId, ask: u64, url: &Url) {
+        let from = match url.scheme() {
+            "http" | "https" => snorkle_core::url_display::display(url).registrable,
+            _ => String::new(),
+        };
+        self.shared.log(console::Level::Info, Some(tab), &format!("download from a frame asks the user: {url}"));
+        (self.shared.emit)(ChromeEvent::DownloadPrompt { ask, tab, from });
     }
     fn download_finished(&self, id: u64, error: Option<String>) {
         use snorkle_core::storage::{DownloadOutcome, DownloadRecord};
         let shared = &self.shared;
         let cancelled = shared.cancelled_downloads.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        let capped = shared.capped_downloads.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        let error = if capped && error.is_some() {
+            Some("Stopped: downloads are limited to 500 MB in all.".to_string())
+        } else {
+            error
+        };
         let item = {
             let mut d = shared.downloads();
             let Some(x) = d.iter_mut().find(|x| x.id == id) else { return };
             x.finished_ms = Some(wall_ms());
-            x.state = match (&error, cancelled) {
+            x.state = match (&error, cancelled && !capped) {
                 (None, _) => "done",
                 (Some(_), true) => "cancelled",
                 (Some(_), false) => "failed",

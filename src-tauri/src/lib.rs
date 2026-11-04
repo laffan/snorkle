@@ -58,6 +58,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::clear_downloads,
         commands::export_download,
         commands::share_download,
+        commands::answer_download_prompt,
         commands::toggle_site_adblock,
         commands::bookmark_tab,
         commands::move_bookmark,
@@ -180,6 +181,10 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
 
     let store = app.path().app_data_dir().ok().and_then(|d| Store::open(d.join("profile-default")).ok());
     let session = store.as_ref().map(|s| s.load_session()).unwrap_or_default();
+    // Downloads are kept out of device backups (owner decision 2026-11-04).
+    if let Some(root) = store.as_ref().and_then(|s| s.downloads_root().ok()) {
+        snorkle_content::exclude_from_backup(&root);
+    }
 
     let handle = app.handle().clone();
     let emit: Emitter = Box::new(move |ev| {
@@ -191,6 +196,11 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::Console(entry) => handle.emit_to(CHROME_LABEL, "console", entry),
             ChromeEvent::ConsoleReset => handle.emit_to(CHROME_LABEL, "console_reset", ()),
             ChromeEvent::Downloads(list) => handle.emit_to(CHROME_LABEL, "downloads", list),
+            ChromeEvent::DownloadPrompt { ask, tab, from } => handle.emit_to(
+                CHROME_LABEL,
+                "download_prompt",
+                serde_json::json!({ "ask": ask, "tab": tab, "from": from }),
+            ),
             ChromeEvent::HeadingCurrent(tab, index) => {
                 handle.emit_to(CHROME_LABEL, "heading_current", serde_json::json!({ "tab": tab, "index": index }))
             }

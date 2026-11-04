@@ -44,12 +44,14 @@ mod webkit;
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 pub use platform::{dispatch_main, os_version, physical_memory, webkit_version, ContentHost};
 #[cfg(any(target_os = "ios", target_os = "macos"))]
+pub use webkit::exclude_from_backup;
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 pub use webkit::{http, keychain};
 
 #[cfg(not(any(target_os = "ios", target_os = "macos")))]
 mod stub;
 #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-pub use stub::{dispatch_main, http, keychain, os_version, physical_memory, webkit_version, ContentHost};
+pub use stub::{dispatch_main, exclude_from_backup, http, keychain, os_version, physical_memory, webkit_version, ContentHost};
 
 /// Width of the strip along the window's left edge where the pointer is
 /// reported (the edge tab is 14 pt wide and shows within 100 pt of it).
@@ -350,6 +352,10 @@ pub trait ContentEvents: 'static {
     ) -> Option<(u64, std::path::PathBuf)> {
         None
     }
+    /// A frame inside `tab`'s page wants to download `url`: ask the user,
+    /// then answer with `ContentHost::answer_frame_download(ask, allow)`.
+    /// Unanswered requests are blocked after a minute.
+    fn frame_download_requested(&self, _tab: TabId, _ask: u64, _url: &Url) {}
     /// Bytes received so far (about twice a second while it runs).
     fn download_progress(&self, _id: u64, _received: u64, _expected: Option<u64>) {}
     /// A download ended: complete (`None`), or failed or cancelled (a

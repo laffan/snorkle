@@ -5,9 +5,10 @@
 //!
 //! Flow: the navigation delegate answers `.download` for a main-frame
 //! response WebKit cannot show or that the server marks as an attachment,
-//! and for a link with a `download` attribute, when
-//! `ContentEvents::may_download` agrees (`policy::may_download` plus a
-//! rate limit). WebKit then hands us the `WKDownload` (`attach`), asks
+//! and for a clicked link with a `download` attribute, when
+//! `ContentEvents::may_download` agrees (`policy::may_download`, a rate
+//! limit and the storage cap). From a frame inside the page, the decision
+//! waits for the user ([`ask_frame`], owner decision 2026-11-04). WebKit then hands us the `WKDownload` (`attach`), asks
 //! where to write it, and the app answers with a path in its own staging
 //! folder (`downloads/<id>/<name>`, the name cleaned by
 //! `storage::clean_download_name`); `None` refuses it.
@@ -65,6 +66,45 @@ thread_local! {
     static ACTIVE: RefCell<HashMap<u64, Active>> = RefCell::new(HashMap::new());
     /// Reports progress while any download runs.
     static TIMER: RefCell<Option<Retained<NSTimer>>> = const { RefCell::new(None) };
+}
+
+/// Downloads from a frame inside a page wait for the user's answer
+/// (`ContentEvents::frame_download_requested`); unanswered after this long,
+/// they are blocked.
+const ASK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Answers WebKit's held decision for a frame download (once).
+type Answer = Box<dyn FnOnce(bool)>;
+
+thread_local! {
+    /// Frame downloads waiting for the user, by request id.
+    static ASKS: RefCell<HashMap<u64, Answer>> = RefCell::new(HashMap::new());
+    static NEXT_ASK: Cell<u64> = const { Cell::new(1) };
+}
+
+/// A frame inside `tab`'s page wants to download `url` (already accepted
+/// by `ContentEvents::may_download`): holds WebKit's decision (`answer`)
+/// and asks the user through the app. `answer(true)` starts the download.
+pub fn ask_frame(tab: TabId, events: &Rc<dyn ContentEvents>, url: url::Url, answer: Answer) {
+    let id = NEXT_ASK.with(|n| {
+        let id = n.get();
+        n.set(id + 1);
+        id
+    });
+    ASKS.with(|a| a.borrow_mut().insert(id, answer));
+    events.frame_download_requested(tab, id, &url);
+    std::thread::spawn(move || {
+        std::thread::sleep(ASK_TIMEOUT);
+        crate::webkit::dispatch_main(move || answer_frame(id, false));
+    });
+}
+
+/// The user's answer to a frame download (or the timeout's). Unknown or
+/// already answered ids are ignored.
+pub fn answer_frame(id: u64, allow: bool) {
+    if let Some(answer) = ASKS.with(|a| a.borrow_mut().remove(&id)) {
+        answer(allow);
+    }
 }
 
 /// Progress is reported this often while downloads run.
