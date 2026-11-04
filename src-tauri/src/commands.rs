@@ -1067,3 +1067,97 @@ pub async fn share_download(s: S<'_>, id: u64, x: f64, y: f64, w: f64, h: f64) -
 pub fn answer_download_prompt(ask: u64, allow: bool) {
     snorkle_content::dispatch_main(move || with_host(|h| h.answer_frame_download(ask, allow)));
 }
+
+// ---- Settings → Blocked ----------------------------------------------------
+
+/// The block list for Settings → Blocked, with the passage the chrome
+/// asks for before a pattern is changed or removed (kept in the core so
+/// there is one copy).
+#[derive(Serialize)]
+pub struct BlockedState {
+    patterns: Vec<String>,
+    message: String,
+    default_message: &'static str,
+    passage: &'static str,
+}
+
+fn blocked_state(list: &snorkle_core::blocklist::BlockList) -> BlockedState {
+    BlockedState {
+        patterns: list.patterns().to_vec(),
+        message: list.settings().message.clone(),
+        default_message: snorkle_core::blocklist::DEFAULT_MESSAGE,
+        passage: snorkle_core::blocklist::UNBLOCK_PASSAGE,
+    }
+}
+
+/// Applies `f` to a copy of the block list, stores it and makes it the
+/// browser's (which hides open pages that are now blocked). The browser
+/// stays locked throughout, so two changes cannot interleave.
+fn change_blocked<T>(
+    s: &S<'_>,
+    f: impl FnOnce(&mut snorkle_core::blocklist::BlockList) -> Result<T, snorkle_core::blocklist::BlockError>,
+) -> Result<(T, BlockedState), String> {
+    let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
+    let (value, state, effects) = {
+        let mut b = s.browser();
+        let mut list = b.blocklist().clone();
+        let value = f(&mut list).map_err(|e| e.to_string())?;
+        store.set_blocked(list.settings()).map_err(|e| format!("Not saved: {e}"))?;
+        let state = blocked_state(&list);
+        let effects = b.set_blocklist(list);
+        (value, state, effects)
+    };
+    s.run(effects);
+    Ok((value, state))
+}
+
+#[tauri::command]
+pub fn get_blocked(s: S<'_>) -> BlockedState {
+    blocked_state(s.browser().blocklist())
+}
+
+/// Adds an address pattern (a regular expression; see
+/// `snorkle_core::blocklist`). Adding needs nothing else.
+#[tauri::command]
+pub async fn add_blocked(s: S<'_>, pattern: String) -> Result<BlockedState, String> {
+    if pattern.len() > 4 * snorkle_core::blocklist::MAX_PATTERN_LEN {
+        return Err("That pattern is too long.".into());
+    }
+    change_blocked(&s, |l| l.add(&pattern)).map(|(_, st)| st)
+}
+
+/// "Block This Site" (⋯ menu): blocks the tab's site and its subdomains.
+/// The site comes from the core's committed URL, not from the caller.
+/// Returns the pattern added.
+#[tauri::command]
+pub async fn block_site(s: S<'_>, tab: u64) -> Result<String, String> {
+    let url = s.browser().tab(TabId(tab)).and_then(|t| t.committed_url.clone()).ok_or("No page to block")?;
+    let pattern = snorkle_core::blocklist::site_pattern(&url).ok_or("This address cannot be blocked by site.")?;
+    change_blocked(&s, |l| l.add(&pattern)).map(|(p, _)| p)
+}
+
+/// Changes (`replacement`) or removes (`None`) a pattern. Refused unless
+/// `passage` is the unblock passage, typed out in full.
+#[tauri::command]
+pub async fn edit_blocked(
+    s: S<'_>,
+    pattern: String,
+    replacement: Option<String>,
+    passage: String,
+) -> Result<BlockedState, String> {
+    if replacement.as_ref().is_some_and(|r| r.len() > 4 * snorkle_core::blocklist::MAX_PATTERN_LEN) {
+        return Err("That pattern is too long.".into());
+    }
+    change_blocked(&s, |l| l.edit(&pattern, replacement.as_deref(), &passage)).map(|(_, st)| st)
+}
+
+/// The message shown in a blocked tab (empty: the default).
+#[tauri::command]
+pub async fn set_blocked_message(s: S<'_>, message: String) -> Result<BlockedState, String> {
+    let message: String = message.chars().take(4 * snorkle_core::blocklist::MAX_MESSAGE_CHARS).collect();
+    change_blocked(&s, |l| {
+        l.set_message(&message);
+        Ok(())
+    })
+    .map(|(_, st)| st)
+}

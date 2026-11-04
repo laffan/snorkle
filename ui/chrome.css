@@ -733,3 +733,68 @@ body.private .pin img.prefab { filter: invert(1); }
   font-variant-numeric: tabular-nums; font-size: 14px; letter-spacing: .04em;
 }
 .keys-combo.recording { background: var(--fg); color: var(--bar); }
+
+/* ---- attached URL bar (⋯ → Attach URL Bar) --------------------------------- */
+/* A full-width bar along the bottom of the page instead of the floating
+   pill; the page ends above it (reported as the content area's bottom
+   inset), so text fields at the bottom of pages stay clear. Toasts, the
+   find bar and the ⋯ popup still float above it, over the page. */
+body.bar-attached #chrome { padding: 0; }
+body.bar-attached #chrome > :not(#toolbar) { margin-left: 12px; margin-right: 12px; }
+body.bar-attached #toolbar.urlpill {
+  align-self: stretch; justify-content: center; border-radius: 0; border-width: 1px 0 0; box-shadow: none;
+  padding: 4px max(12px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  opacity: 1;
+}
+body.bar-attached.sb-docked #toolbar.urlpill { padding-left: 12px; }
+body.bar-attached .findbar { margin-bottom: -1px; }
+body.bar-attached #progress { top: -1px; bottom: auto; left: 0; right: 0; }
+body.bar-attached #surface { padding-bottom: 24px; }
+body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
+
+/* ---- Settings → Blocked ------------------------------------------------------- */
+.mono-inline { font-family: ui-monospace, Menlo, monospace; font-size: .92em; overflow-wrap: anywhere; }
+.blocked-add { display: flex; gap: 8px; margin-top: 12px; }
+.blocked-add input, .blocked-message {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--field);
+  padding: 9px 10px; font-size: 15px;
+}
+.blocked-add input { font-family: ui-monospace, Menlo, monospace; }
+.blocked-message { display: block; width: 100%; resize: vertical; }
+.blocked-msg { min-height: 1.2em; margin-top: 6px; }
+.blocked-list { margin-top: 4px; }
+.blocked-list li { gap: 8px; padding: 6px 0; }
+.blocked-list li.empty { border: 0; padding: 8px 0; }
+.blocked-list .pattern { flex: 1; min-width: 0; }
+.blocked-list .blocked-edit { padding: 6px 12px; font-size: 13px; }
+
+/* The passage modal: the text is greyed out and each letter turns solid
+   as it is typed; a wrong letter is shown inverted until it is deleted. */
+#unblock-modal { z-index: 60; }
+.modal.unblock { width: min(560px, 100%); }
+.unblock-for { margin: 0 0 12px; }
+.unblock-type { position: relative; border-radius: 10px; background: var(--field); padding: 14px 16px; cursor: text; }
+.unblock-type:focus-within { box-shadow: 0 0 0 2px var(--accent) inset; }
+.unblock-text { margin: 0; font-size: 17px; line-height: 1.55; white-space: pre-wrap; }
+.unblock-text span { opacity: .3; transition: opacity .08s; }
+.unblock-text span.ok { opacity: 1; }
+.unblock-text span.bad { opacity: 1; background: var(--fg); color: var(--bar); border-radius: 2px; }
+.unblock-type:focus-within .unblock-text span.cur { box-shadow: -2px 0 0 var(--fg); animation: unblock-caret 1s steps(1) infinite; }
+@keyframes unblock-caret { 50% { box-shadow: none; } }
+/* The real input sits invisibly over the text so a tap anywhere on the
+   passage focuses it (and brings up the keyboard on iPad). 16px keeps
+   iOS from zooming. */
+.unblock-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; resize: none; border: 0; padding: 0;
+  font-size: 16px; color: transparent; background: transparent; caret-color: transparent; cursor: text;
+}
+.unblock-actions { margin-top: 14px; }
+
+/* Settings → Blocked: the user's message in the middle of a blocked tab. */
+#notice.user-blocked {
+  min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding-top: 0;
+}
+#notice.user-blocked h1 { font-size: 30px; max-width: 30ch; overflow-wrap: anywhere; }
+#notice.user-blocked #notice-body:empty { display: none; }
+#unblock-edit { font-family: ui-monospace, Menlo, monospace; }

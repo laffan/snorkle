@@ -143,6 +143,9 @@
         <div id="actions-pop" class="popup actions-pop" role="menu" aria-label="Page actions" hidden>
           <button id="shield" role="menuitem"><span class="label"></span><span class="state"></span></button>
           <button id="bookmark" role="menuitem"><span class="label">Bookmark</span><span class="state">&#x2606;</span></button>
+          <!-- Adds the site to Settings → Blocked (after a confirmation:
+               unblocking means typing out a passage). -->
+          <button id="block-site" role="menuitem"><span class="label">Block This Site</span><span class="state">&#x2298;</span></button>
           <div class="menu-sep" role="separator"></div>
           <button id="scripts-btn" role="menuitem" aria-haspopup="dialog"><span class="label">Site Scripts</span><span class="state">{ }</span></button>
           <div class="menu-sep" role="separator"></div>
@@ -154,6 +157,11 @@
             <button id="zoom-level" class="zoom-level" aria-label="Reset scale to 100%" title="Reset to 100%">100%</button>
             <button id="zoom-in" class="zoom-btn" aria-label="Larger" title="Larger">+</button>
           </div>
+          <div class="menu-sep" role="separator"></div>
+          <!-- Attached: a full-width bar along the bottom of the page, which
+               ends above it, instead of the pill floating over the page
+               (so chat boxes at the bottom of pages stay clear). -->
+          <button id="attach-bar" role="menuitemcheckbox" aria-checked="false"><span class="label">Attach URL Bar</span><span class="state">Off</span></button>
         </div>
       </div>
       <button id="headers" class="icon mode" aria-label="Headers view for this tab" title="Headers view (this tab)" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><rect x="3" y="4.5" width="18" height="3.2" rx="1.6"/><rect x="7" y="10.4" width="14" height="3.2" rx="1.6"/><rect x="11" y="16.3" width="10" height="3.2" rx="1.6"/></svg></button>
@@ -238,6 +246,7 @@
         <button data-section="ai">AI</button>
         <button data-section="keys">Keyboard</button>
         <button data-section="cache">Cache</button>
+        <button data-section="blocked">Blocked</button>
       </nav>
       <div class="settings-body">
         <div class="modal-head">
@@ -383,6 +392,50 @@
         <button class="button clear-data" data-kind="logins">Delete</button>
       </div>
         </section>
+        <section data-panel="blocked" hidden>
+          <p class="muted small">Pages whose address matches a pattern do not open; the tab shows your message instead. Patterns are regular expressions, matched against the address without its scheme (the <span class="mono-inline">https</span> part) and without anything after a <span class="mono-inline">?</span>: <span class="mono-inline">reddit\.com</span> blocks all of Reddit, <span class="mono-inline">(^|\.)x\.com/</span> blocks x.com but not netflix.com, <span class="mono-inline">youtube\.com/shorts</span> blocks only Shorts. Adding is immediate. Changing or removing a pattern means typing out a passage, every time.</p>
+          <div class="blocked-add">
+            <input id="blocked-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"
+                   maxlength="300" placeholder="reddit\.com" aria-label="Address pattern to block">
+            <button id="blocked-add" class="button primary">Add</button>
+          </div>
+          <div id="blocked-msg" class="muted small blocked-msg" role="status"></div>
+          <ul id="blocked-list" class="list blocked-list"></ul>
+          <h3 class="settings-sub">Message</h3>
+          <textarea id="blocked-message" class="blocked-message" rows="2" maxlength="500" aria-label="Message shown in a blocked tab"></textarea>
+          <div class="muted small blocked-msg" id="blocked-message-state" role="status"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings → Blocked: changing or removing a pattern. The passage is
+       typed out letter by letter over its greyed-out text (no pasting,
+       dictation or suggestions); only then can the pattern be changed. -->
+  <div id="unblock-modal" class="backdrop" hidden>
+    <div class="modal unblock" role="dialog" aria-modal="true" aria-labelledby="unblock-pattern">
+      <p class="muted small unblock-for">Pattern <span id="unblock-pattern" class="mono-inline"></span></p>
+      <div id="unblock-step-type">
+        <div id="unblock-type" class="unblock-type">
+          <p id="unblock-text" class="unblock-text" aria-hidden="true"></p>
+          <textarea id="unblock-input" class="unblock-input" aria-label="Type the passage shown" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" rows="1"></textarea>
+        </div>
+        <div class="actions unblock-actions">
+          <span id="unblock-count" class="muted small" aria-live="polite"></span>
+          <span class="spacer"></span>
+          <button id="unblock-cancel" class="button">Cancel</button>
+          <button id="unblock-go" class="button primary" disabled>Edit/Remove URL</button>
+        </div>
+      </div>
+      <div id="unblock-step-edit" hidden>
+        <label class="field">Pattern <input id="unblock-edit" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="300"></label>
+        <div id="unblock-msg" class="muted small blocked-msg" role="status"></div>
+        <div class="actions unblock-actions">
+          <button id="unblock-remove" class="button">Remove</button>
+          <span class="spacer"></span>
+          <button id="unblock-cancel2" class="button">Cancel</button>
+          <button id="unblock-save" class="button primary">Save</button>
+        </div>
       </div>
     </div>
   </div>

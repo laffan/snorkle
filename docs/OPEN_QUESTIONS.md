@@ -605,3 +605,31 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
      `ASAuthorizationWebBrowserPublicKeyCredentialManager.requestAuthorizationForPublicKeyCredentials`
      (AuthenticationServices; not linked yet); and, on iPadOS, whether
      `com.apple.developer.web-browser` enables passkeys in `WKWebView` (assumed, unverified).
+
+
+## Round 10 (2026-11-04)
+
+102. **[blocked] Default browser on iPadOS** (reported 2026-11-04: Snorkle is not listed under
+     Settings → Apps → Default Apps → Browser App). The list includes only apps signed with
+     `com.apple.developer.web-browser`, which Apple grants per bundle identifier. Found: the
+     bundle identifier is still the placeholder `com.example.snorkle`, and the entitlement reached
+     the signed app only if someone copied it by hand into the generated Xcode project after every
+     `tauri ios init` (Tauri 2.12 merges `Info.ios.plist` but never entitlements;
+     `tauri-cli` 2.12.4 `mobile/ios/build.rs`). Fixed in code: `npm run ios:build` now copies it and
+     reports whether the signed app and its provisioning profile carry it. Not fixable in code: the
+     grant itself (Account Holder; "Default browser entitlement request" form) and enabling it for
+     the App ID. **[verify]** on device: the build script's report, then the Settings list.
+103. **[verify] Entitlement sync script.** `scripts/ios-entitlements.sh` uses PlistBuddy
+     (`Delete`, then `Merge`) and `plutil -lint`; written without a Mac, not yet run. The build
+     check reads `codesign -d --entitlements - --xml` (older Xcode: `:-`) and
+     `security cms -D -i embedded.mobileprovision`.
+104. **[decide] Blocked list scope.** Matching ignores the query (so a search for "reddit.com" is
+     not blocked) and frames inside pages (embedded videos still play). Private tabs are blocked
+     too. The list is a file in the app's container, so it is a commitment device, not a lock.
+105. **[verify] Passage typing on iPad.** The chrome accepts only one-character `insertText` and
+     `deleteContentBackward` input events, and reverts anything else (paste, drop, predictive
+     text, dictation, the double-space full stop). Assumed from WebKit's Input Events support; check
+     on device with the software keyboard and a hardware keyboard.
+106. **[verify] Attached URL bar.** On iPadOS the bar's height includes the home-indicator inset
+     (`env(safe-area-inset-bottom)`); with the software keyboard up, pages and the bar behave as
+     they did with the pill (the keyboard is over both).

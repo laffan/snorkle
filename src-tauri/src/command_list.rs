@@ -85,4 +85,9 @@ pub const COMMANDS: &[&str] = &[
     "unpin",
     "set_pin_emoji",
     "edit_item_url",
+    "get_blocked",
+    "add_blocked",
+    "block_site",
+    "edit_blocked",
+    "set_blocked_message",
 ];

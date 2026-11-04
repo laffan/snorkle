@@ -1047,3 +1047,104 @@ fn closed_tabs_reopen_newest_first_and_never_private() {
     assert_eq!(b.pop_closed(), Some(u("https://a.example/")));
     assert_eq!(b.pop_closed(), None, "private and empty tabs are not remembered");
 }
+
+// ---- the user's block list (Settings → Blocked) ----------------------------
+
+fn block(b: &mut Browser, patterns: &[&str]) -> Vec<Effect> {
+    use snorkle_core::blocklist::{BlockList, BlockSettings};
+    b.set_blocklist(BlockList::from_settings(BlockSettings {
+        patterns: patterns.iter().map(|p| p.to_string()).collect(),
+        message: "Not now.".into(),
+    }))
+}
+
+fn user_blocked(b: &Browser, tab: TabId) -> bool {
+    matches!(notice(b, tab), Some(Notice::UserBlocked { ref message, .. }) if message == "Not now.")
+}
+
+#[test]
+fn blocked_addresses_never_reach_webkit_from_any_source() {
+    let mut b = browser(4);
+    block(&mut b, &["reddit\\.com"]);
+    let (t, _) = open_and_load(&mut b, "https://a.example/", 0);
+
+    // Typed (also over http, which would otherwise be upgraded).
+    for typed in ["https://www.reddit.com/r/rust", "http://reddit.com/", "reddit.com"] {
+        let out = b.navigate_input(t, typed, 1).unwrap();
+        assert!(!out.iter().any(|e| matches!(e, Effect::Load { .. } | Effect::CreateView { .. })), "{typed}");
+        assert!(user_blocked(&b, t), "{typed}");
+        assert!(out.contains(&Effect::HideView(t)) || !b.view().content_visible);
+        b.go_back(t);
+    }
+    // Back returns to the page underneath.
+    assert_eq!(notice(&b, t), None);
+    assert!(b.view().content_visible);
+
+    // Links, redirects and script navigations in the main frame.
+    for kind in [NavKind::LinkActivated, NavKind::Other, NavKind::FormSubmitted, NavKind::BackForward] {
+        let (v, _) = b.decide_navigation(t, &u("https://old.reddit.com/"), Frame::Main, kind, 2);
+        assert_eq!(v, Verdict::Cancel, "{kind:?}");
+        assert!(user_blocked(&b, t));
+        b.dismiss_notice(t);
+    }
+    // Frames inside a page are not affected.
+    let (v, _) = b.decide_navigation(t, &u("https://www.reddit.com/embed"), Frame::Sub, NavKind::Other, 3);
+    assert_eq!(v, Verdict::Allow);
+
+    // New tabs: from other apps, ⌘-click, reopened tabs.
+    let (o, _) = b.open_from_other_app(u("https://reddit.com/"), 4);
+    let o = o.unwrap();
+    assert!(user_blocked(&b, o));
+    let (bg, _) = b.on_background_tab_request(t, &u("https://reddit.com/x"), 5);
+    let bg = bg.unwrap();
+    let (v, _) = b.decide_navigation(bg, &u("https://reddit.com/x"), Frame::Main, NavKind::Other, 6);
+    assert_eq!(v, Verdict::Cancel);
+    assert!(user_blocked(&b, bg));
+}
+
+#[test]
+fn single_page_app_moving_to_a_blocked_address_is_hidden() {
+    let mut b = browser(4);
+    block(&mut b, &["youtube\\.com/shorts"]);
+    let (t, _) = open_and_load(&mut b, "https://www.youtube.com/", 0);
+    assert!(b.view().content_visible);
+
+    // pushState to a blocked address: the page is hidden behind the notice.
+    let out = b.on_url_changed(t, u("https://www.youtube.com/shorts/abc"));
+    assert!(out.contains(&Effect::HideView(t)));
+    assert!(user_blocked(&b, t));
+
+    // Back really goes back in the page (the blocked page is underneath),
+    // and dismissing cannot reveal it.
+    let out = b.go_back(t);
+    assert!(out.contains(&Effect::GoBack(t)));
+    assert!(user_blocked(&b, t));
+    let out = b.dismiss_notice(t);
+    assert!(!out.iter().any(|e| matches!(e, Effect::ShowView { .. })));
+    assert!(!b.view().content_visible);
+
+    // The page leaves the blocked address: shown again.
+    block(&mut b, &["youtube\\.com/shorts"]);
+    b.on_url_changed(t, u("https://www.youtube.com/shorts/abc"));
+    let out = b.on_url_changed(t, u("https://www.youtube.com/"));
+    assert!(out.contains(&Effect::ShowView { tab: t, pane: Pane::Full }));
+    assert_eq!(notice(&b, t), None);
+}
+
+#[test]
+fn adding_a_pattern_hides_open_pages_at_once() {
+    let mut b = browser(4);
+    let (t, _) = open_and_load(&mut b, "https://news.example/", 0);
+    let (other, _) = open_and_load(&mut b, "https://fine.example/", 1);
+    b.activate(t, 2);
+    let out = block(&mut b, &["news\\.example"]);
+    assert!(out.contains(&Effect::HideView(t)));
+    assert!(user_blocked(&b, t));
+    assert_eq!(notice(&b, other), None);
+    // A commit that skipped the policy (restored back/forward state) is
+    // still hidden.
+    let (p, _) = open_and_load(&mut b, "https://fine.example/b", 3);
+    b.on_commit(p, u("https://news.example/again"));
+    assert!(user_blocked(&b, p));
+    assert!(!b.view().content_visible);
+}

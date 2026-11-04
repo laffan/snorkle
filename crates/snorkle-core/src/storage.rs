@@ -104,6 +104,8 @@ struct Data {
     pins: Vec<Bookmark>,
     chats: Vec<ChatRecord>,
     launch_modes: crate::viewmodes::LaunchModes,
+    /// Settings → Blocked (patterns as stored; compiled by the caller).
+    blocked: crate::blocklist::BlockSettings,
     /// Emoji shown instead of a pin's favicon, by pin URL.
     pin_emoji: BTreeMap<String, String>,
     /// Offline copies of pinned and bookmarked pages (index of `offline/`).
@@ -340,6 +342,8 @@ const HEADING_RULES_FILE: &str = "heading-rules.json";
 const AI_USAGE_FILE: &str = "ai-usage.json";
 /// View modes each launch starts with (Settings → General).
 const LAUNCH_MODES_FILE: &str = "view-modes.json";
+/// Settings → Blocked: patterns and the message.
+const BLOCKED_FILE: &str = "blocked.json";
 /// AI requests remembered for the usage table (oldest dropped first).
 pub const MAX_AI_USAGE_EVENTS: usize = 20_000;
 
@@ -449,6 +453,7 @@ impl Store {
         ai_usage.drain(..excess);
         let chats = load_chats(&dir.join(CHATS_DIR));
         let launch_modes = load_or_reset(&dir.join(LAUNCH_MODES_FILE));
+        let blocked = crate::blocklist::BlockList::from_settings(load_or_reset(&dir.join(BLOCKED_FILE))).settings().clone();
         let mut pin_emoji: BTreeMap<String, String> = load_or_reset(&dir.join(PIN_EMOJI_FILE));
         pin_emoji.retain(|url, e| pins.iter().any(|p| &p.url == url) && clean_emoji(e).as_deref() == Some(e.as_str()));
         let offline = load_offline(&dir.join(OFFLINE_DIR), |u| {
@@ -469,6 +474,7 @@ impl Store {
                 pins,
                 chats,
                 launch_modes,
+                blocked,
                 pin_emoji,
                 offline,
                 page_texts,
@@ -1089,6 +1095,20 @@ impl Store {
         Ok(modes)
     }
 
+    /// The block list as stored (already validated when the store opened).
+    pub fn blocked(&self) -> crate::blocklist::BlockSettings {
+        self.data().blocked.clone()
+    }
+
+    pub fn set_blocked(&self, blocked: &crate::blocklist::BlockSettings) -> std::io::Result<()> {
+        let snapshot = {
+            let mut d = self.data();
+            d.blocked = blocked.clone();
+            serde_json::to_vec(&d.blocked)?
+        };
+        atomic_write(&self.dir.join(BLOCKED_FILE), &snapshot)
+    }
+
     pub fn heading_rules(&self) -> HeadingRules {
         self.data().heading_rules.clone()
     }
@@ -1686,6 +1706,26 @@ mod tests {
         assert_eq!(s.user_scripts().len(), 1, "tampered entries are dropped on load");
         s.delete_user_script("ok.example").unwrap();
         assert!(s.user_scripts().is_empty());
+    }
+
+    #[test]
+    fn block_list_is_stored_and_cleaned() {
+        use crate::blocklist::{BlockList, BlockSettings};
+        let dir = tmpdir("blocked");
+        {
+            let s = Store::open(&dir).unwrap();
+            assert_eq!(s.blocked(), BlockSettings::default());
+            let mut l = BlockList::from_settings(s.blocked());
+            l.add("reddit\\.com").unwrap();
+            l.set_message("Back to work.");
+            s.set_blocked(l.settings()).unwrap();
+        }
+        let s = Store::open(&dir).unwrap();
+        assert_eq!(s.blocked().patterns, ["reddit\\.com"]);
+        assert_eq!(s.blocked().message, "Back to work.");
+        // A hand-edited file: invalid patterns are dropped on load.
+        fs::write(dir.join(BLOCKED_FILE), br#"{"patterns":["(","a\\.com"],"message":""}"#).unwrap();
+        assert_eq!(Store::open(&dir).unwrap().blocked().patterns, ["a\\.com"]);
     }
 
     #[test]

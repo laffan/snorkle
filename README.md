@@ -79,33 +79,44 @@ Xcode's command-line tools and Rust 1.90+; Safari 26 or later (Safari 27 runs on
 - `npm run tauri ios dev`: the real browser, in the iPad Simulator or on a device. First run:
   1. Xcode with the iPadOS 26/27 SDK; `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`.
   2. `npm run tauri icon src-tauri/icons/icon.png && npm run tauri ios init`
-  3. Copy the keys from `src-tauri/ios/Entitlements.plist` into
-     `src-tauri/gen/apple/snorkle_iOS/snorkle_iOS.entitlements`. Leave out
-     `com.apple.developer.web-browser` until Apple grants it, or device signing fails.
+  3. `sh scripts/ios-entitlements.sh` copies the keys from `src-tauri/ios/Entitlements.plist`
+     into `src-tauri/gen/apple/snorkle_iOS/snorkle_iOS.entitlements` (Tauri never does; `ios init`
+     leaves it empty). Until Apple grants `com.apple.developer.web-browser`, add
+     `--without-web-browser`, or device signing fails. `npm run ios:build` runs it for you.
   4. Set the bundle identifier and development team (`tauri.conf.json`, currently placeholders).
   5. Pick an iPad simulator when prompted. Inspect the chrome **and** the page views from
      Safari → Develop → Simulator (both are inspectable in debug builds).
-  6. Physical iPad: `npm run ios:build` builds a debug IPA and installs it with
+  6. Physical iPad: `npm run ios:build` syncs the entitlements (step 3), builds a debug IPA,
+     reports whether the signed app carries the default-browser entitlement, and installs it with
      `ios-deploy --bundle` (`brew install ios-deploy`). `npm run ios:build -- --release` for a
-     release build; any other arguments go to ios-deploy (e.g. `--justlaunch`, `--id <udid>`).
-     Needs a development team set (`bundle.iOS.developmentTeam` or `APPLE_DEVELOPMENT_TEAM`).
+     release build, `-- --without-web-browser` to sign without that entitlement; any other
+     arguments go to ios-deploy (e.g. `--justlaunch`, `--id <udid>`). Needs a development team set
+     (`bundle.iOS.developmentTeam` or `APPLE_DEVELOPMENT_TEAM`).
   7. Run `tests/device/ipc-probe.html` from a remote origin and `tests/device/raf-probe.html`,
      and record the results in `docs/PERFORMANCE.md`.
 
 ### Default browser
 
-The app already declares the `http`/`https` URL schemes (`Info.ios.plist`) and handles links
-tapped in other apps (each opens in a new tab). To appear in **Settings → Apps → Default
-Browser App**, the app also needs Apple's managed entitlement `com.apple.developer.web-browser`:
+The app already declares the `http`/`https` URL schemes (`Info.ios.plist`), opens an address
+field at launch and handles links tapped in other apps (each opens in a new tab). iPadOS lists a
+browser under **Settings → Apps → Default Apps → Browser App** only if the installed app is
+*signed with* Apple's managed entitlement `com.apple.developer.web-browser`. Nothing in the code
+can substitute for it. Three things must all hold:
 
-1. Request it with Apple's "Default browser entitlement request" form (developer account
-   holder), for the app's real bundle identifier.
-2. Once granted, enable it for the App ID in the developer portal, keep the key in
-   `src-tauri/ios/Entitlements.plist`, and copy it into the generated
-   `gen/apple/snorkle_iOS/snorkle_iOS.entitlements` (step 3 above).
-3. Install the signed build, then choose Snorkle under Settings → Apps → Default Browser App.
+1. **Apple granted it** for the app's real bundle identifier: the developer account holder
+   submits Apple's "Default browser entitlement request" form
+   (developer.apple.com/contact/request/default-browser-entitlement). The identifier in
+   `tauri.conf.json` is still the placeholder `com.example.snorkle`, which cannot be granted.
+2. **It is enabled for the App ID**: developer portal → Certificates, Identifiers & Profiles →
+   Identifiers → the App ID → Additional Capabilities → Default Web Browser, so new provisioning
+   profiles carry it.
+3. **The build is signed with it**: `npm run ios:build` copies the key into the generated Xcode
+   project (`scripts/ios-entitlements.sh`; before 2026-11-04 this was a manual copy that
+   `tauri ios init` undoes), then prints whether the signed app and its profile contain it.
 
-Until then, builds must leave the key out, or signing fails.
+If signing fails with "provisioning profile doesn't include the
+com.apple.developer.web-browser entitlement", 1 or 2 is missing; `npm run ios:build --
+--without-web-browser` installs without it (no default-browser option, no Service Workers).
 
 ### Passkeys (both platforms)
 

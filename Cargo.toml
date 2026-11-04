@@ -27,6 +27,9 @@ serde_json = "=1.0.154"
 # Brave's filter-list engine, used only for its ABP/uBO -> WebKit
 # content-blocking converter. MPL-2.0.
 adblock = { version = "=0.13.5", default-features = false, features = ["content-blocking"] }
+# Settings → Blocked patterns (linear-time matching). Already in the graph
+# through adblock, same version and features.
+regex = "=1.13.1"
 
 [profile.release]
 opt-level = 3

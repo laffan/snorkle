@@ -13,6 +13,7 @@
 
 pub mod ai;
 pub mod blocking;
+pub mod blocklist;
 pub mod browser;
 pub mod console;
 pub mod find;

@@ -339,6 +339,32 @@ Page; other rows open the page as before. Search (`search_history`) matches titl
 the saved text (with a snippet). Images are not saved. Settings → Cache does not delete saved text
 (it belongs to history).
 
+**Attached URL bar** (⋯ → Attach URL Bar, 2026-11-04; remembered in the chrome's
+`localStorage`): the pill becomes a full-width bar along the bottom of the page area (between the
+sidebar and any docked right panel). It is no longer a hole: the chrome reports its height as the
+content area's `bottom` inset, so pages end above it and text fields at the bottom of pages (chat
+boxes) are not covered. Toasts, the find bar, the ⋯ popup and the ⌘W confirmation still float above
+it as holes. With the console open, the console sits on the bar and the page ends above both.
+
+**Blocked** (Settings → Blocked, 2026-11-04; `snorkle_core::blocklist`, `blocked.json`): regular
+expressions (Rust `regex`: linear time, no backreferences) matched case-insensitively against
+`host[:port]/path`, without scheme, user info, query or fragment. A main-frame navigation to a
+match is cancelled in the core before it reaches WebKit, from every source (`navigate_trusted`,
+`decide_navigation`: typed, links, redirects, script, back/forward, popups, background tabs,
+links from other apps); frames inside pages are not affected. The tab shows a `UserBlocked` notice
+with the user's message in its middle. Pages that reach a blocked address without a navigation
+(a single-page app's `pushState`, a commit that skipped the policy, the list changing while the
+page is open) are hidden behind the notice, and the core never shows a view whose committed page
+matches (`showable`); Back then really goes back in the page instead of dismissing the notice.
+Adding a pattern is immediate (also ⋯ → Block This Site, after a confirmation, which adds
+`(^|\.)<registrable domain>(:|/)`). Changing or removing one needs the passage
+(`blocklist::UNBLOCK_PASSAGE`) typed out in full each time: the chrome shows it greyed out, each
+letter turns solid as it is typed, only single-character insertions at the end and deletions of the
+last character are accepted (no paste, drop, dictation or predictive text), and the Edit/Remove
+URL button is enabled only when the text matches. The core refuses the change unless the passage
+it receives is exact. This is a commitment device, not a security boundary (the file is in the
+app's container). The message is free to change.
+
 Bookmarking a tab (⌥⌘D, the ⋯ menu, or dragging it into the bookmarks) moves it into the
 bookmark: the tab becomes that bookmark's tab (`Browser::bind_launcher`) instead of a second tab
 appearing when the bookmark is opened. Un-bookmarking makes it an ordinary tab again.
@@ -506,7 +532,8 @@ via the share sheet.
 | Not selectable as default browser | Links from other apps open in Safari. (With it, iOS sends them to Snorkle as `RunEvent::Opened`; each http/https URL without credentials opens in a new tab through the normal policy, `Browser::open_from_other_app`.) |
 | No Service Workers in WKWebView (unless App-Bound Domains, which we do not use) | PWAs, offline sites and push-dependent sites degrade. A WebKit bug report says SharedWorker pages also fail to load without the entitlement since iOS 16.1 (unverified for 26/27). |
 | "Full script access" | Not needed today: we inject no scripts and do not opt into App-Bound Domains. |
-| Entitlement key present but not provisioned | The build fails to sign. Remove the key from `ios/Entitlements.plist` for such builds. |
+| Entitlement key present but not provisioned | The build fails to sign. Build with `--without-web-browser` (`scripts/ios-entitlements.sh` then leaves the key out of the generated project). |
+| Entitlement granted but not in the generated project | The app signs and runs but iPadOS never lists it as a browser. Tauri merges `Info.ios.plist` on every build but never copies entitlements, and `tauri ios init` writes the file empty; `scripts/ios-entitlements.sh` (run by `npm run ios:build`) copies them, and the build script reports what the signed app carries. |
 
 Apple's rules that the code already follows: http and https schemes declared (`Info.ios.plist`);
 no `UIWebView`; a URL field on launch; none of the rejected `Info.plist` keys (Photo Library

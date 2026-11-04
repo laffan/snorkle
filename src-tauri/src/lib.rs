@@ -112,6 +112,11 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::unpin,
         commands::set_pin_emoji,
         commands::edit_item_url,
+        commands::get_blocked,
+        commands::add_blocked,
+        commands::block_site,
+        commands::edit_blocked,
+        commands::set_blocked_message,
     ])
 }
 
@@ -222,8 +227,11 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
         };
     });
     let allowlist = store.as_ref().map(|s| s.adblock_allowed()).unwrap_or_default();
+    let blocked = store.as_ref().map(|s| s.blocked()).unwrap_or_default();
     let shared = Shared::new(browser, store, emit);
     let _ = shared.browser().set_adblock_allowlist(allowlist);
+    // Before the session is restored, so no blocked page is ever shown.
+    let _ = shared.browser().set_blocklist(snorkle_core::blocklist::BlockList::from_settings(blocked));
     app.manage(shared.clone());
 
     let window = app.get_webview_window(CHROME_LABEL).ok_or("main window missing")?;

@@ -25,6 +25,10 @@
   let editing = false;
   let paletteOpen = false;
   let consoleOpen = false;
+  // ⋯ → Attach URL Bar (remembered): the address bar is a full-width bar
+  // along the bottom of the page, which ends above it, instead of a pill
+  // floating over the page.
+  let barAttached = false;
   let panel = null; // null | 'history' | 'downloads'
   let modalOpen = false;
   let scriptsOpen = false;
@@ -280,6 +284,7 @@
     const marked = !!(tab && ((tab.launcher && bookmarks.some((b) => b.url === tab.launcher)) || (tab.url && bookmarks.some((b) => b.url === tab.url.full))));
     $('bookmark').querySelector('.label').textContent = marked ? 'Remove Bookmark' : 'Bookmark';
     $('bookmark').querySelector('.state').textContent = marked ? '\u2605' : '\u2606';
+    $('block-site').disabled = !(tab && tab.url && tab.adblock);
     $('unsplit').hidden = !state.split;
     $('sheet-close').hidden = !state.sheet;
     $('sheet-pill').hidden = !state.sheet;
@@ -332,6 +337,7 @@
     secondary.textContent = 'Go Back';
     secondary.onclick = () => invoke('go_back', { tab: tab.id });
     detail.textContent = '';
+    $('notice').classList.toggle('user-blocked', n.kind === 'user_blocked');
     switch (n.kind) {
       case 'https_unavailable':
         title.textContent = 'This site does not offer a secure connection';
@@ -365,6 +371,13 @@
         primary.onclick = () => invoke('confirm_external', { tab: tab.id });
         secondary.textContent = 'Cancel';
         secondary.onclick = () => invoke('dismiss_notice', { tab: tab.id });
+        break;
+      case 'user_blocked':
+        // Settings → Blocked: the user's own message, in the middle of the tab.
+        title.textContent = n.message;
+        body.textContent = '';
+        detail.textContent = n.url;
+        primary.hidden = true;
         break;
       case 'crashed':
         title.textContent = 'This page keeps crashing';
@@ -1209,6 +1222,8 @@
     sidebarShown = !narrow && sidebarMode === 'attached' && pref('sidebarOpen') !== '0';
   }
   loadSidebarPrefs();
+  barAttached = pref('urlBarAttached') === '1';
+  document.body.classList.toggle('bar-attached', barAttached);
 
   // The page starts to the sidebar's right (attached and shown, wide window).
   function sidebarDocked() {
@@ -1487,15 +1502,175 @@
     reportLayout();
   }
 
-  const SETTINGS_TITLES = { general: 'General', ai: 'AI', keys: 'Keyboard', cache: 'Cache' };
+  const SETTINGS_TITLES = { general: 'General', ai: 'AI', keys: 'Keyboard', cache: 'Cache', blocked: 'Blocked' };
   function showSettings(section) {
     document.querySelectorAll('.settings-nav button').forEach((b) => b.setAttribute('aria-current', b.dataset.section === section ? 'page' : 'false'));
     document.querySelectorAll('.settings-body [data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== section; });
     $('settings-heading').textContent = SETTINGS_TITLES[section];
     if (section === 'ai') { loadAi(); loadUsage(); }
     if (section === 'keys') renderKeys();
+    if (section === 'blocked') loadBlocked();
   }
   document.querySelectorAll('.settings-nav button').forEach((b) => b.addEventListener('click', () => showSettings(b.dataset.section)));
+
+  // ---- Settings → Blocked ---------------------------------------------------
+  //
+  // The list lives in the core (`snorkle_core::blocklist`), which keeps
+  // matching pages from loading. Adding a pattern is immediate. Changing or
+  // removing one first asks for a passage, typed out in full each time;
+  // the core refuses the change unless it receives the passage exactly.
+  let blocked = { patterns: [], message: '', default_message: '', passage: '' };
+
+  function loadBlocked() {
+    T.core.invoke('get_blocked').then((b) => { blocked = b; renderBlocked(); }).catch((e) => toast(String(e)));
+  }
+
+  function renderBlocked() {
+    const list = $('blocked-list');
+    list.textContent = '';
+    if (!blocked.patterns.length) list.append(el('li', 'empty muted small', 'Nothing is blocked.'));
+    for (const p of blocked.patterns) {
+      const li = el('li');
+      li.append(el('span', 'pattern mono-inline', p));
+      const edit = el('button', 'button blocked-edit', 'Edit…');
+      edit.setAttribute('aria-label', `Edit or remove ${p}`);
+      edit.addEventListener('click', () => openUnblock(p));
+      li.append(edit);
+      list.append(li);
+    }
+    const m = $('blocked-message');
+    if (document.activeElement !== m) m.value = blocked.message;
+    m.placeholder = blocked.default_message;
+  }
+
+  function addBlocked() {
+    const input = $('blocked-input');
+    const pattern = input.value.trim();
+    if (!pattern) return;
+    T.core.invoke('add_blocked', { pattern })
+      .then((b) => { blocked = b; input.value = ''; $('blocked-msg').textContent = ''; renderBlocked(); })
+      .catch((e) => { $('blocked-msg').textContent = String(e); });
+  }
+  $('blocked-add').addEventListener('click', addBlocked);
+  $('blocked-input').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addBlocked(); } });
+  $('blocked-input').addEventListener('input', () => { $('blocked-msg').textContent = ''; });
+  $('blocked-message').addEventListener('change', () => {
+    T.core.invoke('set_blocked_message', { message: $('blocked-message').value })
+      .then((b) => { blocked = b; renderBlocked(); $('blocked-message-state').textContent = 'Saved.'; })
+      .catch((e) => { $('blocked-message-state').textContent = String(e); });
+  });
+  $('blocked-message').addEventListener('input', () => { $('blocked-message-state').textContent = ''; });
+
+  // The passage modal. What has been typed is kept here, not in the
+  // textarea: every change is checked against it, and only one character
+  // added at the end or the last one deleted is accepted, so pasting,
+  // dropping, dictation, predictive text and moving the caret change
+  // nothing.
+  let unblock = null; // { pattern, typed, passage }
+  const UNBLOCK_ALLOWED = new Set(['insertText', 'deleteContentBackward']);
+
+  function openUnblock(pattern) {
+    unblock = { pattern, typed: '', passage: blocked.passage };
+    $('unblock-pattern').textContent = pattern;
+    $('unblock-step-type').hidden = false;
+    $('unblock-step-edit').hidden = true;
+    $('unblock-msg').textContent = '';
+    const text = $('unblock-text');
+    text.textContent = '';
+    for (const ch of unblock.passage) text.append(el('span', '', ch));
+    const input = $('unblock-input');
+    input.value = '';
+    renderUnblock();
+    $('unblock-modal').hidden = false;
+    input.focus();
+  }
+
+  function closeUnblock() {
+    unblock = null;
+    $('unblock-input').value = '';
+    $('unblock-modal').hidden = true;
+  }
+
+  function renderUnblock() {
+    const { typed, passage } = unblock;
+    const spans = $('unblock-text').children;
+    let correct = 0;
+    while (correct < typed.length && typed[correct] === passage[correct]) correct++;
+    for (let i = 0; i < spans.length; i++) {
+      const c = i < correct ? 'ok' : i < typed.length ? 'bad' : i === typed.length ? 'cur' : '';
+      if (spans[i].className !== c) spans[i].className = c;
+    }
+    const done = typed === passage;
+    $('unblock-go').disabled = !done;
+    $('unblock-count').textContent = done
+      ? 'Done.'
+      : correct < typed.length ? 'A letter is wrong: delete back to it.' : `${passage.length - typed.length} letters to go`;
+  }
+
+  const unblockInput = $('unblock-input');
+  unblockInput.addEventListener('beforeinput', (ev) => {
+    if (!unblock) { ev.preventDefault(); return; }
+    const one = ev.inputType === 'insertText' && ev.data && [...ev.data].length === 1;
+    if (!UNBLOCK_ALLOWED.has(ev.inputType) || (ev.inputType === 'insertText' && !one)) ev.preventDefault();
+  });
+  unblockInput.addEventListener('input', () => {
+    if (!unblock) return;
+    const v = unblockInput.value;
+    const t = unblock.typed;
+    if (v.length === t.length + 1 && v.startsWith(t) && t.length < unblock.passage.length && v[t.length] !== '\n') {
+      unblock.typed = v;
+    } else if (v.length === t.length - 1 && t.startsWith(v)) {
+      unblock.typed = v;
+    }
+    if (unblockInput.value !== unblock.typed) unblockInput.value = unblock.typed;
+    unblockInput.setSelectionRange(unblock.typed.length, unblock.typed.length);
+    renderUnblock();
+  });
+  for (const type of ['paste', 'drop', 'dragover']) unblockInput.addEventListener(type, (ev) => ev.preventDefault());
+  unblockInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      if (!$('unblock-go').disabled) $('unblock-go').click();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeUnblock();
+    } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(ev.key)) {
+      ev.preventDefault();
+    }
+  });
+  // The caret always stays at the end.
+  const keepCaret = () => { if (unblock) unblockInput.setSelectionRange(unblock.typed.length, unblock.typed.length); };
+  unblockInput.addEventListener('select', keepCaret);
+  unblockInput.addEventListener('click', keepCaret);
+  $('unblock-text').addEventListener('click', () => unblockInput.focus());
+  $('unblock-cancel').addEventListener('click', closeUnblock);
+  $('unblock-cancel2').addEventListener('click', closeUnblock);
+  $('unblock-go').addEventListener('click', () => {
+    if (!unblock || unblock.typed !== unblock.passage) return;
+    $('unblock-step-type').hidden = true;
+    $('unblock-step-edit').hidden = false;
+    const edit = $('unblock-edit');
+    edit.value = unblock.pattern;
+    edit.focus();
+  });
+  function finishUnblock(replacement) {
+    if (!unblock) return;
+    const args = { pattern: unblock.pattern, replacement, passage: unblock.typed };
+    T.core.invoke('edit_blocked', args)
+      .then((b) => { blocked = b; closeUnblock(); renderBlocked(); })
+      .catch((e) => { $('unblock-msg').textContent = String(e); });
+  }
+  $('unblock-save').addEventListener('click', () => {
+    const v = $('unblock-edit').value.trim();
+    if (!v) { $('unblock-msg').textContent = 'Enter a pattern, or choose Remove.'; return; }
+    finishUnblock(v);
+  });
+  $('unblock-edit').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); $('unblock-save').click(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeUnblock(); }
+  });
+  $('unblock-remove').addEventListener('click', () => finishUnblock(null));
 
   // ---- AI connections -----------------------------------------------------
   //
@@ -1868,11 +2043,14 @@
     edge.style.top = top + 'px';
     // The docked console sits above the URL strip; while it is open the
     // page ends above it (the pill then floats over chrome, not the page).
+    // An attached URL bar is not over the page: the page ends above it.
+    const barBox = $('toolbar').getBoundingClientRect();
+    const bar = barAttached && barBox.height > 0 ? Math.ceil(window.innerHeight - barBox.top) : 0;
     const con = $('console');
     con.style.left = left + 'px';
     con.style.right = right + 'px';
-    con.style.bottom = strip + 'px';
-    const bottom = consoleOpen ? strip + Math.ceil(con.getBoundingClientRect().height) : 0;
+    con.style.bottom = (barAttached ? bar : strip) + 'px';
+    const bottom = consoleOpen ? (barAttached ? bar : strip) + Math.ceil(con.getBoundingClientRect().height) : bar;
     // The chrome surface (start page, notices) covers the focused pane: in
     // split view that is one half of the content area, side by side or one
     // above the other (matching the native pane frames: 2 pt divider,
@@ -1934,8 +2112,10 @@
       const y = Math.floor(r.top) - 1;
       return { x, y, w: Math.ceil(r.right) + 1 - x, h: Math.ceil(r.bottom) + 1 - y, r: radius + 1, c };
     };
+    // An attached bar lies below the page and needs no cut-out (the find
+    // bar on top of it still uses its edge).
     const pill = hole($('toolbar'), 15);
-    if (pill) out.push(pill);
+    if (pill && !barAttached) out.push(pill);
     if (findOpen) {
       const f = hole($('findbar'), 3);
       if (f && pill) f.h = Math.max(1, pill.y - f.y);
@@ -2097,6 +2277,34 @@
     reportLayout();
   }
   $('actions-toggle').addEventListener('click', () => setActions($('actions-pop').hidden));
+
+  function renderAttachBar() {
+    const b = $('attach-bar');
+    b.setAttribute('aria-checked', String(barAttached));
+    b.querySelector('.state').textContent = barAttached ? 'On' : 'Off';
+  }
+  renderAttachBar();
+  $('attach-bar').addEventListener('click', () => {
+    barAttached = !barAttached;
+    setPref('urlBarAttached', barAttached ? '1' : '0');
+    document.body.classList.toggle('bar-attached', barAttached);
+    renderAttachBar();
+    setActions(false);
+    reportLayout();
+  });
+
+  // ⋯ → Block This Site: adds the site (and its subdomains) to Settings →
+  // Blocked. Asked first, since only the passage undoes it.
+  $('block-site').addEventListener('click', withTab((t) => {
+    setActions(false);
+    const site = t.adblock && t.adblock.site;
+    if (!site) return;
+    askConfirm(`Block ${site}? Unblocking it later means typing out a passage in Settings → Blocked.`, 'Block', null, () => {
+      T.core.invoke('block_site', { tab: t.id })
+        .then(() => toast(`Blocked ${site}.`))
+        .catch((e) => toast(String(e)));
+    }, null, { shortcut: false });
+  }));
 
   // Page scale (⋯ menu): per tab, decided and saved by the core; the
   // content host lays the page out for a larger (or smaller) window and
@@ -3488,6 +3696,7 @@
     if (ev.key !== 'Escape' || editing) return;
     if (paletteOpen) closePalette();
     else if (!$('copy-modal').hidden) closePageCopy();
+    else if (unblock) closeUnblock();
     else if (confirmAction) closeConfirm();
     else if (findOpen) closeFind();
     else if (flyoutMode() && sidebarShown) setSidebar(false);

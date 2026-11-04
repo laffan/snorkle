@@ -99,6 +99,12 @@ pub enum Notice {
         reason: String,
         url: String,
     },
+    /// The address is on the user's block list (Settings → Blocked):
+    /// `message` is theirs, shown in the middle of the tab.
+    UserBlocked {
+        message: String,
+        url: String,
+    },
     LoadError {
         url: String,
         message: String,

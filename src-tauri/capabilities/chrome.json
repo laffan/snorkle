@@ -93,6 +93,11 @@
     "allow-move-pin",
     "allow-unpin",
     "allow-set-pin-emoji",
-    "allow-edit-item-url"
+    "allow-edit-item-url",
+    "allow-get-blocked",
+    "allow-add-blocked",
+    "allow-block-site",
+    "allow-edit-blocked",
+    "allow-set-blocked-message"
   ]
 }

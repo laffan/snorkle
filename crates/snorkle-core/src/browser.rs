@@ -25,6 +25,7 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 use url::Url;
 
+use crate::blocklist::BlockList;
 use crate::input::{self, InputError, Interpretation, SearchEngine};
 use crate::os::OsSupport;
 use crate::policy::{self, BlockReason, Decision, Frame, HttpExceptions, Request, Source};
@@ -276,6 +277,8 @@ pub struct Browser {
     /// Pages of recently closed non-private tabs, oldest first (⌘⇧T), in
     /// memory only. Private tabs and popup sheets are never listed.
     closed: Vec<Url>,
+    /// The user's block list (Settings → Blocked).
+    blocklist: BlockList,
 }
 
 /// Most closed tabs remembered for ⌘⇧T.
@@ -299,6 +302,7 @@ impl Browser {
             adblock_allowed: BTreeSet::new(),
             adblock_status: AdblockStatus::Off,
             closed: Vec::new(),
+            blocklist: BlockList::default(),
         }
     }
 
@@ -816,6 +820,10 @@ impl Browser {
         let profile = tab.profile;
         let req = Request { url: &url, frame: Frame::Main, source: Source::Typed, initiator: None };
         match policy::decide(&req, self.exceptions(profile)) {
+            Decision::Allow | Decision::UpgradeToHttps(_) if self.blocklist.matches(&url) => {
+                let notice = self.user_blocked_notice(&url);
+                self.set_notice(id, notice);
+            }
             Decision::Allow => self.load(id, url, Source::Typed, &mut out),
             Decision::UpgradeToHttps(https) => {
                 if let Some(t) = self.tab_mut(id) {
@@ -894,8 +902,11 @@ impl Browser {
 
     fn simple(&mut self, id: TabId, effect: Effect, back_dismisses_notice: bool) -> Vec<Effect> {
         let mut out = Vec::new();
+        // A blocked page itself is under the notice (a single-page app moved
+        // to a blocked address, or the list changed): Back really goes back.
+        let page_blocked = self.committed_blocked(id);
         let Some(t) = self.tab_mut(id) else { return out };
-        if back_dismisses_notice && t.notice.is_some() {
+        if back_dismisses_notice && t.notice.is_some() && !page_blocked {
             // The previous committed page is still loaded under the notice.
             t.notice = None;
         } else if t.life == Life::Live {
@@ -993,6 +1004,16 @@ impl Browser {
         let req = Request { url, frame, source, initiator: initiator.as_ref() };
         let decision = policy::decide(&req, self.exceptions(profile));
         let verdict = match (decision, frame) {
+            // The user's block list: main frames only, whatever started
+            // the navigation (typed, link, redirect, script, history).
+            (Decision::Allow | Decision::UpgradeToHttps(_), Frame::Main) if self.blocklist.matches(url) => {
+                let notice = self.user_blocked_notice(url);
+                let tab = self.tab_mut(id).expect("tab exists");
+                tab.https = HttpsUpgrade::default();
+                tab.expected_load = None;
+                self.set_notice(id, notice);
+                Verdict::Cancel
+            }
             (Decision::Allow, _) => Verdict::Allow,
             (Decision::UpgradeToHttps(https), Frame::Main) => {
                 let tab = self.tab_mut(id).expect("tab exists");
@@ -1201,6 +1222,10 @@ impl Browser {
             t.history_recorded = true;
         }
         let private = t.is_private();
+        // Defence in depth: a blocked page that committed without passing
+        // the navigation policy (a restored back/forward state) stays
+        // hidden behind the notice.
+        self.block_if_listed(id);
         if !private {
             out.push(Effect::PersistSession(self.session()));
         }
@@ -1219,7 +1244,18 @@ impl Browser {
         match &t.committed_url {
             Some(c) if url_display::same_origin(c, &url) && *c != url => {
                 t.committed_url = Some(url);
-                vec![Effect::NotifyChrome]
+                let mut out = Vec::new();
+                // Single-page apps change address without a navigation
+                // (pushState): a blocked one is hidden behind the notice,
+                // and the notice goes when the page leaves it (Back).
+                if !self.block_if_listed(id) {
+                    if let Some(t) = self.tab_mut(id).filter(|t| matches!(t.notice, Some(Notice::UserBlocked { .. }))) {
+                        t.notice = None;
+                    }
+                }
+                self.sync_visibility(&mut out);
+                out.push(Effect::NotifyChrome);
+                out
             }
             _ => Vec::new(),
         }
@@ -1422,7 +1458,36 @@ impl Browser {
     }
 
     fn showable(&self, id: TabId) -> bool {
-        self.tab(id).is_some_and(|t| t.life == Life::Live && t.notice.is_none() && t.committed_url.is_some())
+        self.tab(id).is_some_and(|t| {
+            t.life == Life::Live
+                && t.notice.is_none()
+                && t.committed_url.as_ref().is_some_and(|u| !self.blocklist.matches(u))
+        })
+    }
+
+    /// Whether the tab's committed page is on the block list.
+    fn committed_blocked(&self, id: TabId) -> bool {
+        self.tab(id).and_then(|t| t.committed_url.as_ref()).is_some_and(|u| self.blocklist.matches(u))
+    }
+
+    fn user_blocked_notice(&self, u: &Url) -> Notice {
+        Notice::UserBlocked { message: self.blocklist.message().to_string(), url: shown_url(u) }
+    }
+
+    /// Puts the block notice on a tab whose committed page is on the list
+    /// (unless it already shows that notice). Returns whether it is blocked.
+    fn block_if_listed(&mut self, id: TabId) -> bool {
+        let Some(url) = self.tab(id).and_then(|t| t.committed_url.clone()) else { return false };
+        if !self.blocklist.matches(&url) {
+            return false;
+        }
+        let notice = self.user_blocked_notice(&url);
+        if let Some(t) = self.tab_mut(id) {
+            if !matches!(t.notice, Some(Notice::UserBlocked { .. })) {
+                t.notice = Some(notice);
+            }
+        }
+        true
     }
 
     fn desired_shown(&self) -> Vec<(TabId, Pane)> {
@@ -1512,6 +1577,25 @@ impl Browser {
         }
     }
 
+    pub fn blocklist(&self) -> &BlockList {
+        &self.blocklist
+    }
+
+    /// Settings → Blocked changed (or the stored list was loaded): tabs
+    /// showing a page that is now blocked are hidden behind the notice at
+    /// once. Pages no longer blocked stay behind theirs until reloaded.
+    pub fn set_blocklist(&mut self, list: BlockList) -> Vec<Effect> {
+        self.blocklist = list;
+        let ids: Vec<TabId> = self.tabs.iter().map(|t| t.id).collect();
+        for id in ids {
+            self.block_if_listed(id);
+        }
+        let mut out = Vec::new();
+        self.sync_visibility(&mut out);
+        out.push(Effect::NotifyChrome);
+        out
+    }
+
     pub fn adblock_allowlist(&self) -> &BTreeSet<String> {
         &self.adblock_allowed
     }
@@ -1567,11 +1651,18 @@ fn blocked_notice(r: BlockReason, u: &Url) -> Notice {
         BlockReason::ExternalWithoutGesture => "The page tried to open another app without your action.",
         BlockReason::UnsupportedAbout => "This about: page is not supported.",
     };
-    // Show only the scheme and display host, never the raw (possibly huge
-    // or deceptive) URL.
+    Notice::Blocked { reason: reason.to_string(), url: shown_url(u) }
+}
+
+/// Show only the scheme and display host, never the raw (possibly huge
+/// or deceptive) URL.
+fn shown_url(u: &Url) -> String {
     let d = url_display::display(u);
-    let shown = if d.registrable.is_empty() { format!("{}:", u.scheme()) } else { d.full.chars().take(200).collect() };
-    Notice::Blocked { reason: reason.to_string(), url: shown }
+    if d.registrable.is_empty() {
+        format!("{}:", u.scheme())
+    } else {
+        d.full.chars().take(200).collect()
+    }
 }
 
 fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
