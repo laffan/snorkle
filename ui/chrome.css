@@ -693,7 +693,9 @@ body.dragging .pin > .unpin { opacity: 0; pointer-events: none; }
 /* Pin menu (right-click / ⌘-click), placed under the pin in the sidebar. */
 .popup.pin-pop { left: 10px; right: 10px; bottom: auto; min-width: 0; z-index: 6; }
 .pin-emoji-form { display: flex; gap: 6px; padding: 6px; }
-#item-url-input { font-size: 14px !important; text-align: left !important; }
+#item-url-form { flex-direction: column; }
+#item-url-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+#item-url-form input { font-size: 14px; text-align: left; color: var(--fg); }
 .pin-emoji-form input { flex: 1; min-width: 0; font-size: 22px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); text-align: center; }
 .popup .pin-emoji-form button { padding: 8px 14px; justify-content: center; }
 .pin-emoji-hint { margin: 0 8px 6px; }

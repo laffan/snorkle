@@ -732,13 +732,17 @@ impl Store {
     /// is neither pinned nor bookmarked, `new` is not an http(s) URL, or
     /// it is already pinned or bookmarked.
     pub fn change_item_url(&self, old: &str, new: &str) -> std::io::Result<Option<String>> {
+        self.edit_item(old, new, None)
+    }
+
+    /// Edits a saved item using the same URL rules, with an optional title
+    /// sanitised like other bookmark titles. Title-only edits keep offline data.
+    pub fn edit_item(&self, old: &str, new: &str, title: Option<&str>) -> std::io::Result<Option<String>> {
         let Some(new) = storable_url(new) else { return Ok(None) };
-        if new == old {
-            return Ok(Some(new));
-        }
+        let url_changed = new != old;
         let (pins, bookmarks, emoji, offline, dropped) = {
             let mut d = self.data();
-            let taken = d.pins.iter().chain(d.bookmarks.iter()).any(|b| b.url == new);
+            let taken = url_changed && d.pins.iter().chain(d.bookmarks.iter()).any(|b| b.url == new);
             let in_pins = d.pins.iter().position(|b| b.url == old);
             let in_bookmarks = d.bookmarks.iter().position(|b| b.url == old);
             if taken || (in_pins.is_none() && in_bookmarks.is_none()) {
@@ -746,19 +750,26 @@ impl Store {
             }
             if let Some(i) = in_pins {
                 d.pins[i].url = new.clone();
+                if let Some(title) = title {
+                    d.pins[i].title = clean_title(title);
+                }
             }
             if let Some(i) = in_bookmarks {
                 d.bookmarks[i].url = new.clone();
+                if let Some(title) = title {
+                    d.bookmarks[i].title = clean_title(title);
+                }
             }
-            let emoji = match d.pin_emoji.remove(old) {
+            let emoji = match url_changed.then(|| d.pin_emoji.remove(old)).flatten() {
                 Some(e) => {
                     d.pin_emoji.insert(new.clone(), e);
                     Some(serde_json::to_vec(&d.pin_emoji)?)
                 }
                 None => None,
             };
-            let dropped: Vec<String> = d.offline.iter().filter(|e| e.url == old).map(|e| e.file.clone()).collect();
-            d.offline.retain(|e| e.url != old);
+            let dropped: Vec<String> =
+                d.offline.iter().filter(|e| url_changed && e.url == old).map(|e| e.file.clone()).collect();
+            d.offline.retain(|e| !url_changed || e.url != old);
             let offline = (!dropped.is_empty()).then(|| serde_json::to_vec(&d.offline)).transpose()?;
             (
                 in_pins.map(|_| serde_json::to_vec(&d.pins)).transpose()?,

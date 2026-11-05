@@ -86,6 +86,12 @@ models without capability metadata retain provider defaults.
 
 Sign-off log:
 
+The bookmark editor also accepts an optional title through the existing
+chrome-only `edit_item_url` command. Storage sanitises it with `clean_title`
+(300 characters, control/bidi removal); URL validation and duplicate checks
+still apply. A title-only edit preserves the offline copy. Tests were skipped
+at the owner's request for this small follow-up; human review remains pending.
+
 | Date | Change | Approved by |
 |---|---|---|
 | 2026-11-04 | Sidebar UI, bundled colour logos, F1 declared-icon discovery and blank-snapshot rejection, icons-v4 migration, N1 effort metadata and chrome-only `ai_efforts`. No new page-to-native channel. | Owner (feature request in session); **human review pending** |

@@ -62,10 +62,15 @@
     <div id="pin-pop" class="popup pin-pop" role="menu" hidden>
       <button id="item-copy" role="menuitem">Copy URL</button>
       <button id="item-original" class="item-only" role="menuitem">Return to Original URL</button>
-      <button id="item-edit" class="item-only" role="menuitem">Edit URL…</button>
+      <button id="item-edit" class="item-only" role="menuitem">Edit Bookmark…</button>
       <form id="item-url-form" class="pin-emoji-form" novalidate hidden>
-        <input id="item-url-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-               maxlength="4096" aria-label="Address of this item">
+        <label id="item-title-field">Title
+          <input id="item-title-input" type="text" autocomplete="off" maxlength="300">
+        </label>
+        <label>URL
+          <input id="item-url-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                 maxlength="4096" aria-label="Address of this item">
+        </label>
         <button class="button primary" type="submit">Save</button>
       </form>
       <div class="menu-sep pin-only" role="separator"></div>

@@ -904,7 +904,8 @@
   }
 
   // Pin and bookmark menu (right-click or ⌘-click): Return to Original
-  // URL, Edit URL; for pins also Return to Bookmark and Use Emoji for Icon.
+  // URL, Edit Bookmark (Edit URL for pins); for pins also Return to Bookmark
+  // and Use Emoji for Icon.
   // Placed under the item, inside the sidebar.
   let pinMenu = null; // the pin, bookmark or tab, plus { kind: 'pin' | 'bookmark' | 'tab' }
   function openPinPop(p, node, kind = 'pin') {
@@ -915,6 +916,7 @@
     pop.style.top = Math.round(node.getBoundingClientRect().bottom - side.top + 6) + 'px';
     for (const e of pop.querySelectorAll('.pin-only')) e.hidden = kind !== 'pin';
     for (const e of pop.querySelectorAll('.item-only')) e.hidden = kind === 'tab';
+    $('item-edit').textContent = kind === 'bookmark' ? 'Edit Bookmark…' : 'Edit URL…';
     $('pin-emoji-form').hidden = true;
     $('pin-emoji-hint').hidden = true;
     $('item-url-form').hidden = true;
@@ -927,6 +929,7 @@
     $('pin-pop').hidden = true;
     $('pin-emoji-input').blur();
     $('item-url-input').blur();
+    $('item-title-input').blur();
     pinMenu = null;
     syncMenuOpen();
   }
@@ -954,14 +957,18 @@
     $('item-url-form').hidden = false;
     const input = $('item-url-input');
     input.value = pinMenu ? pinMenu.url : '';
-    focusInput(input, true);
+    const bookmark = pinMenu && pinMenu.kind === 'bookmark';
+    $('item-title-field').hidden = !bookmark;
+    $('item-title-input').value = pinMenu ? pinMenu.title || '' : '';
+    focusInput(bookmark ? $('item-title-input') : input, true);
   });
   $('item-url-form').addEventListener('submit', (ev) => {
     ev.preventDefault();
     const p = pinMenu;
     const value = $('item-url-input').value.trim();
     if (!p || !value) return;
-    T.core.invoke('edit_item_url', { url: p.url, newUrl: value }).then(() => {
+    const title = p.kind === 'bookmark' ? $('item-title-input').value.trim() : null;
+    T.core.invoke('edit_item_url', { url: p.url, newUrl: value, title }).then(() => {
       closePinPop();
       return Promise.all([loadPins(), loadBookmarks()]);
     }).catch((e) => toast(String(e)));

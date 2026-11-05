@@ -950,18 +950,18 @@ pub async fn move_pin(s: S<'_>, url: String, index: usize) -> Result<(), String>
     }
 }
 
-/// Changes a pin's or bookmark's URL ("Edit URL"). `new_url` is what the
+/// Edits a saved item's URL and optionally its title. `new_url` is what the
 /// user typed, read like the address bar but only as an address (a search
 /// is refused). Returns the stored URL.
 #[tauri::command]
-pub async fn edit_item_url(s: S<'_>, url: String, new_url: String) -> Result<String, String> {
+pub async fn edit_item_url(s: S<'_>, url: String, new_url: String, title: Option<String>) -> Result<String, String> {
     let target = match snorkle_core::input::interpret(&new_url, &snorkle_core::input::DEFAULT_SEARCH) {
         Ok(snorkle_core::input::Interpretation::Url(u)) if matches!(u.scheme(), "http" | "https") => u,
         _ => return Err("Enter a web address (https://…).".into()),
     };
     let Some(store) = s.store.clone() else { return Err("Storage is unavailable.".into()) };
     let stored = store
-        .change_item_url(&url, target.as_str())
+        .edit_item(&url, target.as_str(), title.as_deref())
         .map_err(|e| e.to_string())?
         .ok_or("That address is already pinned or bookmarked, or the item is gone.")?;
     with_browser(&s, |b| b.rekey_launcher(&url, &stored));
