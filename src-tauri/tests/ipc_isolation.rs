@@ -51,6 +51,7 @@ fn args(cmd: &str) -> serde_json::Value {
         }
         "get_chat" | "delete_chat" => json!({ "id": "c1" }),
         "list_chats" => json!({}),
+        "ai_efforts" => json!({ "provider": "openai", "model": "gpt-5.1" }),
         "ai_chat" => {
             json!({ "tab": 1, "provider": "anthropic", "model": "claude-opus-5-5", "messages": [{ "role": "user", "text": "Hi" }] })
         }

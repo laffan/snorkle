@@ -6,9 +6,8 @@
 //! 1. A hidden, off-screen `WKWebView` with its own non-persistent data
 //!    store (no cookies or site data shared with browsing), JavaScript
 //!    disabled, no user scripts and no rule lists loads a fixed HTML string
-//!    whose only content is `<img src="https://<host>/favicon.ico">`. The
-//!    host was validated to `[a-z0-9.-]` by the caller, so it cannot inject
-//!    markup. WebKit fetches and decodes the image in its sandboxed
+//!    whose only content is an image with an escaped HTTPS source. The
+//!    URL is validated and escaped by the core, so it cannot inject markup. WebKit fetches and decodes the image in its sandboxed
 //!    WebContent process.
 //! 2. Our navigation delegate allows only that `about:blank` document.
 //! 3. When loading finishes, WebKit renders a 64×64 snapshot; the app
@@ -19,12 +18,12 @@
 //!    matters: snapshots on wide-colour screens can use pixel formats the
 //!    chrome then failed to display.
 //!
-//! A missing favicon renders as nothing (`alt=""`), giving a transparent
-//! snapshot; PNGs below `MIN_ICON_BYTES` are treated as "no icon" (a
-//! heuristic) and the chrome shows a letter tile.
-//!
-//! One fetch at a time, with a 15 s timeout. Privacy: each pinned site
-//! learns the device's IP when its favicon is fetched (once, then cached).
+//! A cookie-free HTML request discovers a declared HTTPS icon; `/favicon.ico`
+//! remains the fallback. Only the escaped image URL is rendered, never the site
+//! HTML. Uniform snapshots are rejected using app-rendered pixels, not PNG size.
+//! One job at a time with a 20 s deadline, including up to 5 s for discovery.
+//! Privacy: the site and its declared icon host learn the device IP; browsing
+//! cookies are not shared. Failed jobs may retry after five minutes.
 
 #![allow(non_snake_case)]
 
@@ -36,34 +35,38 @@ use std::time::Duration;
 use block2::RcBlock;
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{Bool, NSObject};
-use objc2::{define_class, extern_methods, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
+use objc2::{
+    define_class, extern_methods, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message,
+};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential, NSURLSessionAuthChallengeDisposition,
-    NSURL,
+    NSError, NSObjectProtocol, NSString, NSURLAuthenticationChallenge, NSURLCredential,
+    NSURLSessionAuthChallengeDisposition, NSURL,
 };
 use objc2_ui_kit::{
-    UIColor, UIGraphicsImageRenderer, UIScrollViewContentInsetAdjustmentBehavior, UIGraphicsImageRendererContext, UIGraphicsImageRendererFormat,
-    UIGraphicsImageRendererFormatRange, UIImage, UIView,
+    UIColor, UIGraphicsImageRenderer, UIGraphicsImageRendererContext, UIGraphicsImageRendererFormat,
+    UIGraphicsImageRendererFormatRange, UIImage, UIScrollViewContentInsetAdjustmentBehavior, UIView,
 };
 use objc2_web_kit::{
-    WKContentMode, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate, WKSnapshotConfiguration,
-    WKWebViewConfiguration, WKWebsiteDataStore,
+    WKContentMode, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
+    WKSnapshotConfiguration, WKWebViewConfiguration, WKWebsiteDataStore,
 };
 
 use super::bindings::WKWebView;
 use crate::FaviconDone;
 
 const SIZE: f64 = 64.0;
-const TIMEOUT: Duration = Duration::from_secs(15);
-/// Snapshots smaller than this (as PNG) are almost certainly blank.
-const MIN_ICON_BYTES: usize = 220;
+const TIMEOUT: Duration = Duration::from_secs(20);
 
 impl WKWebView {
     extern_methods!(
         #[unsafe(method(loadHTMLString:baseURL:))]
         #[unsafe(method_family = none)]
-        unsafe fn loadHTMLString_baseURL(&self, html: &NSString, base: Option<&NSURL>) -> Option<Retained<WKNavigation>>;
+        unsafe fn loadHTMLString_baseURL(
+            &self,
+            html: &NSString,
+            base: Option<&NSURL>,
+        ) -> Option<Retained<WKNavigation>>;
 
         #[unsafe(method(takeSnapshotWithConfiguration:completionHandler:))]
         #[unsafe(method_family = none)]
@@ -77,6 +80,7 @@ impl WKWebView {
 
 struct Job {
     generation: u64,
+    fallback: Option<String>,
     web: Retained<WKWebView>,
     _nav: Retained<FaviconNav>,
     done: FaviconDone,
@@ -121,6 +125,20 @@ fn start_next(mtm: MainThreadMarker) {
     let Some((host, done, generation, root)) = next else { return };
     let job = unsafe { start(mtm, &root, &host, generation, done) };
     FETCHER.with(|f| f.borrow_mut().current = Some(job));
+    crate::webkit::http::discover_favicon(
+        host,
+        Box::new(move |url| {
+            crate::webkit::dispatch_main(move || {
+                let web = FETCHER.with(|f| {
+                    f.borrow().current.as_ref().filter(|j| j.generation == generation).map(|j| j.web.clone())
+                });
+                if let Some(web) = web {
+                    let html = snorkle_core::favicon::document(&url, SIZE as u32);
+                    unsafe { web.loadHTMLString_baseURL(&NSString::from_str(&html), None) };
+                }
+            });
+        }),
+    );
     std::thread::spawn(move || {
         std::thread::sleep(TIMEOUT);
         super::dispatch_main(move || finish(generation, None));
@@ -148,18 +166,12 @@ unsafe fn start(mtm: MainThreadMarker, root: &UIView, host: &str, generation: u6
     let nav = FaviconNav::new(mtm, generation);
     web.setNavigationDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*nav)));
     root.addSubview(&web);
-    // `host` is [a-z0-9.-] only (validated by the caller), so it is inert in
-    // both the attribute and the URL.
-    let html = format!(
-        "<!doctype html><meta name=viewport content=\"width={s},initial-scale=1,user-scalable=no\"><style>html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}img{{position:fixed;left:0;top:0;width:{s}px;height:{s}px;object-fit:contain}}</style><img alt=\"\" src=\"https://{host}/favicon.ico\">",
-        s = SIZE as u32
-    );
-    web.loadHTMLString_baseURL(&NSString::from_str(&html), None);
-    Job { generation, web, _nav: nav, done }
+    Job { generation, fallback: Some(format!("https://{host}/favicon.ico")), web, _nav: nav, done }
 }
 
 fn snapshot(generation: u64) {
-    let web = FETCHER.with(|f| f.borrow().current.as_ref().filter(|j| j.generation == generation).map(|j| j.web.clone()));
+    let web =
+        FETCHER.with(|f| f.borrow().current.as_ref().filter(|j| j.generation == generation).map(|j| j.web.clone()));
     let Some(web) = web else { return };
     unsafe {
         let mtm = MainThreadMarker::new().expect("main thread");
@@ -167,8 +179,8 @@ fn snapshot(generation: u64) {
         cfg.setRect(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(SIZE, SIZE)));
         cfg.setAfterScreenUpdates(true);
         let block = RcBlock::new(move |image: *mut UIImage, _err: *mut NSError| {
-            let png = image.as_ref().map(plain_png).filter(|bytes| bytes.len() >= MIN_ICON_BYTES);
-            finish(generation, png);
+            let png = image.as_ref().map(plain_png).filter(|bytes| !bytes.is_empty());
+            finish_snapshot(generation, png);
         });
         web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
     }
@@ -187,10 +199,55 @@ fn plain_png(image: &UIImage) -> Vec<u8> {
         &format,
     );
     let image = image.retain();
-    let draw = RcBlock::new(move |_ctx: NonNull<UIGraphicsImageRendererContext>| {
+    let detailed = std::rc::Rc::new(Cell::new(false));
+    let detail = detailed.clone();
+    let draw = RcBlock::new(move |ctx: NonNull<UIGraphicsImageRendererContext>| {
         image.drawInRect(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(SIZE, SIZE)));
+        let context = unsafe { ctx.as_ref() }.CGContext();
+        use objc2_core_graphics::{
+            CGBitmapContextGetBitsPerPixel, CGBitmapContextGetBytesPerRow, CGBitmapContextGetData,
+            CGBitmapContextGetHeight, CGBitmapContextGetWidth,
+        };
+        let context = Some(&*context);
+        let (width, height, stride) = (
+            CGBitmapContextGetWidth(context),
+            CGBitmapContextGetHeight(context),
+            CGBitmapContextGetBytesPerRow(context),
+        );
+        let data = CGBitmapContextGetData(context);
+        if !data.is_null()
+            && width == 128
+            && height == 128
+            && CGBitmapContextGetBitsPerPixel(context) == 32
+            && (512..=4096).contains(&stride)
+        {
+            // The renderer owns this bitmap and keeps it alive throughout this callback.
+            let pixels = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), stride * height) };
+            detail.set(snorkle_core::favicon::has_detail(pixels, width, height, stride));
+        }
     });
-    unsafe { renderer.PNGDataWithActions(RcBlock::as_ptr(&draw)) }.to_vec()
+    let png = unsafe { renderer.PNGDataWithActions(RcBlock::as_ptr(&draw)) }.to_vec();
+    if detailed.get() {
+        png
+    } else {
+        Vec::new()
+    }
+}
+
+fn finish_snapshot(generation: u64, png: Option<Vec<u8>>) {
+    if png.is_none() {
+        let retry = FETCHER.with(|f| {
+            let mut f = f.borrow_mut();
+            let job = f.current.as_mut().filter(|j| j.generation == generation)?;
+            Some((job.web.clone(), job.fallback.take()?))
+        });
+        if let Some((web, url)) = retry {
+            let html = snorkle_core::favicon::document(&url, SIZE as u32);
+            unsafe { web.loadHTMLString_baseURL(&NSString::from_str(&html), None) };
+            return;
+        }
+    }
+    finish(generation, png);
 }
 
 fn finish(generation: u64, png: Option<Vec<u8>>) {
@@ -229,13 +286,19 @@ define_class!(
 
     unsafe impl WKNavigationDelegate for FaviconNav {
         #[unsafe(method(webView:decidePolicyForNavigationAction:decisionHandler:))]
-        fn decide(&self, _w: &WKWebView, action: &WKNavigationAction, handler: &block2::Block<dyn Fn(WKNavigationActionPolicy)>) {
+        fn decide(
+            &self,
+            _w: &WKWebView,
+            action: &WKNavigationAction,
+            handler: &block2::Block<dyn Fn(WKNavigationActionPolicy)>,
+        ) {
             let is_blank = unsafe { action.request().URL() }
                 .and_then(|u| u.absoluteString())
                 .map(|s| s.to_string() == "about:blank")
                 .unwrap_or(false);
             let main = unsafe { action.targetFrame() }.map(|f| unsafe { f.isMainFrame() }).unwrap_or(false);
-            let policy = if is_blank && main { WKNavigationActionPolicy::Allow } else { WKNavigationActionPolicy::Cancel };
+            let policy =
+                if is_blank && main { WKNavigationActionPolicy::Allow } else { WKNavigationActionPolicy::Cancel };
             handler.call((policy,));
         }
 
@@ -265,7 +328,12 @@ define_class!(
         }
 
         #[unsafe(method(webView:authenticationChallenge:shouldAllowDeprecatedTLS:))]
-        fn deprecated_tls(&self, _w: &WKWebView, _c: &NSURLAuthenticationChallenge, handler: &block2::Block<dyn Fn(Bool)>) {
+        fn deprecated_tls(
+            &self,
+            _w: &WKWebView,
+            _c: &NSURLAuthenticationChallenge,
+            handler: &block2::Block<dyn Fn(Bool)>,
+        ) {
             handler.call((Bool::NO,));
         }
     }

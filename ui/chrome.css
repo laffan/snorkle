@@ -43,17 +43,14 @@ body.private {
   --warn-bg: #2e2e2e; --side: #111111;
   --edge: #333333; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
 }
-/* Catches anything colourful the palette cannot: favicons, emoji. With a
-   pointer, favicons and emoji show in colour while the sidebar is in use
-   (the same states that keep its contents from fading: pointed at, focus
-   inside, a drag) and fade back to grey with it (2026-11-04). The filter
-   is on the root, so it cannot be lifted for the sidebar alone; the rest
-   of the chrome is grey by palette and does not change. */
-html { filter: grayscale(1); transition: filter .3s ease-in-out; }
+/* Google product artwork keeps its colour. Other site images retain the
+   existing grey-to-colour hover behaviour without filtering the whole root. */
+.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab) { filter: grayscale(1); transition: filter .3s; }
 @media (any-hover: hover) {
-  html:has(#sidebar:hover), html:has(#sidebar:focus-within), html:has(body.dragging) { filter: grayscale(0); }
+  html:has(#sidebar:hover) :is(.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab)),
+  html:has(#sidebar:focus-within) :is(.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab)),
+  body.dragging :is(.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab)) { filter: none; }
 }
-
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
@@ -214,11 +211,10 @@ body.dragging #side-scroll { overflow-y: hidden; }
 }
 body.dragging .tab .close { opacity: 0; pointer-events: none; }
 
-/* Same-site tabs: the first is the group's main row, the rest indented
-   under it; a count on the main row folds them. */
+/* Same-site tabs share a domain heading; all page rows are siblings. */
 .site-group { display: flex; flex-direction: column; gap: 2px; }
 .site-group > .tab.child { margin-left: 18px; }
-.site-group.collapsed > .tab.child:not(.active) { display: none; }
+.site-group.collapsed > .tab.child { display: none; }
 .site-toggle {
   flex: 0 0 auto; min-width: 26px; height: 22px; margin-left: 6px; padding: 0 6px; border-radius: 11px;
   font-size: 12px; font-weight: 700; border: 1px solid var(--fg);
@@ -693,9 +689,6 @@ body.dragging .pin > .unpin { opacity: 0; pointer-events: none; }
 .pin img { width: 28px; height: 28px; object-fit: contain; pointer-events: none; }
 /* Bundled single-colour icons are black; light on dark backgrounds. */
 .pin img.prefab { width: 24px; height: 24px; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pin img.prefab { filter: invert(1); } }
-:root[data-theme="dark"] .pin img.prefab { filter: invert(1); }
-body.private .pin img.prefab { filter: invert(1); }
 .pin .emoji { font-size: 26px; line-height: 1; pointer-events: none; }
 /* Pin menu (right-click / ⌘-click), placed under the pin in the sidebar. */
 .popup.pin-pop { left: 10px; right: 10px; bottom: auto; min-width: 0; z-index: 6; }
@@ -814,5 +807,12 @@ body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
 :is(.tab, .bm) > .tab-icon + .open { padding-left: 8px; }
 .tab-group > .tab > .tab-icon { margin-left: 6px; }
 .tab-group > .tab > .tab-icon + .open { padding-left: 6px; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) :is(.tab, .bm) > img.tab-icon[src^="icons/"] { filter: invert(1); } }
-:root[data-theme="dark"] :is(.tab, .bm) > img.tab-icon[src^="icons/"] { filter: invert(1); }
+
+/* Domain headings are containers, never a parent page. */
+.site-heading { display: flex; align-items: center; min-height: 28px; padding-right: 2px; gap: 4px; }
+.site-heading .site-toggle { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; border: 0; font-weight: 500; color: var(--muted); }
+.site-heading .close { flex: 0 0 32px; width: 32px; height: 32px; padding: 0; border-radius: 8px; color: var(--muted); font-size: 18px; }
+
+.chat-foot { flex-wrap: wrap; }
+#chat-model-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#chat-effort { max-width: 125px; font-size: 12px; padding: 4px; }

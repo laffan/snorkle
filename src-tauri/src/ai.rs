@@ -5,7 +5,7 @@
 //! the in-app console.
 
 use std::collections::BTreeMap;
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -173,6 +173,36 @@ fn wall_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+/// Only provider-supplied, validated capabilities are cached; the chrome never supplies them.
+async fn effort_support(s: &S<'_>, provider: Provider, model: &str) -> ai::EffortSupport {
+    let fallback = ai::fallback_effort(provider, model);
+    if provider != Provider::Anthropic {
+        return fallback;
+    }
+    static CACHE: OnceLock<Mutex<BTreeMap<String, ai::EffortSupport>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let cached = cache.lock().unwrap_or_else(|e| e.into_inner()).get(model).cloned();
+    if let Some(cached) = cached {
+        return cached;
+    }
+    let Ok(key) = key(provider) else { return fallback };
+    let Ok(req) = ai::model_effort_request(&key, model) else { return fallback };
+    let Ok((status, body)) = send(s, provider, None, "model effort capabilities", req).await else { return fallback };
+    let Ok(Some(support)) = ai::parse_effort_support(status, &body) else { return fallback };
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.len() >= 128 {
+        cache.clear();
+    }
+    cache.insert(model.to_string(), support.clone());
+    support
+}
+
+/// Read-only capability metadata from the selected provider (no page data).
+#[tauri::command]
+pub async fn ai_efforts(s: S<'_>, provider: Provider, model: String) -> Result<Vec<String>, String> {
+    Ok(effort_support(&s, provider, &model).await.levels)
+}
+
 /// AI chat about a page. A new chat reads the tab's page (title, visible
 /// text, selection; channel C17) when the user sends the first message;
 /// the URL comes from the core. In a non-private tab the chat is archived
@@ -187,6 +217,7 @@ pub async fn ai_chat(
     model: String,
     messages: Vec<ChatMessage>,
     chat_id: Option<String>,
+    effort: Option<String>,
 ) -> Result<ChatReply, String> {
     let key = key(provider)?;
     // Nothing typed in a private tab is stored, also when it continues an
@@ -230,8 +261,13 @@ pub async fn ai_chat(
             (page, private, None)
         }
     };
-    let host = snorkle_core::Url::parse(&page.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
-    let req = ai::chat_request(provider, &key, &model, &page, &messages)?;
+    let host =
+        snorkle_core::Url::parse(&page.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+    let mut req = ai::chat_request(provider, &key, &model, &page, &messages)?;
+    if effort.as_deref().is_some_and(|e| !e.is_empty() && e != "default") {
+        let support = effort_support(&s, provider, &model).await;
+        ai::apply_supported_effort(&mut req, provider, effort.as_deref(), &support)?;
+    }
     let (status, body) = send(&s, provider, Some(&model), &format!("chat about {host} ({model})"), req).await?;
     let text = ai::parse_chat_reply(provider, status, &body)?;
     let usage = ai::parse_usage(provider, &body).unwrap_or(ai::Usage { input: 0, output: 0 });

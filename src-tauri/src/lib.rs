@@ -93,6 +93,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         ai::ai_write_script,
         ai::detect_headings,
         ai::ai_chat,
+        ai::ai_efforts,
         ai::list_chats,
         ai::get_chat,
         ai::delete_chat,

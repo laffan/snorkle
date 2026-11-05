@@ -66,6 +66,7 @@ pub const COMMANDS: &[&str] = &[
     "ai_write_script",
     "detect_headings",
     "ai_chat",
+    "ai_efforts",
     "list_chats",
     "get_chat",
     "delete_chat",

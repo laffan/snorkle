@@ -16,6 +16,7 @@ pub mod blocking;
 pub mod blocklist;
 pub mod browser;
 pub mod console;
+pub mod favicon;
 pub mod find;
 pub mod idn;
 pub mod imagemenu;

@@ -669,3 +669,16 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
      orientation-aware indirect-input correction; swapping page offsets alone would miss Settings,
      nested scroll areas, inertia and history gestures.
 
+
+## Sidebar UI and favicons (2026-11-04)
+
+- **[verify]** On iPad and Mac, confirm the image-only hidden WebKit snapshot
+  shows declared SVG/PNG/ICO favicons. Check claude.ai, laurieanderson.com and
+  springer.com after the icons-v4 migration; this cloud environment cannot reach
+  those sites. Snapshot format/transparent rendering is only type-checked here.
+- **[verify]** Test Cmd-click on the fixed sidebar divider with Magic Keyboard,
+  plus ordinary dragging, and domain close-all in normal/private tab groups.
+- **[verify]** Send a chat with each configured provider using Default and a
+  non-default effort. Anthropic capability parsing uses the provider SDK schema;
+  no API credentials are configured here. OpenAI uses explicit known model
+  capabilities; unrecognized models retain Default until their support is known.

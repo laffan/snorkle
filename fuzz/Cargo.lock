@@ -460,6 +460,7 @@ dependencies = [
  "adblock",
  "idna",
  "psl",
+ "regex",
  "serde",
  "serde_json",
  "unicode-script",

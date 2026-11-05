@@ -1,13 +1,22 @@
 # Bundled site icons
 
-Single-colour SVG icons used in the pinned grid for sites whose favicons
-the sandboxed fetcher cannot get (Google services serve them from other
-hosts or paths). Taken unmodified from Simple Icons 15.0.0
-(npm `simple-icons@15.0.0`, https://simpleicons.org), licensed CC0-1.0.
+Google product artwork identifies pinned sites, tabs and bookmarks. The SVGs
+are bundled locally and displayed in their original colours through `<img>`;
+no icon CDN is contacted by the chrome. Trademarks belong to Google LLC.
 
-The icons depict trademarks of their owners (Google LLC). They are used
-only to identify the pinned site to the user.
+- Gmail, Drive, Calendar, Keep, Meet, Maps, Photos and YouTube: the colour logos
+  in `@iconify-json/logos` 1.2.19 (SVG Logos by Gil Barbara, CC0-1.0),
+  https://github.com/gilbarbara/logos. Imported bodies unchanged; an SVG wrapper
+  supplies the collection's dimensions. The `*-2020` variants are used where
+  available; Maps uses `google-maps`, YouTube uses `youtube-icon`.
+- Docs, Sheets, Slides, Forms and Chat: `svg/google-*.svg` from
+  https://github.com/homarr-labs/dashboard-icons/tree/16c42dc580c144246651d322a079e535cb2b69f8/svg
+  (Apache-2.0, reproduced in `LICENSE-dashboard-icons.txt`). Artwork unchanged;
+  added missing `viewBox` attributes to the four document icons so they scale
+  correctly. Copyright (c) 2024 Bjorn Lammers, Meier Lukas, Thomas Camlong and
+  Homarr Labs.
 
-Checked on import: each file is a `<svg>` with a `<title>` and one
-`<path>`; no scripts, styles, links or embedded images. They are shown
-through `<img>` (no script execution) from the chrome's own origin.
+These public catalogs redistribute Google's product logos; the files were not
+retrieved directly from Google in this environment. Each imported SVG was
+checked for scripts, event attributes, external references and embedded images.
+Only vector shapes, gradients, masks and local fragment references are present.

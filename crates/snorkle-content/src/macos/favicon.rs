@@ -4,8 +4,7 @@
 //! 1. A hidden `WKWebView` (its own non-persistent data store, JavaScript
 //!    off, no user scripts or rule lists), placed outside the window's
 //!    visible area, loads a fixed HTML string whose only content is
-//!    `<img src="https://<host>/favicon.ico">`; `host` was validated to
-//!    `[a-z0-9.-]` by the caller. WebKit fetches and decodes the image in
+//!    an image with an escaped HTTPS URL validated by the core. WebKit fetches and decodes the image in
 //!    its sandboxed WebContent process.
 //! 2. Our navigation delegate allows only that `about:blank` document.
 //! 3. When loading finishes, WebKit renders a 64×64 snapshot (an `NSImage`
@@ -13,12 +12,12 @@
 //!    bitmap and encoded as PNG by AppKit. Only that app-made PNG reaches
 //!    storage (which checks its header) and the chrome UI.
 //!
-//! The view's background is opaque white (making it transparent needs a
-//! private API), so a missing icon gives a plain white snapshot, which
-//! encodes far below `MIN_ICON_BYTES` and the chrome shows a letter tile.
-//!
-//! One fetch at a time, with a 15 s timeout. Privacy: each pinned site
-//! learns the device's IP when its favicon is fetched (once, then cached).
+//! A cookie-free HTML request discovers a declared HTTPS icon; `/favicon.ico`
+//! remains the fallback. Only the escaped image URL is rendered, never the site
+//! HTML. Uniform snapshots are rejected using app-rendered pixels, not PNG size.
+//! One job at a time with a 20 s deadline, including up to 5 s for discovery.
+//! Privacy: the site and its declared icon host learn the device IP; browsing
+//! cookies are not shared. Failed jobs may retry after five minutes.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -43,12 +42,11 @@ use objc2_web_kit::{
 use crate::FaviconDone;
 
 const SIZE: f64 = 64.0;
-const TIMEOUT: Duration = Duration::from_secs(15);
-/// Snapshots smaller than this (as PNG) are almost certainly blank.
-const MIN_ICON_BYTES: usize = 220;
+const TIMEOUT: Duration = Duration::from_secs(20);
 
 struct Job {
     generation: u64,
+    fallback: Option<String>,
     web: Retained<WKWebView>,
     _nav: Retained<FaviconNav>,
     done: FaviconDone,
@@ -93,6 +91,20 @@ fn start_next(mtm: MainThreadMarker) {
     let Some((host, done, generation, root)) = next else { return };
     let job = unsafe { start(mtm, &root, &host, generation, done) };
     FETCHER.with(|f| f.borrow_mut().current = Some(job));
+    crate::webkit::http::discover_favicon(
+        host,
+        Box::new(move |url| {
+            crate::webkit::dispatch_main(move || {
+                let web = FETCHER.with(|f| {
+                    f.borrow().current.as_ref().filter(|j| j.generation == generation).map(|j| j.web.clone())
+                });
+                if let Some(web) = web {
+                    let html = snorkle_core::favicon::document(&url, SIZE as u32);
+                    unsafe { web.loadHTMLString_baseURL(&NSString::from_str(&html), None) };
+                }
+            });
+        }),
+    );
     std::thread::spawn(move || {
         std::thread::sleep(TIMEOUT);
         crate::webkit::dispatch_main(move || finish(generation, None));
@@ -110,14 +122,7 @@ unsafe fn start(mtm: MainThreadMarker, root: &NSView, host: &str, generation: u6
     let nav = FaviconNav::new(mtm, generation);
     web.setNavigationDelegate(Some(objc2::runtime::ProtocolObject::from_ref(&*nav)));
     root.addSubview(&web);
-    // `host` is [a-z0-9.-] only (validated by the caller), so it is inert in
-    // both the attribute and the URL.
-    let html = format!(
-        "<!doctype html><style>html,body{{margin:0;padding:0;background:#fff;overflow:hidden}}img{{position:fixed;left:0;top:0;width:{s}px;height:{s}px;object-fit:contain}}</style><img alt=\"\" src=\"https://{host}/favicon.ico\">",
-        s = SIZE as u32
-    );
-    web.loadHTMLString_baseURL(&NSString::from_str(&html), None);
-    Job { generation, web, _nav: nav, done }
+    Job { generation, fallback: Some(format!("https://{host}/favicon.ico")), web, _nav: nav, done }
 }
 
 fn snapshot(generation: u64) {
@@ -129,8 +134,8 @@ fn snapshot(generation: u64) {
         let cfg = WKSnapshotConfiguration::new(mtm);
         cfg.setRect(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(SIZE, SIZE)));
         let block = RcBlock::new(move |image: *mut NSImage, _err: *mut NSError| {
-            let png = image.as_ref().and_then(plain_png).filter(|bytes| bytes.len() >= MIN_ICON_BYTES);
-            finish(generation, png);
+            let png = image.as_ref().and_then(plain_png);
+            finish_snapshot(generation, png);
         });
         web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
     }
@@ -154,15 +159,44 @@ fn plain_png(image: &NSImage) -> Option<Vec<u8>> {
             0,
             0,
         )?;
+        let stride = usize::try_from(rep.bytesPerRow()).ok()?;
+        let data = rep.bitmapData();
+        if data.is_null() || !(512..=4096).contains(&stride) {
+            return None;
+        }
+        // Transparent image areas must start blank, not with allocator contents.
+        std::ptr::write_bytes(data, 0, stride * PX as usize);
         let ctx = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
         NSGraphicsContext::saveGraphicsState_class();
         NSGraphicsContext::setCurrentContext(Some(&ctx));
         image.drawInRect(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(PX as f64, PX as f64)));
         ctx.flushGraphics();
         NSGraphicsContext::restoreGraphicsState_class();
+        // The app allocated a 128 x 128, 8-bit, four-channel bitmap above.
+        let pixels = std::slice::from_raw_parts(data, stride * PX as usize);
+        if !snorkle_core::favicon::has_detail(pixels, PX as usize, PX as usize, stride) {
+            return None;
+        }
+
         let png = rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())?;
         Some(png.to_vec())
     }
+}
+
+fn finish_snapshot(generation: u64, png: Option<Vec<u8>>) {
+    if png.is_none() {
+        let retry = FETCHER.with(|f| {
+            let mut f = f.borrow_mut();
+            let job = f.current.as_mut().filter(|j| j.generation == generation)?;
+            Some((job.web.clone(), job.fallback.take()?))
+        });
+        if let Some((web, url)) = retry {
+            let html = snorkle_core::favicon::document(&url, SIZE as u32);
+            unsafe { web.loadHTMLString_baseURL(&NSString::from_str(&html), None) };
+            return;
+        }
+    }
+    finish(generation, png);
 }
 
 fn finish(generation: u64, png: Option<Vec<u8>>) {

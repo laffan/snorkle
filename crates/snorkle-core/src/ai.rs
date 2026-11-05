@@ -548,6 +548,103 @@ pub fn chat_request(
     Ok(messages_request(p, key, &model, &system, &turns, 8000))
 }
 
+/// Explicit capabilities only: unknown models keep the provider default.
+/// This is also the server-side validation boundary for chrome-supplied effort.
+pub fn effort_options(p: Provider, model: &str) -> Vec<&'static str> {
+    let family = |name: &str| {
+        model == name
+            || model
+                .strip_prefix(name)
+                .and_then(|s| s.strip_prefix('-'))
+                .is_some_and(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
+    };
+    match p {
+        Provider::OpenAi if family("gpt-5.2-pro") => vec!["medium", "high", "xhigh"],
+        Provider::OpenAi if family("gpt-5-pro") => vec!["high"],
+        Provider::OpenAi if family("gpt-5.2") => vec!["none", "low", "medium", "high", "xhigh"],
+        Provider::OpenAi if family("gpt-5.1") => vec!["none", "low", "medium", "high"],
+        Provider::OpenAi if family("gpt-5") || family("gpt-5-mini") || family("gpt-5-nano") => {
+            vec!["minimal", "low", "medium", "high"]
+        }
+        Provider::OpenAi if family("o3") || family("o3-mini") || family("o4-mini") || family("o1") => {
+            vec!["low", "medium", "high"]
+        }
+        Provider::Anthropic if family("claude-opus-4-6") => vec!["low", "medium", "high", "max"],
+        Provider::Anthropic if family("claude-opus-4-5") || family("claude-sonnet-4-6") => {
+            vec!["low", "medium", "high"]
+        }
+        _ => vec![],
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffortSupport {
+    pub levels: Vec<String>,
+    pub adaptive: bool,
+}
+
+pub fn fallback_effort(p: Provider, model: &str) -> EffortSupport {
+    EffortSupport {
+        levels: effort_options(p, model).into_iter().map(str::to_string).collect(),
+        adaptive: p == Provider::Anthropic
+            && (model.starts_with("claude-opus-4-6") || model.starts_with("claude-sonnet-4-6")),
+    }
+}
+
+/// Anthropic's authenticated model metadata, with the model escaped as one path segment.
+pub fn model_effort_request(key: &str, model: &str) -> Result<HttpRequest, String> {
+    let model = validate_model(model)?;
+    let mut url = url::Url::parse(&format!("{ANTHROPIC}v1/models/")).unwrap();
+    url.path_segments_mut().unwrap().pop_if_empty().push(&model);
+    Ok(HttpRequest { method: "GET", url: url.into(), headers: auth_headers(Provider::Anthropic, key), body: None })
+}
+
+/// Schema: anthropic-sdk-python types/{model_capabilities,effort_capability,thinking_types}.
+/// Known levels only; absent metadata preserves the conservative fallback.
+pub fn parse_effort_support(status: u16, bytes: &[u8]) -> Result<Option<EffortSupport>, String> {
+    let body = parse_ok(Provider::Anthropic, status, bytes)?;
+    let Some(cap) = body.get("capabilities").filter(|v| v.is_object()) else { return Ok(None) };
+    let Some(supported) = cap["effort"]["supported"].as_bool() else { return Ok(None) };
+    let levels = ["low", "medium", "high", "xhigh", "max"]
+        .into_iter()
+        .filter(|level| supported && cap["effort"][*level]["supported"].as_bool() == Some(true))
+        .map(str::to_string)
+        .collect();
+    let adaptive = cap["thinking"]["supported"].as_bool() == Some(true)
+        && cap["thinking"]["types"]["adaptive"]["supported"].as_bool() == Some(true);
+    Ok(Some(EffortSupport { levels, adaptive }))
+}
+
+/// Add an optional, validated effort to a chat request. Default omits the parameter.
+pub fn apply_effort(req: &mut HttpRequest, p: Provider, model: &str, effort: Option<&str>) -> Result<(), String> {
+    apply_supported_effort(req, p, effort, &fallback_effort(p, model))
+}
+
+pub fn apply_supported_effort(
+    req: &mut HttpRequest,
+    p: Provider,
+    effort: Option<&str>,
+    support: &EffortSupport,
+) -> Result<(), String> {
+    let Some(effort) = effort.filter(|e| !e.is_empty() && *e != "default") else { return Ok(()) };
+    if !support.levels.iter().any(|level| level == effort) {
+        return Err("This effort is not supported for the selected model.".into());
+    }
+    let mut body: Value = serde_json::from_slice(req.body.as_deref().ok_or("Missing request body")?)
+        .map_err(|_| "Invalid request body")?;
+    match p {
+        Provider::OpenAi => body["reasoning"] = json!({ "effort": effort }),
+        Provider::Anthropic => {
+            body["output_config"] = json!({ "effort": effort });
+            if support.adaptive {
+                body["thinking"] = json!({ "type": "adaptive" });
+            }
+        }
+    }
+    req.body = Some(body.to_string().into_bytes());
+    Ok(())
+}
+
 /// The model's answer to a chat turn (plain text for `textContent`).
 pub fn parse_chat_reply(p: Provider, status: u16, body: &[u8]) -> Result<String, String> {
     let text = clean_multiline(reply_text(p, status, body)?.trim(), MAX_CHAT_REPLY_CHARS);
@@ -661,6 +758,57 @@ mod tests {
         let r = script_request(Provider::OpenAi, "k", "gpt-5.1", "example.com", "a{}", "", "x").unwrap();
         assert!(r.url.ends_with("/v1/responses"));
         assert!(script_request(Provider::OpenAi, "k", "gpt-5.1", "example.com", "", "", "  ").is_err());
+    }
+
+    #[test]
+    fn live_effort_metadata_drives_new_models_without_guessing() {
+        let body = br#"{"capabilities":{"effort":{"supported":true,"low":{"supported":true},"medium":{"supported":true},"high":{"supported":true},"xhigh":{"supported":true},"max":{"supported":false}},"thinking":{"supported":true,"types":{"adaptive":{"supported":true}}}}}"#;
+        let support = parse_effort_support(200, body).unwrap().unwrap();
+        assert_eq!(support.levels, ["low", "medium", "high", "xhigh"]);
+        assert!(support.adaptive);
+        let mut req =
+            messages_request(Provider::Anthropic, "k", "claude-opus-5-5", "s", &[(ChatRole::User, "hi")], 8000);
+        apply_supported_effort(&mut req, Provider::Anthropic, Some("xhigh"), &support).unwrap();
+        assert!(apply_supported_effort(&mut req, Provider::Anthropic, Some("max"), &support).is_err());
+        let body: Value = serde_json::from_slice(req.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["output_config"]["effort"], "xhigh");
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert!(parse_effort_support(200, br#"{"capabilities":null}"#).unwrap().is_none());
+        assert!(parse_effort_support(401, br#"{}"#).is_err());
+        let disabled =
+            parse_effort_support(200, br#"{"capabilities":{"effort":{"supported":false,"high":{"supported":true}}}}"#)
+                .unwrap()
+                .unwrap();
+        assert!(disabled.levels.is_empty());
+        let req = model_effort_request("k", "../models").unwrap();
+        assert!(req.url.ends_with("..%2Fmodels"));
+    }
+
+    #[test]
+    fn effort_is_model_specific_and_validated_before_serialization() {
+        let request =
+            || messages_request(Provider::OpenAi, "k", "gpt-5.2", "system", &[(ChatRole::User, "hello")], 8000);
+        let mut req = request();
+        let original = req.clone();
+        apply_effort(&mut req, Provider::OpenAi, "gpt-5.2", None).unwrap();
+        assert_eq!(req, original);
+        apply_effort(&mut req, Provider::OpenAi, "gpt-5.2", Some("xhigh")).unwrap();
+        let body: Value = serde_json::from_slice(req.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["reasoning"]["effort"], "xhigh");
+        assert_eq!(body["instructions"], "system");
+        assert!(!effort_options(Provider::OpenAi, "gpt-5.2-pro").contains(&"low"));
+        assert!(effort_options(Provider::OpenAi, "gpt-5.2-chat-latest").is_empty());
+        assert!(effort_options(Provider::OpenAi, "unknown-model").is_empty());
+        assert!(apply_effort(&mut req, Provider::OpenAi, "unknown-model", Some("high")).is_err());
+        assert!(apply_effort(&mut req, Provider::OpenAi, "gpt-5.1", Some("xhigh")).is_err());
+        let mut req =
+            messages_request(Provider::Anthropic, "k", "claude-opus-4-6", "s", &[(ChatRole::User, "hi")], 8000);
+        apply_effort(&mut req, Provider::Anthropic, "claude-opus-4-6", Some("max")).unwrap();
+        let body: Value = serde_json::from_slice(req.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["output_config"]["effort"], "max");
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert!(body.get("reasoning").is_none());
+        assert!(apply_effort(&mut req, Provider::Anthropic, "claude-sonnet-4-6", Some("max")).is_err());
     }
 
     #[test]

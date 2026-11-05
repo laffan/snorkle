@@ -1,15 +1,18 @@
 //! SECURITY-REVIEW: the app's own HTTPS requests to AI providers (owner
 //! request 2026-10-30), and image fetches for the image menu's Copy, Share
-//! and Download (owner request 2026-11-03, [`fetch_image`]). The only other
-//! app-initiated requests are favicon fetches (`favicon.rs`).
+//! and Download (owner request 2026-11-03, [`fetch_image`]), plus cookie-free
+//! favicon link discovery ([`discover_favicon`]).
 //!
 //! Security assumptions:
-//! - Only URLs accepted by `snorkle_core::ai::is_allowed_url` (the two API
+//! - For AI requests, only URLs accepted by `snorkle_core::ai::is_allowed_url` (the two API
 //!   hosts, https) are sent; anything else fails without a request.
 //! - An ephemeral `NSURLSession`: no cookies, cache or credentials are kept
 //!   or shared with web content; system TLS validation applies.
 //! - The reply is handed back as bytes, capped in size; parsing happens in
-//!   `snorkle_core::ai`.
+//!   `snorkle_core::ai`. Favicon discovery accepts validated DNS hosts only,
+//!   parses at most 1 MiB of HTML, and returns only an HTTPS image URL; remote
+//!   HTML is never executed. NSURLSession may buffer a larger reply before
+//!   the completion callback rejects it (the five-second timeout also applies).
 
 use std::sync::Mutex;
 
@@ -113,6 +116,41 @@ pub fn fetch_image(url: &url::Url, done: crate::ImageDone) {
         }
     });
     // SAFETY: the block only touches a Mutex and a Send callback.
+    let task = unsafe { session.dataTaskWithRequest_completionHandler(&request, &block) };
+    task.resume();
+    session.finishTasksAndInvalidate();
+}
+
+/// Favicon discovery: ephemeral, cookie-free HTML fetch, never rendered or executed.
+/// Only the discovered HTTPS image URL is handed to the sandboxed image view.
+pub fn discover_favicon(host: String, done: Box<dyn FnOnce(String) + Send>) {
+    let fallback = format!("https://{host}/favicon.ico");
+    if snorkle_core::storage::favicon_host(&format!("https://{host}/")).as_deref() != Some(&host) {
+        return;
+    }
+    let Some(url) = NSURL::URLWithString(&NSString::from_str(&format!("https://{host}/"))) else {
+        done(fallback);
+        return;
+    };
+    let request = NSMutableURLRequest::requestWithURL(&url);
+    request.setTimeoutInterval(5.0);
+    let session = NSURLSession::sessionWithConfiguration(&NSURLSessionConfiguration::ephemeralSessionConfiguration());
+    let done = Mutex::new(Some(done));
+    let block = RcBlock::new(move |data: *mut NSData, response: *mut NSURLResponse, _error: *mut NSError| {
+        let Some(done) = done.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+        let found = unsafe { data.as_ref().zip(response.as_ref()) }.and_then(|(data, response)| {
+            if data.length() > 1_048_576 {
+                return None;
+            }
+            let status = response.downcast_ref::<NSHTTPURLResponse>()?.statusCode();
+            if status != 200 {
+                return None;
+            }
+            let base = response.URL()?.absoluteString()?.to_string();
+            snorkle_core::favicon::discover(&base, &String::from_utf8_lossy(&data.to_vec()))
+        });
+        done(found.unwrap_or_else(|| fallback.clone()));
+    });
     let task = unsafe { session.dataTaskWithRequest_completionHandler(&request, &block) };
     task.resume();
     session.finishTasksAndInvalidate();

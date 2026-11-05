@@ -386,9 +386,9 @@ pub fn clean_emoji(s: &str) -> Option<String> {
 }
 /// Versioned: older caches are deleted and icons fetched again (v1: raw
 /// snapshot encoding the chrome could fail to display; v2: icons offset
-/// by the snapshot view's desktop layout).
-const ICONS_DIR: &str = "icons-v3";
-const OLD_ICONS_DIRS: &[&str] = &["icons", "icons-v2"];
+/// by the snapshot view's desktop layout; v3: root-only lookup and blank snapshots).
+const ICONS_DIR: &str = "icons-v4";
+const OLD_ICONS_DIRS: &[&str] = &["icons", "icons-v2", "icons-v3"];
 
 impl Store {
     /// Opens (or creates) the store. Corrupt files are moved aside to

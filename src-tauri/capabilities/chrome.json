@@ -67,6 +67,7 @@
     "allow-get-shortcuts",
     "allow-set-shortcuts",
     "allow-ai-chat",
+    "allow-ai-efforts",
     "allow-list-chats",
     "allow-get-chat",
     "allow-delete-chat",

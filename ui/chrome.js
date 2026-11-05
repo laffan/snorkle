@@ -202,7 +202,7 @@
       return l;
     };
     if (prefab || fav) {
-      const img = el('img', 'tab-icon');
+      const img = el('img', 'tab-icon' + (prefab ? ' prefab' : ''));
       img.alt = '';
       img.addEventListener('error', () => img.replaceWith(fallback()));
       img.src = prefab || fav;
@@ -250,7 +250,7 @@
         list.appendChild(group);
       } else {
         // Same-site tabs (not paired, not bound to a pin or bookmark) are
-        // collected under the first one.
+        // collected under a separate domain heading.
         const site = siteOf(t);
         const members = site ? state.tabs.filter((o) => groupable(o) && o.private === t.private && siteOf(o) === site) : [t];
         if (members.length < 2) {
@@ -259,28 +259,33 @@
           continue;
         }
         const key = (t.private ? 'p:' : 'n:') + site;
-        if (members.some((m) => m.id === shownTab())) collapsedSites.delete(key);
         const collapsed = collapsedSites.has(key);
         const box = el('div', 'site-group' + (collapsed ? ' collapsed' : ''));
         box.setAttribute('role', 'group');
         box.setAttribute('aria-label', `${members.length} tabs on ${site}`);
-        members.forEach((m, i) => {
+        const head = el('div', 'site-heading');
+        const toggle = el('button', 'site-toggle', site);
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+        toggle.setAttribute('aria-label', `${collapsed ? 'Show' : 'Hide'} ${members.length} tabs on ${site}`);
+        toggle.addEventListener('click', () => {
+          if (collapsedSites.has(key)) collapsedSites.delete(key);
+          else collapsedSites.add(key);
+          tabsKey = '';
+          renderTabs();
+        });
+        const close = el('button', 'close', '×');
+        close.setAttribute('aria-label', `Close all ${members.length} tabs on ${site}`);
+        close.addEventListener('click', () => {
+          const ids = members.map((m) => m.id);
+          askConfirm(`Close ${ids.length} tabs on ${site}?`, 'Close tabs', null, async () => {
+            for (const tab of ids) await invoke('close_tab', { tab });
+          }, null, { shortcut: false });
+        });
+        head.append(toggle, close);
+        box.appendChild(head);
+        members.forEach((m) => {
           const node = tabNode(m, null);
-          if (i === 0) {
-            const toggle = el('button', 'site-toggle', String(members.length));
-            toggle.setAttribute('aria-expanded', String(!collapsed));
-            toggle.setAttribute('aria-label', `${collapsed ? 'Show' : 'Hide'} ${members.length - 1} more ${site} tabs`);
-            toggle.addEventListener('click', (ev) => {
-              ev.stopPropagation();
-              if (collapsedSites.has(key)) collapsedSites.delete(key);
-              else collapsedSites.add(key);
-              tabsKey = '';
-              renderTabs();
-            });
-            node.insertBefore(toggle, node.firstChild);
-          } else {
-            node.classList.add('child');
-          }
+          node.classList.add('child');
           box.appendChild(node);
           placed.add(m.id);
         });
@@ -1450,6 +1455,7 @@
 
   $('sidebar-resize').addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
+    if (ev.metaKey) { switchSidebarMode(); return; }
     const handle = $('sidebar-resize');
     handle.setPointerCapture(ev.pointerId);
     const w = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 264;
@@ -2646,7 +2652,34 @@
     const btn = $('chat-model-btn');
     btn.textContent = c ? `${c.name} ▾` : 'No model ▾';
     btn.disabled = !chatModels().length;
+    renderChatEfforts(c);
   }
+
+  let effortGeneration = 0;
+  let effortModelKey = null;
+  function effortKey(c) { return `chatEffort.${c.p}.${c.id}`; }
+  function renderChatEfforts(c) {
+    const key = c ? effortKey(c) : null;
+    if (key && key === effortModelKey) return;
+    effortModelKey = key;
+    const generation = ++effortGeneration;
+    const select = $('chat-effort');
+    select.replaceChildren(new Option('Effort: Default', 'default'));
+    select.disabled = true;
+    if (!c) return;
+    T.core.invoke('ai_efforts', { provider: c.p, model: c.id }).then((options) => {
+      if (generation !== effortGeneration) return;
+      for (const value of options) select.add(new Option(value.charAt(0).toUpperCase() + value.slice(1), value));
+      const saved = pref(effortKey(c));
+      select.value = options.includes(saved) ? saved : 'default';
+      select.disabled = !options.length;
+      select.title = options.length ? 'Reasoning effort' : 'This model uses its provider’s default effort';
+    }).catch(() => { if (generation === effortGeneration) effortModelKey = null; });
+  }
+  $('chat-effort').addEventListener('change', () => {
+    const c = chatChoice();
+    if (c) setPref(effortKey(c), $('chat-effort').value);
+  });
 
   function setModelMenu(open) {
     const menu = $('chat-model-menu');
@@ -2806,8 +2839,9 @@
     c.messages.push({ role: 'user', text });
     c.log.push({ role: 'user', text });
     c.busy = true;
+    const effort = $('chat-effort').value;
     renderChat();
-    T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, messages: c.messages, chatId: c.chatId })
+    T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, effort, messages: c.messages, chatId: c.chatId })
       .then((r) => {
         c.messages.push({ role: 'assistant', text: r.text });
         if (r.chat_id) c.chatId = r.chat_id;

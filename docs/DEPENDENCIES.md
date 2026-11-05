@@ -25,7 +25,7 @@ Policy:
 | psl | =2.1.245 | core | Public Suffix List, compiled in; no runtime parsing |
 | unicode-script | =0.5.8 | core | Script property for the IDN policy; no dependencies |
 | adblock | =0.13.5 (default features off; `content-blocking`) | core | Brave's ABP/uBlock filter parser and WebKit content-blocking converter (MPL-2.0). Only the converter is used; no matching engine runs in the app. |
-| regex | =1.13.1 | core | Settings → Blocked patterns (2026-11-04): linear-time matching, size-limited compilation. Already in the graph through `adblock` at this version with the same features; no new crate. |
+| regex | =1.13.1 | core | Favicon link discovery and Settings → Blocked patterns (2026-11-04): linear-time matching, size-limited compilation. Already in the graph through `adblock` at this version with the same features; no new crate. |
 | serde / serde_json | =1.0.229 / =1.0.154 | core, src-tauri | State serialisation, storage (already in Tauri's graph) |
 | objc2 / block2 | =0.6.5 / =0.6.2 | content (iOS) | ObjC runtime, blocks (same versions as wry) |
 | objc2-foundation / -ui-kit / -web-kit / -core-foundation | =0.3.2 | content (iOS) | Framework bindings (same versions as wry) |
@@ -50,3 +50,8 @@ Bundled data: EasyList and EasyPrivacy (`src-tauri/resources/filters/`, CC BY-SA
 - `cargo deny check`: advisories ok, bans ok, licences ok, sources ok (crates.io only).
 - No embedded JS engine or alternative web engine in the iOS graph (`javascriptcore-rs` appears
   only on Linux through WebKitGTK).
+
+2026-11-04 UI update: enabled `CGBitmapContext` on the existing
+`objc2-core-graphics` 0.3.2 iOS dependency to inspect app-rendered favicon pixels.
+No new application crate or JavaScript dependency. Bundled colour logo sources
+and licenses are recorded in `ui/icons/SOURCES.md`.
