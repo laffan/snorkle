@@ -43,13 +43,13 @@ body.private {
   --warn-bg: #2e2e2e; --side: #111111;
   --edge: #333333; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
 }
-/* Google product artwork keeps its colour. Other site images retain the
-   existing grey-to-colour hover behaviour without filtering the whole root. */
-.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab) { filter: grayscale(1); transition: filter .3s; }
+/* All site artwork, including bundled Google icons, desaturates as the
+   sidebar recedes and returns to colour while the sidebar is in use. */
+.pin img, .pin .emoji, .tab-icon { filter: grayscale(1); transition: filter .3s; }
 @media (any-hover: hover) {
-  html:has(#sidebar:hover) :is(.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab)),
-  html:has(#sidebar:focus-within) :is(.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab)),
-  body.dragging :is(.pin img:not(.prefab), .pin .emoji, .tab-icon:not(.prefab)) { filter: none; }
+  html:has(#sidebar:hover) :is(.pin img, .pin .emoji, .tab-icon),
+  html:has(#sidebar:focus-within) :is(.pin img, .pin .emoji, .tab-icon),
+  body.dragging :is(.pin img, .pin .emoji, .tab-icon) { filter: none; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
