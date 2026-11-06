@@ -130,3 +130,8 @@ at the owner's request for this small follow-up; human review remains pending.
   touched target for at least 5 minutes.
 - List anything about Apple or Tauri behaviour that you assumed but could not verify in
   `docs/OPEN_QUESTIONS.md`.
+
+2026-11-06 follow-up: native dark-mode canvas colours, document-start opacity
+cover and restore handling, stronger constant media styles and subtree watching,
+and stale selection-reply rejection. No new page/native channel or dependencies.
+Human review pending; on-device compositor behaviour remains unverified.

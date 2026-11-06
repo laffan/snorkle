@@ -682,3 +682,15 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
   non-default effort. Anthropic capability parsing uses the provider SDK schema;
   no API credentials are configured here. OpenAI uses explicit known model
   capabilities; unrecognized models retain Default until their support is known.
+
+## Dark loading and navigation follow-up (2026-11-06)
+
+- Verify black native page canvases and the document-start dark-mode cover on
+  physical iPad/macOS during reload, back/forward restoration and app resume.
+  The cover is removed by the existing dark detector; no timer exposes an
+  unchecked page. This cloud environment cannot verify compositor timing.
+- Verify lazy-loaded media remains hidden until deliberate hover on affected
+  sites. Media selectors now outrank ordinary site rules and DOM insertions
+  refresh pointer-reveal state; custom shadow-root players still need site testing.
+- Check New Tab centering with either sidebar docked, result priority, history
+  opening a fresh tab, bookmark movement, and deselection while a text read is pending.

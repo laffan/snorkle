@@ -894,6 +894,8 @@ const SPLIT_GAP: f64 = 8.0;
 /// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
 /// and the default canvas); otherwise the window's.
 fn set_dark(web: &WKWebView, dark: bool) {
+    let color = if dark { NSColor::blackColor() } else { NSColor::windowBackgroundColor() };
+    unsafe { web.setUnderPageBackgroundColor(Some(&color)) };
     let a = if dark { NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }) } else { None };
     let _: () = unsafe { msg_send![web, setAppearance: a.as_deref()] };
 }

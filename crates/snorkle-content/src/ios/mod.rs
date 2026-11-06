@@ -1098,6 +1098,11 @@ const GLIDE_SECONDS: f64 = 0.25;
 /// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
 /// and the default canvas); otherwise the system's.
 fn set_dark(web: &WKWebView, dark: bool) {
+    // Set the native canvas before navigation can create its first document.
+    let color = if dark { UIColor::blackColor() } else { UIColor::systemBackgroundColor() };
+    web.setOpaque(false);
+    web.setBackgroundColor(Some(&color));
+    unsafe { web.scrollView() }.setBackgroundColor(Some(&color));
     web.setOverrideUserInterfaceStyle(if dark { UIUserInterfaceStyle::Dark } else { UIUserInterfaceStyle::Unspecified });
 }
 

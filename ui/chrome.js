@@ -217,7 +217,7 @@
   function renderTabs() {
     refreshTabIcons(false);
     const key = JSON.stringify([
-      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable, t.sheet_over, tabIcons.hosts.get(t.id)]),
+      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable, t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
       state.active,
       state.splits,
       tabIcons.version,
@@ -2127,6 +2127,8 @@
     // content area, full height, at the width the user dragged.
     const docks = rightPanels();
     const right = docks.length ? clampRight(rightWidth, left) : 0;
+    $('palette').style.left = left + 'px';
+    $('palette').style.right = right + 'px';
     $('chrome').style.left = left + 'px';
     $('chrome').style.right = right + 'px';
     const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
@@ -3050,7 +3052,7 @@
     for (const h of paletteHistory) {
       if (seen.has(h.url)) continue;
       seen.add(h.url);
-      out.push({ kind: 'History', history: true, title: h.title || h.display.registrable, host: h.display.registrable, run: () => openLink(h.url) });
+      out.push({ kind: 'History', history: true, title: h.title || h.display.registrable, host: h.display.registrable, run: () => openTyped(h.url) });
     }
     return out;
   }
@@ -3072,9 +3074,10 @@
           return best && { ...c, score: best.score - (c.history ? 0.5 : 0), hits: best === m ? best.hits : [] };
         })
         .filter(Boolean)
-        .sort((a, b) => b.score - a.score)
+        .sort((a, b) => ({Tab: 0, Private: 0, Pinned: 1, Bookmark: 1, History: 2}[a.kind] - {Tab: 0, Private: 0, Pinned: 1, Bookmark: 1, History: 2}[b.kind]) || b.score - a.score)
         .slice(0, 8);
-      rows.push({ kind: 'Go', title: q, host: '', hits: [], go: true, run: () => openTyped(q) });
+      rows.unshift({ kind: 'Search', title: q, host: '', hits: [], run: () => invoke('search_google', { query: q, private: false }) });
+      if (looksLikeAddress(q)) rows.unshift({ kind: 'Go to', title: q, host: '', hits: [], run: () => openTyped(q) });
     }
     paletteRows = rows;
     paletteSel = Math.min(paletteSel, Math.max(0, rows.length - 1));
@@ -3099,7 +3102,11 @@
   }
 
   function looksLikeAddress(q) {
-    return /^[a-z][a-z0-9+.-]*:/i.test(q) || (/^[^\s]+\.[^\s]{2,}/.test(q) && !/\s/.test(q));
+    if (/\s/.test(q)) return false;
+    try {
+      const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(q) ? q : 'https://' + q);
+      return ['http:', 'https:'].includes(u.protocol) && (u.hostname.includes('.') || u.hostname === 'localhost');
+    } catch (_) { return false; }
   }
 
   function openTyped(q) {
@@ -3630,6 +3637,7 @@
   // menu floats above it (cut out of the page, like the pill). Its text is
   // read when the menu appears (C20) and used only by the chosen action.
 
+  let selectionGeneration = 0;
   let selection = null; // { tab, text }
 
   function paneBox(tab) {
@@ -3649,6 +3657,7 @@
   }
 
   function hideSelection() {
+    ++selectionGeneration;
     if (!selection && $('sel-pop').hidden) return;
     selection = null;
     $('sel-pop').hidden = true;
@@ -3679,16 +3688,18 @@
   }
 
   T.event.listen('selection', (e) => {
+    const generation = ++selectionGeneration;
     const { tab, rect } = e.payload;
     const shown = state && (tab === state.active || (state.split && (tab === state.split.left || tab === state.split.right)));
     if (!rect || !shown || paletteOpen || modalOpen || panel) { hideSelection(); return; }
     T.core.invoke('read_selection', { tab }).then((text) => {
-      if (!text) { hideSelection(); return; }
+      if (generation !== selectionGeneration) return;
+      if (!text || !text.trim()) { hideSelection(); return; }
       selection = { tab, text };
       const ask = useChoice('ask');
       $('sel-ask').textContent = ask ? `Ask ${ask.name}` : 'Ask AI';
       showSelection(tab, rect);
-    }).catch(() => hideSelection());
+    }).catch(() => { if (generation === selectionGeneration) hideSelection(); });
   });
 
   $('sel-google').addEventListener('click', () => {

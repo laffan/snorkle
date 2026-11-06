@@ -25,7 +25,7 @@
   :root:not([data-theme="light"]) {
     --bg: #151515; --bar: #1f1f1f; --fg: #efefef; --muted: #a0a0a0; --line: #363636;
     --accent: #efefef; --danger: #efefef; --warn-bg: #333333; --field: #2b2b2b;
-    --tab: #262626; --tab-active: #363636; --side: #1a1a1a;
+    --tab: #262626; --tab-active: #363636; --side: #000000;
     --edge: #3a3a3a; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
   }
 }
@@ -33,14 +33,14 @@
   color-scheme: dark;
   --bg: #151515; --bar: #1f1f1f; --fg: #efefef; --muted: #a0a0a0; --line: #363636;
   --accent: #efefef; --danger: #efefef; --warn-bg: #333333; --field: #2b2b2b;
-  --tab: #262626; --tab-active: #363636; --side: #1a1a1a;
+  --tab: #262626; --tab-active: #363636; --side: #000000;
   --edge: #3a3a3a; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
 }
 /* Private browsing: unmistakably different chrome (always dark). */
 body.private {
   --bar: #0c0c0c; --bg: #000000; --fg: #f5f5f5; --muted: #9a9a9a; --line: #333333;
   --field: #232323; --tab: #1b1b1b; --tab-active: #2e2e2e; --accent: #f5f5f5; --danger: #f5f5f5;
-  --warn-bg: #2e2e2e; --side: #111111;
+  --warn-bg: #2e2e2e; --side: #000000;
   --edge: #333333; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
 }
 /* All site artwork, including bundled Google icons, desaturates as the

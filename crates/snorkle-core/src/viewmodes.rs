@@ -151,21 +151,21 @@ const MEDIA_SELECTOR: &str = concat!(
 /// animates a registered custom property, since the `!important` filter
 /// cannot be animated directly; without `@property` the box is still).
 pub const NO_MEDIA_CSS: &str = concat!(
-    "img,input[type=image],svg image,video,canvas,object,embed,",
+    ":root:has(#__snorkle_no_images) :is(img,input[type=image],svg image,video,canvas,object,embed,",
     "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
     "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
     "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"],",
-    "iframe[src*=\"/embed/\"],iframe[src*=\"player\"],iframe[src*=\"video\"]",
+    "iframe[src*=\"/embed/\"],iframe[src*=\"player\"],iframe[src*=\"video\"])",
     "{background-color:#c8c8c8!important;filter:grayscale(1) contrast(0) brightness(1.57)!important;",
     "transition:filter .3s ease-out,background-color .3s ease-out!important}",
     "img:not([data-snorkle-reveal]):not(:hover),video:not([data-snorkle-reveal]):not(:hover),[data-snorkle-loading]",
     "{opacity:1!important}",
-    "img:hover,input[type=image]:hover,svg image:hover,video:hover,canvas:hover,object:hover,embed:hover,iframe:hover,",
-    ":root [data-snorkle-reveal][data-snorkle-reveal]",
+    ":root:has(#__snorkle_no_images) :is(img:hover,input[type=image]:hover,svg image:hover,video:hover,canvas:hover,object:hover,embed:hover,iframe:hover),",
+    ":root:has(#__snorkle_no_images) [data-snorkle-reveal][data-snorkle-reveal]",
     "{background-color:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
     "@property --snorkle-pulse{syntax:'<number>';inherits:false;initial-value:1.57}",
     "@keyframes snorkle-pulse{50%{--snorkle-pulse:1.25}}",
-    ":root [data-snorkle-loading][data-snorkle-loading][data-snorkle-loading]",
+    ":root:has(#__snorkle_no_images) [data-snorkle-loading][data-snorkle-loading][data-snorkle-loading]",
     "{background-color:#c8c8c8!important;filter:grayscale(1) contrast(0) brightness(var(--snorkle-pulse,1.57))!important;",
     "animation:snorkle-pulse 1.1s ease-in-out infinite!important}",
     "*,*::before,*::after{background-image:none!important}"
@@ -199,8 +199,8 @@ pub const MEDIA_BOX_ATTR: &str = "data-snorkle-media-box";
 ///   counter-filter goes on that element, and media inside it get none.
 ///   A video with no such ancestor keeps the filter on itself.
 pub const DARK_CSS: &str = concat!(
-    "html.snorkle-dark-checked{transition:filter .2s ease-out}",
-    "html:not(.snorkle-dark-checked){filter:brightness(.2)!important}",
+    "html.snorkle-dark-checked{transition:none!important}",
+    "html:not(.snorkle-dark-checked){filter:brightness(.2)!important;opacity:0!important}",
     "html.snorkle-dark{filter:invert(1) hue-rotate(180deg)!important;min-height:100%!important}",
     "html.snorkle-dark.snorkle-dark-bg{background-color:#fff!important}",
     "html.snorkle-dark:has(#__snorkle_grayscale){filter:invert(1) hue-rotate(180deg) grayscale(1)!important}",
@@ -271,7 +271,7 @@ document.addEventListener('loadedmetadata',onMeta,true);window.addEventListener(
 window.__snorkleDark={check:check,stop:function(){obs.disconnect();clearTimeout(timer);\
 document.removeEventListener('loadedmetadata',onMeta,true);window.removeEventListener('resize',later);\
 marked.forEach(function(e){e.removeAttribute(BOX);});marked=[];}};\
-check();window.addEventListener('load',check);setTimeout(check,1500);})();";
+check();window.addEventListener('load',check);window.addEventListener('pageshow',check);window.addEventListener('pagehide',function(){document.documentElement.classList.remove('snorkle-dark-checked');});setTimeout(check,1500);})();";
 
 const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}if(window.__snorkleDark&&window.__snorkleDark.stop)window.__snorkleDark.stop();delete window.__snorkleDark;})();";
 
@@ -564,8 +564,8 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
     format!(
         "(function(){{if(window[{key}])return;var s={{}};window[{key}]=s;\
          var st=document.createElement('style');st.id={id};st.textContent={css};s.st=st;\
-         var seen=[];var watch=function(n){{if(n&&seen.indexOf(n)<0){{seen.push(n);s.obs.observe(n,{{childList:true}});}}}};\
-         var put=function(){{watch(document.documentElement);watch(document.head);\
+         var seen=[];var watch=function(n){{if(n&&seen.indexOf(n)<0){{seen.push(n);s.obs.observe(n,{{childList:true,subtree:true}});}}}};\
+         var put=function(){{if(s.queue)s.queue();watch(document.documentElement);watch(document.head);\
          var r=document.head||document.documentElement;if(r&&!st.isConnected)r.appendChild(st);}};\
          s.obs=new MutationObserver(put);watch(document);put();{pause}}})();",
         css = json_str(css)
