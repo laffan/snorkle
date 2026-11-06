@@ -213,15 +213,18 @@ pub const DARK_CSS: &str = concat!(
     "{filter:brightness(.6)!important;transition:filter .3s ease-out!important}",
     "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
     "{filter:brightness(1)!important}",
-    // Hidden media on an inverted page: gray boxes; revealed un-inverted.
-    // Same filter functions in both states, so the reveal still fades.
+    // Hidden media on an inverted page: white before root inversion, black
+    // on screen. Revealed media remain un-inverted.
     "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
-    "{filter:invert(0) hue-rotate(0deg) grayscale(1) contrast(0) brightness(1.57)!important}",
+    "{background:#fff!important;filter:brightness(0) invert(1)!important}",
     "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
     "{filter:invert(1) hue-rotate(180deg) grayscale(1) contrast(1) brightness(1)!important}",
-    // Revealed before it has loaded: still a (pulsing) gray box.
+    // Revealed before it has loaded: keep the placeholder black.
     "html.snorkle-dark:has(#__snorkle_no_images) :is(img,input[type=image])[data-snorkle-loading][data-snorkle-loading]",
-    "{filter:invert(0) hue-rotate(0deg) grayscale(1) contrast(0) brightness(var(--snorkle-pulse,1.57))!important}",
+    "{background:#fff!important;filter:brightness(0) invert(1)!important;animation:none!important}",
+    // Pages already using a dark theme need black without counter-inversion.
+    "html.snorkle-dark-checked:not(.snorkle-dark):has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):not(:hover):not([data-snorkle-reveal]),html.snorkle-dark-checked:not(.snorkle-dark):has(#__snorkle_no_images) [data-snorkle-loading][data-snorkle-loading]",
+    "{background:#000!important;filter:brightness(0)!important;animation:none!important}",
     // Media inside a video's frame: the frame's filter already covers
     // them (two ids, so this beats every rule above).
     "html:has(#__snorkle_dark):has(#__snorkle_dark) [data-snorkle-media-box] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",

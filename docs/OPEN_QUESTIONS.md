@@ -694,3 +694,9 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
   refresh pointer-reveal state; custom shadow-root players still need site testing.
 - Check New Tab centering with either sidebar docked, result priority, history
   opening a fresh tab, bookmark movement, and deselection while a text read is pending.
+
+Header View follow-up: device-check black hidden media on both inverted light
+sites and sites with their own dark theme, including lazy placeholders and
+hover reveal. Run Detect Headers again to generate page-specific snippets;
+verify provider output on a long article and a sectioned home page. Existing
+site selector rules alone do not trigger paid summary requests on navigation.

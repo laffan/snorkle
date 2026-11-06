@@ -2512,6 +2512,8 @@
     $('outline-msg').textContent = text || '';
   }
 
+  const outlineSummaries = new Map();
+
   // "Detect Headers": the AI picks this site's heading elements.
   $('detect-headers').addEventListener('click', () => {
     const tab = state && state.active;
@@ -2521,9 +2523,13 @@
     const model = use.id;
     const btn = $('detect-headers');
     btn.disabled = true;
-    outlineMsg(`Asking ${AI_LABEL[p]} which elements are headings…`);
+    outlineMsg(`Asking ${AI_LABEL[p]} to find headers and summarize sections…`);
     T.core.invoke('detect_headings', { tab, provider: p, model })
-      .then((n) => outlineMsg(`Using ${n} rule${n === 1 ? '' : 's'} for this site: section labels group the headings under them.`))
+      .then((result) => {
+        outlineSummaries.set(tab, result);
+        outlineMsg('Headers and summaries updated.');
+        renderOutline();
+      })
       .catch((e) => outlineMsg(String(e)))
       .finally(() => { btn.disabled = false; });
   });
@@ -2553,12 +2559,20 @@
       return;
     }
     const min = Math.min(...items.map((h) => h.level));
+    const saved = outlineSummaries.get(tab);
+    const currentUrl = activeTab()?.url?.full;
+    const summaries = saved && saved.url === currentUrl ? saved.summaries : [];
+    const addSummary = (button, h) => {
+      const match = summaries.find((s) => s.heading === h.text || s.heading === h.text.slice(0, 80));
+      if (match) button.appendChild(el('span', 'summary', match.summary));
+    };
     const entry = (h, base) => {
       const li = el('li');
       li.dataset.index = String(h.index);
       if (currentHeading.get(tab) === h.index) li.classList.add('current');
       const b = el('button', 'l' + (h.level - min + 1), h.text);
-      b.style.paddingLeft = 8 + Math.max(0, h.level - base) * 14 + 'px';
+      b.style.paddingLeft = 12 + Math.max(0, h.level - base) * 20 + 'px';
+      addSummary(b, h);
       b.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
       li.appendChild(b);
       return li;
@@ -2587,6 +2601,7 @@
           renderOutline();
         });
         const title = el('button', 'sec-title', h.text);
+        addSummary(title, h);
         title.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
         const count = el('span', 'sec-count');
         row.append(toggle, title, count);

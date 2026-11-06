@@ -135,3 +135,12 @@ at the owner's request for this small follow-up; human review remains pending.
 cover and restore handling, stronger constant media styles and subtree watching,
 and stale selection-reply rejection. No new page/native channel or dependencies.
 Human review pending; on-device compositor behaviour remains unverified.
+
+2026-11-06 Header View follow-up: Detect Headers now reads bounded page text
+through existing C17 and sends it to the selected provider with the C14 sample
+only on the user's action. No new page/native channel. Summaries are sanitised,
+limited to 20 words each and 200 entries, and returned as plain text to chrome.
+They stay in session memory associated with tab and URL, never in reusable site
+rules. Navigation during a request rejects the result. Human review pending.
+The chrome tripwire exempts the exact scheme-only URL constructor used for
+Go To validation; it makes no request and all other remote literals remain banned.

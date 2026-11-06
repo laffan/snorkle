@@ -252,23 +252,25 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
 }
 .vm-pop { left: auto; right: 10px; min-width: 220px; }
 .vm-title { font-size: 12px; color: var(--muted); padding: 6px 12px 4px; }
-.outline-list { list-style: none; margin: 0; padding: 0; }
-.outline-list button { display: block; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px; font-size: 14px; line-height: 1.3; }
+.outline-list { list-style: none; margin: 0; padding: 0 0 0 16px; }
+.outline-list button { display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: 6px; font-size: 17px; line-height: 1.45; }
 .outline-list button:active { background: var(--field); }
-.outline-list .l1 { font-weight: 700; }
+.outline-list .l1 { font-weight: 400; }
 /* Sections (when the page's outline has several top-level entries with
    headings under them): a label row with a fold toggle, items indented. */
 .outline-list li.section { margin-top: 10px; }
 .outline-list li.section:first-child { margin-top: 0; }
-.outline-list .sec-row { display: flex; align-items: center; gap: 2px; }
-.outline-list .sec-row > button.sec-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.outline-list .sec-row { position: relative; display: flex; align-items: center; gap: 2px; }
+.outline-list .sec-row > .sec-toggle { position: absolute; left: -16px; top: 8px; width: 16px; }
+.outline-list .sec-row > button.sec-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--fg); }
 .outline-list .sec-toggle { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 6px; padding: 0; text-align: center; font-size: 12px; color: var(--muted); transition: transform .15s; }
 .outline-list li.section.collapsed .sec-toggle { transform: rotate(-90deg); }
 .outline-list .sec-count { flex: 0 0 auto; font-size: 11px; color: var(--muted); padding-right: 6px; }
-.outline-list ol { list-style: none; margin: 0; padding: 0; }
+.outline-list ol { list-style: none; margin: 0; padding: 0 0 0 20px; }
 .outline-list li.section.collapsed > ol { display: none; }
 .outline-list li.section.has-current > .sec-row .sec-title { color: var(--fg); }
-.outline-list .l2 { font-weight: 600; }
+.outline-list .l2 { font-weight: 400; }
+.outline-list .summary { display: block; margin-top: 4px; font-size: 14px; line-height: 1.45; font-weight: 400; color: var(--muted); }
 .outline-list li.muted { padding: 6px 8px; font-size: 13px; }
 #outline .modal-head h1 { flex: 1; }
 #outline.dock { overflow-y: auto; }

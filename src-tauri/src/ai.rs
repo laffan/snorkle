@@ -118,13 +118,20 @@ pub async fn ai_test(s: S<'_>, provider: Provider) -> Result<Vec<Model>, String>
     ai::parse_models(provider, status, &body)
 }
 
+#[derive(Serialize)]
+pub struct DetectedHeadings {
+    rules: usize,
+    url: String,
+    summaries: Vec<ai::HeadingSummary>,
+}
+
 /// "Detect Headers": samples the tab's heading-like elements (headers view
 /// on), asks the model which are headings on this site, stores the rules
-/// for the site and restarts the outline with them. Returns the number of
-/// rules. Sends the sample (tags, classes, styles, short texts) to the
-/// provider; runs only when the user presses the button.
+/// for the site and restarts the outline with them. Returns the rule count
+/// and page-specific summaries. Sends the sample and bounded page text to
+/// the provider only when the user presses the button.
 #[tauri::command]
-pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: String) -> Result<usize, String> {
+pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: String) -> Result<DetectedHeadings, String> {
     let tab = snorkle_core::tabs::TabId(tab);
     let site = s
         .browser()
@@ -135,6 +142,7 @@ pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: Stri
         .and_then(|t| t.adblock)
         .map(|a| a.site)
         .ok_or("Open a web page first.")?;
+    let url = s.browser().tab(tab).and_then(|t| t.committed_url.clone()).ok_or("Open a web page first.")?;
     let key = key(provider)?;
     let (tx, rx) = mpsc::channel();
     s.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).insert(tab, tx);
@@ -144,15 +152,29 @@ pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: Stri
         .map_err(|_| "Request failed.".to_string())?;
     s.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).remove(&tab);
     let sample = sample.map_err(|_| "The page didn't answer. Reload it with the headers view on and try again.")?;
-    let req = ai::headings_request(provider, &key, &model, &site, &sample)?;
+    let (tx, rx) = mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        crate::state::with_host(|h| h.read_page_text(tab, Box::new(move |t| drop(tx.send(t)))))
+    });
+    let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
+        .await.map_err(|_| "Request failed.")?;
+    let page = text.ok().flatten().and_then(|t| ai::parse_page_text(&t, url.as_str()))
+        .ok_or("The page didn't answer. Wait for it to load and try again.")?;
+    let mut sample: serde_json::Value = serde_json::from_str(&sample).map_err(|_| "Invalid heading sample")?;
+    sample["page_text"] = serde_json::Value::String(page.text);
+    let req = ai::headings_request(provider, &key, &model, &site, &sample.to_string())?;
     let (status, body) =
         send(&s, provider, Some(&model), &format!("detect headings for {site} ({model})"), req).await?;
     let rules = ai::parse_headings_reply(provider, status, &body)?;
+    let summaries = ai::parse_heading_summaries(provider, status, &body)?;
+    if s.browser().tab(tab).and_then(|t| t.committed_url.as_ref()) != Some(&url) {
+        return Err("The page changed. Detect headers again on the new page.".into());
+    }
     if let Some(store) = s.store.clone() {
         store.set_heading_rules(&site, &rules).map_err(|e| e.to_string())?;
     }
     crate::scripts::apply(&s, true);
-    Ok(rules.len())
+    Ok(DetectedHeadings { rules: rules.len(), url: url.to_string(), summaries })
 }
 
 /// A page-chat answer, with what the request used.
