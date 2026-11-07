@@ -198,6 +198,9 @@ pub const MEDIA_BOX_ATTR: &str = "data-snorkle-media-box";
 ///   the document rather than a shadow tree) with [`MEDIA_BOX_ATTR`]; the
 ///   counter-filter goes on that element, and media inside it get none.
 ///   A video with no such ancestor keeps the filter on itself.
+const DITHER_START_JS: &str = include_str!("dither.js");
+const DITHER_STOP_JS: &str = "if(window.__snorkleDither)window.__snorkleDither.stop();";
+
 pub const DARK_CSS: &str = concat!(
     "html.snorkle-dark-checked{transition:none!important}",
     "html:not(.snorkle-dark-checked){filter:brightness(.2)!important;opacity:0!important}",
@@ -214,6 +217,12 @@ pub const DARK_CSS: &str = concat!(
     "{filter:brightness(.5)!important;transition:filter .3s ease-out!important}",
     "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
     "{filter:brightness(1)!important}",
+    // Ordered grayscale dithering, after source colour conversion and before
+    // counter-inversion. Hover removes the effect; hide-media takes priority.
+    "html.snorkle-dither-ready.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,[data-snorkle-media-box]):not(:hover)",
+    "{filter:url(#__snorkle_dither) brightness(.5) invert(1) hue-rotate(180deg)!important}",
+    "html.snorkle-dither-ready.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,[data-snorkle-media-box]):not(:hover)",
+    "{filter:url(#__snorkle_dither) brightness(.5)!important}",
     // Hidden media on an inverted page: white before root inversion, black
     // on screen. Revealed media remain un-inverted.
     "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
@@ -467,7 +476,7 @@ pub fn injections(modes: ViewModes, rules: &HeadingRules) -> Vec<Injection> {
     }
     if modes.dark {
         out.push(Injection {
-            source: style_js("__snorkle_dark", DARK_CSS, true, false),
+            source: DITHER_START_JS.to_string() + &style_js("__snorkle_dark", DARK_CSS, true, false),
             at: InjectAt::DocumentStart,
             all_frames: false,
         });
@@ -485,11 +494,11 @@ pub fn apply_js(modes: ViewModes, rules: &HeadingRules) -> String {
     } else {
         HEADINGS_STOP_JS.to_string()
     };
-    let dark = if modes.dark { DARK_DETECT_JS } else { DARK_STOP_JS };
+    let dark = if modes.dark { DITHER_START_JS.to_string() + DARK_DETECT_JS } else { DITHER_STOP_JS.to_string() + DARK_STOP_JS };
     style_js("__snorkle_grayscale", GRAYSCALE_CSS, modes.desaturate, false)
         + &style_js("__snorkle_no_images", NO_MEDIA_CSS, modes.hide_media, true)
         + &style_js("__snorkle_dark", DARK_CSS, modes.dark, false)
-        + dark
+        + &dark
         + &headers
 }
 

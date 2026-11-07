@@ -709,3 +709,21 @@ alpha. Test hover reveal for video compositing on device. The NASA Mars article
 URL reported in session is blocked by this environment's network policy; local
 DOM checks cover white article panels inside dark roots, fully dark pages,
 and backgrounds that change after load. Live NASA verification is pending.
+
+## Dark-pages dithering (2026-11-07)
+
+- **[verify]** Inspect still images, transparent images, playing videos and
+  hover reveal on iPad/macOS. SVG filters run in WebKit's compositor, not a
+  JavaScript canvas. Protected/native-fullscreen video and closed shadow DOM
+  may bypass the filter. Chromium in this workspace failed its renderer IPC
+  startup, so automated visual verification was unavailable; Apple compilation
+  and DOM lifecycle checks passed.
+- Sites that block the embedded PNG threshold textures keep ordinary dimming.
+  Check CSP-restricted sites and toggling dark pages off/on during loading.
+- Reference: Maxime Heckel, “The Art of Dithering and Retro Shading for the Web,”
+  the `scene9` demo following the Fractal Brownian Motion passage:
+  https://blog.maximeheckel.com/posts/the-art-of-dithering-and-retro-shading-web/
+  Adapted independently to SVG: eight-by-eight Bayer ranks sampled at two-pixel
+  coordinates, four grayscale levels, rounding `floor(3*(L+rank/64-.25)+.5)/3`,
+  clamped to the display range. Source luminance is Rec.709; the existing 50%
+  dark-mode dimming follows quantization. Hover restores the original image.

@@ -152,3 +152,11 @@ Cmd+R and the refresh button stop loading then use WKWebView
 `reloadFromOrigin` on both Apple hosts (iOS binding updated). Constant dark
 detection samples nine viewport locations with bounded ancestor traversal and
 rechecks on DOM insertions; no new page-to-native channel. Human review pending.
+
+2026-11-07 dithering: `viewmodes.rs` includes the constant `dither.js` source
+through existing I2 injection. It builds an inert local SVG filter with two
+fixed generated PNG textures, no remote requests or canvas/video pixel reads,
+and no new message handler. It keeps original alpha and uses text-free SVG
+attributes only. A ready class is set only after both textures load; CSP failure
+retains ordinary dimming. Mode-off disconnects its observer and removes the SVG
+and class; late load callbacks cannot reinstall it. Human review pending.
