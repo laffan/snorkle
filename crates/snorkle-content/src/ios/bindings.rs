@@ -61,9 +61,9 @@ impl WKWebView {
         #[unsafe(method_family = none)]
         pub unsafe fn goForward(&self) -> Option<Retained<WKNavigation>>;
 
-        #[unsafe(method(reload))]
+        #[unsafe(method(reloadFromOrigin))]
         #[unsafe(method_family = none)]
-        pub unsafe fn reload(&self) -> Option<Retained<WKNavigation>>;
+        pub unsafe fn reloadFromOrigin(&self) -> Option<Retained<WKNavigation>>;
 
         #[unsafe(method(stopLoading))]
         #[unsafe(method_family = none)]

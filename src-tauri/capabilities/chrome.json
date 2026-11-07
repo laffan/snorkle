@@ -61,6 +61,7 @@
     "allow-share-page",
     "allow-image-action",
     "allow-zoom-page",
+    "allow-set-url-bar-attached",
     "allow-read-selection",
     "allow-define-term",
     "allow-search-google",

@@ -204,13 +204,14 @@ pub const DARK_CSS: &str = concat!(
     "html.snorkle-dark{filter:invert(1) hue-rotate(180deg)!important;min-height:100%!important}",
     "html.snorkle-dark.snorkle-dark-bg{background-color:#fff!important}",
     "html.snorkle-dark:has(#__snorkle_grayscale){filter:invert(1) hue-rotate(180deg) grayscale(1)!important}",
-    // Visible media: not inverted, dimmed until hovered.
+    // Halving RGB is equivalent to a 50% black overlay (alpha is unchanged).
+    // Dim before counter-inversion so the root inversion cannot brighten it.
     "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
-    "{filter:invert(1) hue-rotate(180deg) brightness(.6)!important;transition:filter .3s ease-out!important}",
+    "{filter:brightness(.5) invert(1) hue-rotate(180deg)!important;transition:filter .3s ease-out!important}",
     "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
     "{filter:invert(1) hue-rotate(180deg) brightness(1)!important}",
     "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
-    "{filter:brightness(.6)!important;transition:filter .3s ease-out!important}",
+    "{filter:brightness(.5)!important;transition:filter .3s ease-out!important}",
     "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
     "{filter:brightness(1)!important}",
     // Hidden media on an inverted page: white before root inversion, black
@@ -250,10 +251,13 @@ pub const DARK_CSS: &str = concat!(
 pub const DARK_DETECT_JS: &str = "(function(){\
 function lum(c){var m=/rgba?\\(([\\d.]+)[, ]+([\\d.]+)[, ]+([\\d.]+)(?:[,/ ]+([\\d.]+%?))?/.exec(c||'');if(!m)return null;\
 if(m[4]!==undefined&&parseFloat(m[4])<(m[4].slice(-1)==='%'?10:0.1))return null;return (0.2126*m[1]+0.7152*m[2]+0.0722*m[3])/255;}\
-function check(){var d=document.documentElement;if(!d)return;var root=lum(getComputedStyle(d).backgroundColor),l=root;\
-if(l===null&&document.body)l=lum(getComputedStyle(document.body).backgroundColor);\
+function check(full){var d=document.documentElement;if(!d)return;d.classList.remove('snorkle-dark-bg');var root=lum(getComputedStyle(d).backgroundColor),l=root;\
+if(document.body){var body=lum(getComputedStyle(document.body).backgroundColor);if(body!==null)l=body;}\
+var light=0,dark=0;[0.25,0.5,0.75].forEach(function(x){[0.25,0.5,0.75].forEach(function(y){var e=document.elementFromPoint(innerWidth*x,innerHeight*y);\
+for(var i=0;e&&i<16;i++,e=e.parentElement){if(/^(IMG|VIDEO|CANVAS|SVG|IFRAME)$/.test(e.tagName))continue;var v=lum(getComputedStyle(e).backgroundColor);if(v!==null){if(v>0.5)light++;else dark++;break;}}});});\
+if(light+dark>=3)l=light>=dark?1:0;\
 if(l===null){var cs=String(getComputedStyle(d).colorScheme||'');l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
-d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');boxes(true);}\
+d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');boxes(full!==false);}\
 if(window.__snorkleDark){window.__snorkleDark.check();return;}\
 var BOX='data-snorkle-media-box',marked=[],timer=0,hosts=[];\
 function videos(full){var out=[].slice.call(document.querySelectorAll('video'));\
@@ -267,7 +271,7 @@ if(p.getRootNode()===document)return p;e=p;}return null;}\
 function boxes(full){timer=0;var want=[];videos(full===true).forEach(function(v){var b=frame(v);if(b&&want.indexOf(b)<0)want.push(b);});\
 marked.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(BOX);});\
 want.forEach(function(e){if(!e.hasAttribute(BOX))e.setAttribute(BOX,'');});marked=want;}\
-function later(){if(!timer)timer=setTimeout(boxes,500);}\
+function later(){if(!timer)timer=setTimeout(function(){check(false);},500);}\
 function onMeta(e){if(e.target&&e.target.tagName==='VIDEO')later();}\
 var obs=new MutationObserver(later);obs.observe(document,{childList:true,subtree:true});\
 document.addEventListener('loadedmetadata',onMeta,true);window.addEventListener('resize',later);\

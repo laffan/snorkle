@@ -74,6 +74,8 @@ pub struct SessionTab {
     /// Page zoom in percent; absent means 100 %.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<u16>,
+    #[serde(default)]
+    pub url_bar_attached: bool,
 }
 
 /// Returns the normalised URL string if `s` is an http(s) URL.
@@ -1969,8 +1971,9 @@ mod tests {
                     launcher: None,
                     exempt: vec![],
                     zoom: None,
+                    url_bar_attached: false,
                 },
-                SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None, exempt: vec![], zoom: None },
+                SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None, exempt: vec![], zoom: None, url_bar_attached: false },
             ],
             active: Some(1),
         };

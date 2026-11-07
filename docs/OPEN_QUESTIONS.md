@@ -700,3 +700,12 @@ sites and sites with their own dark theme, including lazy placeholders and
 hover reveal. Run Detect Headers again to generate page-specific snippets;
 verify provider output on a long article and a sectioned home page. Existing
 site selector rules alone do not trigger paid summary requests on navigation.
+
+URL bar / refresh follow-up: verify two tabs retain independent attachment
+settings after restarting; verify Cmd+R and the button interrupt a slow load
+and reload from origin on iPad/macOS. Media brightness now halves RGB before
+counter-inversion, visually equivalent to a 50% black overlay with unchanged
+alpha. Test hover reveal for video compositing on device. The NASA Mars article
+URL reported in session is blocked by this environment's network policy; local
+DOM checks cover white article panels inside dark roots, fully dark pages,
+and backgrounds that change after load. Live NASA verification is pending.

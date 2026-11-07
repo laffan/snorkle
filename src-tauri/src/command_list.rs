@@ -53,6 +53,7 @@ pub const COMMANDS: &[&str] = &[
     "share_page",
     "image_action",
     "zoom_page",
+    "set_url_bar_attached",
     "read_selection",
     "define_term",
     "search_google",

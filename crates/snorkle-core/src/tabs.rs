@@ -162,6 +162,7 @@ pub struct Tab {
     /// session. Below 100 the page gets a wider viewport (it is laid out
     /// for a larger window and drawn smaller), above 100 a narrower one.
     pub zoom: u16,
+    pub url_bar_attached: bool,
     /// The page shown (or about to be) is the saved offline copy of a pin
     /// or bookmark, loaded because the network failed.
     pub offline: Option<OfflineCopy>,
@@ -237,6 +238,7 @@ impl Tab {
             sheet: false,
             view_exempt: Vec::new(),
             zoom: DEFAULT_ZOOM,
+            url_bar_attached: false,
             offline: None,
             offline_tried: false,
             landing: None,

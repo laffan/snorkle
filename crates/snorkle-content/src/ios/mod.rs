@@ -777,7 +777,8 @@ impl ContentHost {
                 }
                 Effect::Reload(tab) => {
                     if let Some(v) = self.views.get(tab) {
-                        v.web.reload();
+                        v.web.stopLoading();
+                        v.web.reloadFromOrigin();
                     }
                 }
                 Effect::Stop(tab) => {

@@ -85,6 +85,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "focus_chrome" | "get_shortcuts" => json!({}),
         "set_appearance" => json!({ "mode": "dark" }),
         "set_tab_headers" => json!({ "tab": 1, "on": true }),
+        "set_url_bar_attached" => json!({"tab":1,"attached":true}),
         "zoom_page" => json!({ "tab": 1, "step": "in" }),
         "delete_user_script" => json!({ "domain": "example.com" }),
         "save_user_script" => json!({ "domain": "example.com", "css": "", "js": "", "enabled": false }),

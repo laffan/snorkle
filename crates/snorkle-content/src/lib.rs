@@ -130,6 +130,7 @@ impl Appearance {
 /// `ios::keys`); the chrome UI performs them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortcut {
+    Reload,
     NewTab,
     CloseTab,
     /// Reopen the most recently closed tab (⌘⇧T).
@@ -188,6 +189,7 @@ const fn def(
 /// Every native shortcut, with its default binding (⌘ plus `mods`).
 pub const SHORTCUTS: &[ShortcutDef] = &[
     def("new_tab", ShortcutMenu::File, "New Tab", "t", 0, Shortcut::NewTab),
+    def("reload", ShortcutMenu::View, "Reload Page", "r", 0, Shortcut::Reload),
     def("reopen_tab", ShortcutMenu::File, "Reopen Closed Tab", "t", MOD_SHIFT, Shortcut::ReopenTab),
     def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", 0, Shortcut::Bookmark),
     def("split_columns", ShortcutMenu::View, "Split Side by Side", "s", 0, Shortcut::SplitColumns),
@@ -223,6 +225,7 @@ impl Shortcut {
     /// Name passed to the chrome UI, which performs the action.
     pub fn name(self) -> String {
         match self {
+            Shortcut::Reload => "reload".into(),
             Shortcut::NewTab => "new_tab".into(),
             Shortcut::CloseTab => "close_tab".into(),
             Shortcut::ReopenTab => "reopen_tab".into(),

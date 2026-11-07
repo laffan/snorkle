@@ -680,6 +680,11 @@ pub fn focus_chrome() {
 /// Page zoom from the ⋯ menu (`step`: in, out or reset). The core picks
 /// the level; the content host applies it to the tab's web view.
 #[tauri::command]
+pub fn set_url_bar_attached(s: S<'_>, tab: u64, attached: bool) {
+    with_browser(&s, |b| b.set_url_bar_attached(TabId(tab), attached));
+}
+
+#[tauri::command]
 pub fn zoom_page(s: S<'_>, tab: u64, step: snorkle_core::tabs::ZoomStep) {
     with_browser(&s, |b| b.zoom(TabId(tab), step));
 }

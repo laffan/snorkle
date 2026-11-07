@@ -214,6 +214,7 @@ pub struct TabView {
     pub launcher: Option<String>,
     /// Page zoom in percent.
     pub zoom: u16,
+    pub url_bar_attached: bool,
     /// Set while the tab shows a saved offline copy: when it was saved
     /// (Unix ms).
     pub offline_saved_ms: Option<u64>,
@@ -356,6 +357,7 @@ impl Browser {
             tab.title = sanitize_page_text(&st.title, MAX_PAGE_TEXT_CHARS);
             tab.launcher = st.launcher.as_deref().and_then(crate::storage::storable_url);
             tab.view_exempt = clean_exempt(&st.exempt);
+            tab.url_bar_attached = st.url_bar_attached;
             tab.zoom = st.zoom.map(crate::tabs::clean_zoom).unwrap_or(crate::tabs::DEFAULT_ZOOM);
             self.tabs.push(tab);
             ids.push(id);
@@ -895,6 +897,12 @@ impl Browser {
     pub fn go_forward(&mut self, id: TabId) -> Vec<Effect> {
         self.simple(id, Effect::GoForward(id), false)
     }
+    pub fn set_url_bar_attached(&mut self, id: TabId, attached: bool) -> Vec<Effect> {
+        let Some(tab) = self.tab_mut(id) else { return Vec::new() };
+        tab.url_bar_attached = attached;
+        vec![Effect::PersistSession(self.session()), Effect::NotifyChrome]
+    }
+
     pub fn reload(&mut self, id: TabId) -> Vec<Effect> {
         self.simple(id, Effect::Reload(id), false)
     }
@@ -1571,6 +1579,7 @@ impl Browser {
             tabs: persistable
                 .iter()
                 .map(|t| SessionTab {
+                    url_bar_attached: t.url_bar_attached,
                     exempt: t.view_exempt.clone(),
                     zoom: (t.zoom != crate::tabs::DEFAULT_ZOOM).then_some(t.zoom),
                     launcher: t.launcher.clone(),
@@ -1698,6 +1707,7 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
         sheet_over: t.opener.filter(|_| t.sheet),
         launcher: t.launcher.clone(),
         zoom: t.zoom,
+        url_bar_attached: t.url_bar_attached,
         offline_saved_ms: t.offline.filter(|o| o.committed).map(|o| o.saved_ms),
     }
 }

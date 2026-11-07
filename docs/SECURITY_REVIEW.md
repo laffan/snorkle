@@ -144,3 +144,11 @@ They stay in session memory associated with tab and URL, never in reusable site
 rules. Navigation during a request rejects the result. Human review pending.
 The chrome tripwire exempts the exact scheme-only URL constructor used for
 Go To validation; it makes no request and all other remote literals remain banned.
+
+2026-11-06 URL bar / refresh follow-up: `url_bar_attached` is a default-false
+boolean on Tab and SessionTab, exposed through chrome-only
+`set_url_bar_attached`; private tabs remain excluded from session persistence.
+Cmd+R and the refresh button stop loading then use WKWebView
+`reloadFromOrigin` on both Apple hosts (iOS binding updated). Constant dark
+detection samples nine viewport locations with bounded ancestor traversal and
+rechecks on DOM insertions; no new page-to-native channel. Human review pending.

@@ -454,6 +454,7 @@ fn saved_zoom_is_snapped_to_a_level() {
             launcher: None,
             exempt: vec![],
             zoom: Some(4000),
+            url_bar_attached: false,
         }],
         active: Some(0),
     };
@@ -596,6 +597,7 @@ fn session_restore_is_lazy() {
                 launcher: None,
                 exempt: vec![],
                 zoom: None,
+                url_bar_attached: false,
             })
             .collect(),
         active: Some(3),
@@ -1147,4 +1149,22 @@ fn adding_a_pattern_hides_open_pages_at_once() {
     b.on_commit(p, u("https://news.example/again"));
     assert!(user_blocked(&b, p));
     assert!(!b.view().content_visible);
+}
+
+#[test]
+fn url_bar_attachment_is_per_tab_and_restored() {
+    let mut b = browser(4);
+    let (first, _) = b.new_tab(Profile::Default, 0);
+    let (second, _) = b.new_tab(Profile::Default, 0);
+    webkit_load(&mut b, first, "https://a.example/");
+    webkit_load(&mut b, second, "https://b.example/");
+    b.set_url_bar_attached(first, true);
+    assert!(b.tab(first).unwrap().url_bar_attached);
+    assert!(!b.tab(second).unwrap().url_bar_attached);
+    let session = b.session();
+    let mut restored = browser(4);
+    restored.restore_session(&session, 0);
+    let tabs = restored.view().tabs;
+    assert!(tabs[0].url_bar_attached);
+    assert!(!tabs[1].url_bar_attached);
 }

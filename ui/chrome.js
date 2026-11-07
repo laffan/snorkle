@@ -98,6 +98,9 @@
   function render() {
     if (!state) return;
     const tab = activeTab();
+    barAttached = !!(tab && tab.url_bar_attached);
+    document.body.classList.toggle('bar-attached', barAttached);
+    renderAttachBar();
     document.body.classList.toggle('private', !!(tab && tab.private));
     renderOs();
     renderTabs();
@@ -342,8 +345,8 @@
     $('back').disabled = !(tab && tab.can_go_back);
     $('forward').disabled = !(tab && tab.can_go_forward);
     const reload = $('reload');
-    reload.textContent = tab && tab.loading ? '×' : '↻';
-    reload.setAttribute('aria-label', tab && tab.loading ? 'Stop' : 'Reload');
+    reload.textContent = '↻';
+    reload.setAttribute('aria-label', 'Reload');
     $('bookmark').disabled = !(tab && tab.url && !tab.private);
     const marked = !!(tab && ((tab.launcher && bookmarks.some((b) => b.url === tab.launcher)) || (tab.url && bookmarks.some((b) => b.url === tab.url.full))));
     $('bookmark').querySelector('.label').textContent = marked ? 'Remove Bookmark' : 'Bookmark';
@@ -1322,7 +1325,7 @@
     sidebarShown = !narrow && sidebarMode === 'attached' && pref('sidebarOpen') !== '0';
   }
   loadSidebarPrefs();
-  barAttached = pref('urlBarAttached') === '1';
+  barAttached = false;
   document.body.classList.toggle('bar-attached', barAttached);
 
   // The page starts to the sidebar's right (attached and shown, wide window).
@@ -2388,12 +2391,10 @@
   }
   renderAttachBar();
   $('attach-bar').addEventListener('click', () => {
-    barAttached = !barAttached;
-    setPref('urlBarAttached', barAttached ? '1' : '0');
-    document.body.classList.toggle('bar-attached', barAttached);
-    renderAttachBar();
+    const tab = activeTab();
+    if (!tab) return;
+    invoke('set_url_bar_attached', { tab: tab.id, attached: !barAttached });
     setActions(false);
-    reportLayout();
   });
 
   // ⋯ → Block This Site: adds the site (and its subdomains) to Settings →
@@ -3245,6 +3246,9 @@
     chromeLog('debug', `shortcut ${name} via ${via}`);
     if (name === 'new_tab') {
       openPalette();
+    } else if (name === 'reload') {
+      const tab = activeTab();
+      if (tab) invoke('reload', { tab: tab.id });
     } else if (name === 'close_tab') {
       closeTabShortcut();
     } else if (name === 'reopen_tab') {
@@ -3796,7 +3800,7 @@
 
   $('back').addEventListener('click', withTab((t) => invoke('go_back', { tab: t.id })));
   $('forward').addEventListener('click', withTab((t) => invoke('go_forward', { tab: t.id })));
-  $('reload').addEventListener('click', withTab((t) => invoke(t.loading ? 'stop' : 'reload', { tab: t.id })));
+  $('reload').addEventListener('click', withTab((t) => invoke('reload', { tab: t.id })));
   $('menu-new-tab').addEventListener('click', () => { closeMenu(); openPalette(); });
   $('menu-new-private').addEventListener('click', () => {
     closeMenu();

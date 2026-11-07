@@ -80,6 +80,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::share_page,
         commands::image_action,
         commands::zoom_page,
+        commands::set_url_bar_attached,
         commands::read_selection,
         commands::define_term,
         commands::search_google,
