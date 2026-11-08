@@ -211,6 +211,16 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   (`overrideUserInterfaceStyle`), so sites with their own dark theme use it; a constant detector
   then checks the page's background (root, body, else the canvas) and, if it is light, marks the
   root so a constant style inverts the page with hues kept (`invert(1) hue-rotate(180deg)`).
+  Sections kept dark (2026-11-08): on an inverted page the detector also marks each element whose
+  own opaque background (alpha ≥ 0.5, at least 24×16 pt) the inversion would show bright (shown
+  luminance > 0.6: a dark header, footer or code block), `data-snorkle-flip`, and the style inverts
+  it back, so it keeps its original dark colour with readable text. Inside one, a light element (a
+  white card) would now show white and is flipped again; at most two levels. Media whose nearest
+  flipped ancestor shows the page as it is get the dark-page media filters. Elements containing a
+  `position: fixed` element are not flipped (a filter would make them the fixed element's
+  containing block), nor are media or video frames. Each pass looks at ≤ 4,000 elements and
+  runs with the light check (document end, load, 1.5 s, and DOM changes at most every 0.5 s);
+  marks are decided before the root is marked, so nothing transitions from the inverted state.
   Until the detector has run, the page is dimmed to 20% brightness so white pages do not flash
   while loading. Images, video and embeds are never shown inverted and are dimmed to 60% until
   pointed at (with hide media on, its gray boxes stay, and what it reveals is shown un-inverted). With black and white also on, the root filter includes `grayscale`.

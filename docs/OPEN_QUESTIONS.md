@@ -729,3 +729,18 @@ and backgrounds that change after load. Live NASA verification is pending.
   start page's tab and kept when that tab then navigates.
 - **[verify]** Define with each provider: reply format and cost; checked here only against a mock.
 
+## Dark mode: sections kept dark (2026-11-08)
+
+- **[verify]** On device (WebKit), on sites with dark headers, footers, hero bands and code blocks:
+  they keep their dark colour and their text stays readable; white cards inside them turn dark.
+  Checked here only in Chromium on a test page.
+- **[verify]** Cost of the scan (≤ 4,000 `getComputedStyle` calls per pass, at most every 0.5 s on
+  pages that keep changing) and of many filtered elements (each is a compositing layer) on long
+  pages, on an iPad.
+- **[decide]** A dark section that contains a `position: fixed` element is left inverted (bright),
+  since filtering it would re-anchor the fixed element to the section. Backgrounds drawn with
+  images or gradients are not considered, only background colours.
+- Double inversion (`invert` + `hue-rotate(180deg)` twice) is not exact for saturated colours: a
+  pure red image shows slightly desaturated, the same as images were already shown on inverted
+  pages.
+

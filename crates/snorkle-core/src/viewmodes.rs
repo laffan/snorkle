@@ -178,6 +178,12 @@ pub const LOADING_ATTR: &str = "data-snorkle-loading";
 /// Attribute dark mode's detector puts on the element that frames a video
 /// (see [`DARK_CSS`]).
 pub const MEDIA_BOX_ATTR: &str = "data-snorkle-media-box";
+/// Attribute dark mode's detector puts on an element of an inverted page
+/// whose background would be shown bright: it is inverted back (see
+/// [`DARK_CSS`]).
+pub const FLIP_ATTR: &str = "data-snorkle-flip";
+/// Elements the detector looks at per pass when choosing what to flip.
+pub const MAX_FLIP_SCAN: usize = 4000;
 
 /// Fixed style for dark mode (main frame, document start).
 /// - Until [`DARK_DETECT_JS`] has looked at the page (root not yet
@@ -198,6 +204,15 @@ pub const MEDIA_BOX_ATTR: &str = "data-snorkle-media-box";
 ///   the document rather than a shadow tree) with [`MEDIA_BOX_ATTR`]; the
 ///   counter-filter goes on that element, and media inside it get none.
 ///   A video with no such ancestor keeps the filter on itself.
+/// - Sections kept dark (2026-11-08): on an inverted page the detector
+///   marks each element whose own opaque background would be shown bright
+///   (a dark header or footer, a dark code block) with [`FLIP_ATTR`], and
+///   it is inverted back, so it shows its original dark colour (its text
+///   flips with it and stays readable). Inside such a section a light
+///   element (a white card) would now show white: it is flipped again.
+///   At most two levels; media whose nearest flipped ancestor shows the
+///   page as it is get the dark-page media filters instead of the
+///   counter-inversion.
 pub const DARK_CSS: &str = concat!(
     "html.snorkle-dark-checked{transition:none!important}",
     "html:not(.snorkle-dark-checked){filter:brightness(.2)!important;opacity:0!important}",
@@ -226,6 +241,23 @@ pub const DARK_CSS: &str = concat!(
     // Pages already using a dark theme need black without counter-inversion.
     "html.snorkle-dark-checked:not(.snorkle-dark):has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image]):not(:hover):not([data-snorkle-reveal]),html.snorkle-dark-checked:not(.snorkle-dark):has(#__snorkle_no_images) [data-snorkle-loading][data-snorkle-loading]",
     "{background:#000!important;filter:brightness(0)!important;animation:none!important}",
+    // Sections kept dark (2026-11-08): an element whose background the
+    // inversion would turn bright is inverted back (FLIP_ATTR). Inside
+    // one, light elements are flipped again (at most two levels deep).
+    "html.snorkle-dark [data-snorkle-flip]{filter:invert(1) hue-rotate(180deg)!important}",
+    // Media whose nearest flipped ancestor shows the page as it is (exactly
+    // one flipped ancestor): no counter-inversion, as on a dark page. The
+    // `:not(...)` adds enough specificity to beat each inverted-page rule.
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):not([data-snorkle-flip] [data-snorkle-flip] *)",
+    "{filter:brightness(.5)!important;transition:filter .3s ease-out!important}",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover:not([data-snorkle-flip] [data-snorkle-flip] *)",
+    "{filter:brightness(1)!important}",
+    "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):not([data-snorkle-flip] [data-snorkle-flip] *):not(:hover):not([data-snorkle-reveal]):not(:has([data-snorkle-reveal]))",
+    "{background:#000!important;filter:brightness(0)!important;animation:none!important}",
+    "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):not([data-snorkle-flip] [data-snorkle-flip] *):is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
+    "{background:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
+    "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,input[type=image])[data-snorkle-loading][data-snorkle-loading]:not([data-snorkle-flip] [data-snorkle-flip] *)",
+    "{background:#000!important;filter:brightness(0)!important;animation:none!important}",
     // Media inside a video's frame: the frame's filter already covers
     // them (two ids, so this beats every rule above).
     "html:has(#__snorkle_dark):has(#__snorkle_dark) [data-snorkle-media-box] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
@@ -249,15 +281,16 @@ pub const DARK_CSS: &str = concat!(
 /// search for shadow roots walks every element, so it runs only with the
 /// light check (document end, load, 1.5 s); later passes reuse its hosts.
 pub const DARK_DETECT_JS: &str = "(function(){\
-function lum(c){var m=/rgba?\\(([\\d.]+)[, ]+([\\d.]+)[, ]+([\\d.]+)(?:[,/ ]+([\\d.]+%?))?/.exec(c||'');if(!m)return null;\
-if(m[4]!==undefined&&parseFloat(m[4])<(m[4].slice(-1)==='%'?10:0.1))return null;return (0.2126*m[1]+0.7152*m[2]+0.0722*m[3])/255;}\
+function col(c){var m=/rgba?\\(([\\d.]+)[, ]+([\\d.]+)[, ]+([\\d.]+)(?:[,/ ]+([\\d.]+%?))?/.exec(c||'');if(!m)return null;\
+var a=m[4]===undefined?1:(m[4].slice(-1)==='%'?parseFloat(m[4])/100:parseFloat(m[4]));return [(0.2126*m[1]+0.7152*m[2]+0.0722*m[3])/255,a];}\
+function lum(c){var k=col(c);return k&&k[1]>=0.1?k[0]:null;}\
 function check(full){var d=document.documentElement;if(!d)return;d.classList.remove('snorkle-dark-bg');var root=lum(getComputedStyle(d).backgroundColor),l=root;\
 if(document.body){var body=lum(getComputedStyle(document.body).backgroundColor);if(body!==null)l=body;}\
 var light=0,dark=0;[0.25,0.5,0.75].forEach(function(x){[0.25,0.5,0.75].forEach(function(y){var e=document.elementFromPoint(innerWidth*x,innerHeight*y);\
 for(var i=0;e&&i<16;i++,e=e.parentElement){if(/^(IMG|VIDEO|CANVAS|SVG|IFRAME)$/.test(e.tagName))continue;var v=lum(getComputedStyle(e).backgroundColor);if(v!==null){if(v>0.5)light++;else dark++;break;}}});});\
 if(light+dark>=3)l=light>=dark?1:0;\
 if(l===null){var cs=String(getComputedStyle(d).colorScheme||'');l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
-d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);d.classList.add('snorkle-dark-checked');boxes(full!==false);}\
+flips(l>0.5);d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);boxes(full!==false);d.classList.add('snorkle-dark-checked');}\
 if(window.__snorkleDark){window.__snorkleDark.check();return;}\
 var BOX='data-snorkle-media-box',marked=[],timer=0,hosts=[];\
 function videos(full){var out=[].slice.call(document.querySelectorAll('video'));\
@@ -271,13 +304,25 @@ if(p.getRootNode()===document)return p;e=p;}return null;}\
 function boxes(full){timer=0;var want=[];videos(full===true).forEach(function(v){var b=frame(v);if(b&&want.indexOf(b)<0)want.push(b);});\
 marked.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(BOX);});\
 want.forEach(function(e){if(!e.hasAttribute(BOX))e.setAttribute(BOX,'');});marked=want;}\
+var FLIP='data-snorkle-flip',flipped=[],MED=/^(img|video|canvas|svg|iframe|object|embed|picture|audio)$/i;\
+function flips(on){var want=[],gone=[],fixed=[],n=0,d=document.documentElement;\
+function walk(e,depth,up){for(var c=e.firstElementChild;c&&n<4000;c=c.nextElementSibling){n++;\
+if(MED.test(c.tagName)||c.hasAttribute(BOX))continue;var s=getComputedStyle(c);if(s.display==='none')continue;\
+if(s.position==='fixed')fixed.push(c);var k=col(s.backgroundColor),f=false;\
+if(k&&k[1]>=0.5&&depth<2&&(depth%2===0?1-k[0]:k[0])>0.6){var r=c.getBoundingClientRect();f=r.width>=24&&r.height>=16;}\
+if(f){want.push([c,up]);walk(c,depth+1,c);}else walk(c,depth,up);}}\
+if(on&&document.body)walk(document.body,0,null);\
+want=want.filter(function(w){var bad=gone.indexOf(w[1])>=0||fixed.some(function(x){return x!==w[0]&&w[0].contains(x);});if(bad)gone.push(w[0]);return !bad;}).map(function(w){return w[0];});\
+flipped.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(FLIP);});\
+want.forEach(function(e){if(!e.hasAttribute(FLIP))e.setAttribute(FLIP,'');});flipped=want;}\
 function later(){if(!timer)timer=setTimeout(function(){check(false);},500);}\
 function onMeta(e){if(e.target&&e.target.tagName==='VIDEO')later();}\
 var obs=new MutationObserver(later);obs.observe(document,{childList:true,subtree:true});\
 document.addEventListener('loadedmetadata',onMeta,true);window.addEventListener('resize',later);\
 window.__snorkleDark={check:check,stop:function(){obs.disconnect();clearTimeout(timer);\
 document.removeEventListener('loadedmetadata',onMeta,true);window.removeEventListener('resize',later);\
-marked.forEach(function(e){e.removeAttribute(BOX);});marked=[];}};\
+marked.forEach(function(e){e.removeAttribute(BOX);});marked=[];\
+flipped.forEach(function(e){e.removeAttribute(FLIP);});flipped=[];}};\
 check();window.addEventListener('load',check);window.addEventListener('pageshow',check);window.addEventListener('pagehide',function(){document.documentElement.classList.remove('snorkle-dark-checked');});setTimeout(check,1500);})();";
 
 const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}if(window.__snorkleDark&&window.__snorkleDark.stop)window.__snorkleDark.stop();delete window.__snorkleDark;})();";
@@ -773,6 +818,23 @@ mod tests {
         assert!(DARK_CSS[at..].starts_with(&none) && DARK_CSS.ends_with("{filter:none!important}"));
         assert!(DARK_STOP_JS.contains("__snorkleDark.stop()"));
         assert!(DARK_DETECT_JS.contains("removeAttribute(BOX)"));
+    }
+
+    #[test]
+    fn dark_mode_keeps_dark_sections_dark() {
+        assert!(DARK_DETECT_JS.contains(&format!("var FLIP='{FLIP_ATTR}'")));
+        assert!(DARK_DETECT_JS.contains(&format!("n<{MAX_FLIP_SCAN}")), "bounded scan");
+        assert!(DARK_DETECT_JS.contains("depth<2"), "at most two levels of flips");
+        assert!(DARK_DETECT_JS.contains("position==='fixed'"), "sections holding fixed elements are not filtered");
+        // Marked before the root is, so no media filter transitions from the
+        // inverted state.
+        assert!(DARK_DETECT_JS.contains("flips(l>0.5);d.classList.toggle('snorkle-dark'"));
+        assert!(DARK_DETECT_JS.contains("removeAttribute(FLIP)"));
+        assert!(DARK_CSS.contains(&format!("html.snorkle-dark [{FLIP_ATTR}]{{filter:invert(1) hue-rotate(180deg)!important}}")));
+        let one = format!(":not([{FLIP_ATTR}] [{FLIP_ATTR}] *)");
+        assert_eq!(DARK_CSS.matches(&one).count(), 5, "media under one flip get the dark-page filters");
+        // The frame rule (two ids) still wins over them: it stays last.
+        assert!(DARK_CSS.ends_with("{filter:none!important}"));
     }
 
     #[test]

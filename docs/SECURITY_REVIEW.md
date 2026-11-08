@@ -163,3 +163,10 @@ text). `search_google` takes an optional existing tab id (checked to exist).
 Launch uses `restore_session_with_start_tab` (no restored page loads). Two new
 shortcuts (⌘⇧] / ⌘⇧[) reuse the existing shortcut path (C12). No new
 page-to-native channel, command or capability. Human review pending.
+
+2026-11-08 Dark mode keeps dark sections dark: constant additions to
+`DARK_CSS` / `DARK_DETECT_JS` (I2). The detector reads computed background
+colours and sets or removes the `data-snorkle-flip` attribute on page elements;
+it reports nothing to native code. No new page-to-native channel. Human review
+pending.
+
