@@ -23,7 +23,6 @@
 
   let state = null;
   let editing = false;
-  let paletteOpen = false;
   let consoleOpen = false;
   // ⋯ → Attach URL Bar (remembered): the address bar is a full-width bar
   // along the bottom of the page, which ends above it, instead of a pill
@@ -390,6 +389,8 @@
     $('start').hidden = showPanel || !!notice || !tab || !!tab.url;
     if (notice && !showPanel) renderNotice(tab, notice);
     if (!$('start').hidden) renderStart(tab);
+    else startTab = null;
+    startShown = !$('start').hidden;
   }
 
   function renderNotice(tab, n) {
@@ -459,7 +460,32 @@
     }
   }
 
-  function renderStart() {}
+  // ---- start page (a new tab) ----------------------------------------------
+  //
+  // An empty tab shows the start page on the chrome's surface (no content
+  // view exists until it navigates): the new-tab input, a little above the
+  // middle of its pane, with the palette's rows under it. Each launch opens
+  // one (Rust, `restore_session_with_start_tab`); ⌘T and New Tab create one.
+
+  let startTab = null; // the tab whose start page is shown
+  let startTabsKey = '';
+  let startShown = false;
+  function renderStart(tab) {
+    const input = $('palette-input');
+    const fresh = startTab !== tab.id;
+    if (fresh) {
+      startTab = tab.id;
+      input.value = '';
+      paletteSel = 0;
+      loadPaletteHistory();
+    }
+    input.placeholder = tab.private ? 'Search or enter an address (private)' : 'Search tabs and bookmarks, or enter an address';
+    // Other tabs' titles and addresses are rows: re-render when they change
+    // (not on every progress update, so a click is not lost to a rebuild).
+    const key = JSON.stringify(state.tabs.map((t) => [t.id, t.title, t.url && t.url.full]));
+    if (fresh || key !== startTabsKey) { startTabsKey = key; renderPalette(); }
+    if (fresh || !startShown) focusInput(input);
+  }
 
   // History, newest first, under a heading per day and per hour.
   // ---- downloads ----------------------------------------------------------
@@ -791,8 +817,9 @@
   // Opens a pin or bookmark (its own tab, as left); `reset` goes back to
   // its saved address ("Return to Original URL").
   function openLink(url, reset = false) {
-    invoke('open_launcher', { url, reset });
+    const opened = invoke('open_launcher', { url, reset });
     if (narrow) setSidebar(false);
+    return opened;
   }
 
   // The pin or bookmark whose tab is shown, if any.
@@ -2124,14 +2151,12 @@
     // beside the page (shrinking the content area), float over it as a
     // hole (the pill, its popup, toasts: the page is cut out there), or set
     // `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || paletteOpen || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarShown);
+    const overlay = !!panel || modalOpen || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarShown);
     // Docked right panels (site scripts; or the headers outline and the
     // chat, one above the other when both are open) take the right of the
     // content area, full height, at the width the user dragged.
     const docks = rightPanels();
     const right = docks.length ? clampRight(rightWidth, left) : 0;
-    $('palette').style.left = left + 'px';
-    $('palette').style.right = right + 'px';
     $('chrome').style.left = left + 'px';
     $('chrome').style.right = right + 'px';
     const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
@@ -2628,13 +2653,15 @@
   // tabs, and later turns reuse it. Replies are model output and are shown
   // with textContent only.
 
-  // tab id -> { url, sticky, chatId, context, messages: [{role, text}],
+  // tab id -> { url, sticky, chatId, context, word, messages: [{role, text}],
   //             log, input, output, cost, unpriced, busy }
+  // `word`: a Define chat (the start page's Define row), about that word
+  // rather than the page.
   const chats = new Map();
   let archiveOpen = false;
 
   function newChat(url) {
-    return { url, sticky: false, chatId: null, context: '', messages: [], log: [], input: 0, output: 0, cost: 0, unpriced: false, busy: false };
+    return { url, sticky: false, chatId: null, context: '', word: '', messages: [], log: [], input: 0, output: 0, cost: 0, unpriced: false, busy: false };
   }
 
   function chatFor(t) {
@@ -2758,6 +2785,7 @@
     const c = t && (t.url || (cur && cur.sticky)) ? chatFor(t) : null;
     $('chat-context').hidden = !(c && c.context);
     $('chat-context').textContent = c ? c.context : '';
+    $('chat-input').placeholder = c && c.word ? 'Ask about this word' : 'Ask about this page';
     if (!c) {
       $('chat-cost').textContent = '';
       $('chat-send').disabled = true;
@@ -2794,7 +2822,7 @@
         const open = el('button', 'open');
         open.appendChild(el('span', 't', it.first || it.title || it.host));
         const cost = it.cost_micros || it.unpriced ? ` · ${it.unpriced ? '≥ ' : ''}${money(it.cost_micros)}` : '';
-        open.appendChild(el('span', 'u', `${it.host} · ${dateLabel(it.updated_ms)}${cost}`));
+        open.appendChild(el('span', 'u', `${it.word ? 'Definition' : it.host} · ${dateLabel(it.updated_ms)}${cost}`));
         open.addEventListener('click', () => openArchived(it.id));
         const rm = el('button', 'remove', '×');
         rm.setAttribute('aria-label', 'Delete this chat');
@@ -2818,7 +2846,10 @@
       const c = newChat(t.url ? t.url.full : '');
       c.sticky = true;
       c.chatId = v.id;
-      c.context = `${v.host} · ${dateLabel(v.created_ms)}` + (v.selection ? ` · “${v.selection.length > 120 ? v.selection.slice(0, 120) + '…' : v.selection}”` : '');
+      c.word = v.word || '';
+      c.context = c.word
+        ? `Definition · “${c.word}” · ${dateLabel(v.created_ms)}`
+        : `${v.host} · ${dateLabel(v.created_ms)}` + (v.selection ? ` · “${v.selection.length > 120 ? v.selection.slice(0, 120) + '…' : v.selection}”` : '');
       c.messages = v.messages.map((m) => ({ role: m.role, text: m.text }));
       c.log = c.messages.map((m) => ({ role: m.role, text: m.text }));
       c.input = v.input;
@@ -2856,17 +2887,21 @@
     const t = activeTab();
     const input = $('chat-input');
     const text = input.value.trim();
+    if (!t || !text) return;
+    if (askChat(t, chatFor(t), text)) input.value = '';
+  }
+
+  // Sends `text` as the next message of chat `c` in tab `t`; false if it
+  // cannot be sent now (no model, a reply pending, nothing to ask about).
+  function askChat(t, c, text) {
     const choice = chatChoice();
-    if (!t || !text || !choice) return;
-    const c = chatFor(t);
-    if (c.busy || (!t.url && !c.chatId)) return;
-    input.value = '';
+    if (!choice || c.busy || (!t.url && !c.chatId && !c.word)) return false;
     c.messages.push({ role: 'user', text });
     c.log.push({ role: 'user', text });
     c.busy = true;
     const effort = $('chat-effort').value;
     renderChat();
-    T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, effort, messages: c.messages, chatId: c.chatId })
+    T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, effort, messages: c.messages, chatId: c.chatId, word: c.word || null })
       .then((r) => {
         c.messages.push({ role: 'assistant', text: r.text });
         if (r.chat_id) c.chatId = r.chat_id;
@@ -2883,6 +2918,26 @@
         c.log.push({ role: 'error', text: String(e) });
       })
       .finally(() => { c.busy = false; renderChat(); });
+    return true;
+  }
+
+  // The start page's Define row: a new chat in tab `t` (the empty tab)
+  // asking the chat's model for the word's definition. No page is read
+  // (Rust: `ai::define_request`); follow-up questions continue the chat.
+  function defineWord(t, word) {
+    if (!t) return;
+    setChat(true);
+    loadAi().then(() => {
+      if (!chatChoice()) { toast('Connect an AI provider in Settings → AI to define words.'); return; }
+      const c = newChat(t.url ? t.url.full : '');
+      c.sticky = true;
+      c.word = word;
+      c.context = `Definition · “${word}”`;
+      chats.set(t.id, c);
+      if (archiveOpen) setArchive(false);
+      chatKey = '';
+      askChat(t, c, `Define “${word}”.`);
+    });
   }
 
   $('chat-btn').addEventListener('click', () => setChat(!chatOpen));
@@ -3018,16 +3073,17 @@
     reportLayout();
   }
 
-  // ---- command palette (new tab) -------------------------------------------
+  // ---- command palette (the start page's input) ------------------------------
   //
-  // Arc-style: ⌘T or New Tab opens a palette instead of a blank tab. Typing
-  // fuzzy-matches open tabs, pins and bookmarks first; the last row searches
-  // or goes to what was typed in a new tab. Nothing is created until a row
-  // is chosen.
+  // Arc-style rows under the start page's input: typing fuzzy-matches open
+  // tabs, pins and bookmarks first, then history; the first rows go to,
+  // search for, or (a single word) define what was typed. Going, searching
+  // and history load in this tab; choosing another tab, pin or bookmark
+  // switches to it and closes this empty one, as Chrome's omnibox does.
 
   let paletteRows = [];
   // Recent history for the palette (newest first, one entry per URL),
-  // loaded when it opens.
+  // loaded when a start page opens.
   let paletteHistory = [];
   let paletteSel = 0;
 
@@ -3053,24 +3109,32 @@
     return { score, hits };
   }
 
+  // Each row's `run` gets the start page's tab.
   function paletteCandidates() {
     const out = [];
     if (state) {
       for (const t of state.tabs) {
-        if (t.sheet_over !== null || t.launcher !== null) continue;
-        out.push({ kind: t.private ? 'Private' : 'Tab', title: t.title || (t.url ? t.url.registrable : 'New Tab'), host: t.url ? t.url.registrable : '', run: () => invoke('activate_tab', { tab: t.id }) });
+        // Empty tabs (this one included) are not worth switching to.
+        if (t.sheet_over !== null || t.launcher !== null || !t.url) continue;
+        out.push({ kind: t.private ? 'Private' : 'Tab', title: t.title || t.url.registrable, host: t.url.registrable, run: (here) => leaveStart(here, invoke('activate_tab', { tab: t.id })) });
       }
     }
-    for (const p of pins) out.push({ kind: 'Pinned', title: p.title || p.display.registrable, host: p.display.registrable, run: () => openLink(p.url) });
-    for (const b of bookmarks) out.push({ kind: 'Bookmark', title: b.title || b.display.registrable, host: b.display.registrable, run: () => openLink(b.url) });
+    for (const p of pins) out.push({ kind: 'Pinned', title: p.title || p.display.registrable, host: p.display.registrable, run: (here) => leaveStart(here, openLink(p.url)) });
+    for (const b of bookmarks) out.push({ kind: 'Bookmark', title: b.title || b.display.registrable, host: b.display.registrable, run: (here) => leaveStart(here, openLink(b.url)) });
     // History, after the rest; pages already pinned or bookmarked once.
     const seen = new Set([...pins.map((p) => p.url), ...bookmarks.map((b) => b.url)]);
     for (const h of paletteHistory) {
       if (seen.has(h.url)) continue;
       seen.add(h.url);
-      out.push({ kind: 'History', history: true, title: h.title || h.display.registrable, host: h.display.registrable, run: () => openTyped(h.url) });
+      out.push({ kind: 'History', history: true, title: h.title || h.display.registrable, host: h.display.registrable, run: (here) => goHere(here, h.url) });
     }
     return out;
+  }
+
+  // One word of letters (apostrophes and hyphens inside it), as Rust's
+  // `ai::clean_word` accepts.
+  function singleWord(q) {
+    return [...q].length <= 64 && /^\p{Alphabetic}(?:[\p{Alphabetic}'’-]*\p{Alphabetic})?$/u.test(q);
   }
 
   function renderPalette() {
@@ -3092,8 +3156,13 @@
         .filter(Boolean)
         .sort((a, b) => ({Tab: 0, Private: 0, Pinned: 1, Bookmark: 1, History: 2}[a.kind] - {Tab: 0, Private: 0, Pinned: 1, Bookmark: 1, History: 2}[b.kind]) || b.score - a.score)
         .slice(0, 8);
-      rows.unshift({ kind: 'Search', title: q, host: '', hits: [], run: () => invoke('search_google', { query: q, private: false }) });
-      if (looksLikeAddress(q)) rows.unshift({ kind: 'Go to', title: q, host: '', hits: [], run: () => openTyped(q) });
+      const head = [];
+      if (looksLikeAddress(q)) head.push({ kind: 'Go to', title: q, host: '', hits: [], run: (here) => goHere(here, q) });
+      head.push({ kind: 'Search', title: q, host: '', hits: [], run: (here) => invoke('search_google', { query: q, private: !!(here && here.private), tab: here ? here.id : null }) });
+      // Define (owner request 2026-11-08): a single word only; the AI's
+      // definition opens as a new chat in the chat panel.
+      if (singleWord(q)) head.push({ kind: 'Define', title: q, host: '', hits: [], run: (here) => defineWord(here, q) });
+      rows = head.concat(rows);
     }
     paletteRows = rows;
     paletteSel = Math.min(paletteSel, Math.max(0, rows.length - 1));
@@ -3103,7 +3172,7 @@
       const li = el('li');
       li.setAttribute('role', 'option');
       li.setAttribute('aria-selected', String(i === paletteSel));
-      li.appendChild(el('span', 'kind', r.go ? (looksLikeAddress(q) ? 'Go to' : 'Search') : r.kind));
+      li.appendChild(el('span', 'kind', r.kind));
       const t = el('span', 't');
       // Highlight matched characters (built from text nodes, never markup).
       const hits = new Set(r.hits);
@@ -3125,36 +3194,42 @@
     } catch (_) { return false; }
   }
 
-  function openTyped(q) {
-    T.core.invoke('new_tab', { private: false })
-      .then((id) => invoke('navigate', { tab: id, input: q }))
-      .catch((e) => toast(String(e)));
+  // Loads `q` (typed, or a history address) in the start page's tab.
+  function goHere(here, q) {
+    if (here) invoke('navigate', { tab: here.id, input: q });
+  }
+
+  // After switching to another tab, pin or bookmark (`switched`, a
+  // promise): closes the start page's empty tab, unless it is half of a
+  // split view.
+  function leaveStart(here, switched) {
+    if (!here || pairOf(here.id)) return;
+    Promise.resolve(switched).then(() => {
+      const t = state && state.tabs.find((x) => x.id === here.id);
+      if (t && !t.url && state.active !== here.id) invoke('close_tab', { tab: here.id });
+    });
   }
 
   function choosePalette(i) {
     const r = paletteRows[i];
-    closePalette();
-    if (r) r.run();
+    const here = activeTab();
+    if (!r || !here || here.url) return;
+    $('palette-input').blur();
+    r.run(here);
   }
 
-  function openPalette() {
-    // Already open (the same ⌘T arriving by both routes, or pressed again):
-    // keep what has been typed and only make sure the field has focus.
-    if (paletteOpen) { focusInput($('palette-input')); return; }
-    closeMenu();
-    if (narrow) setSidebar(false);
-    paletteOpen = true;
-    paletteSel = 0;
-    $('palette').hidden = false;
-    const input = $('palette-input');
-    input.value = '';
-    renderPalette();
-    focusInput(input);
-    reportLayout();
+  function loadPaletteHistory() {
     T.core.invoke('list_history', { limit: 500 }).then((items) => {
       paletteHistory = items;
-      if (paletteOpen) renderPalette();
+      if (startShown) renderPalette();
     }).catch(() => {});
+  }
+
+  // ⌘T and New Tab: a new empty tab, which shows the start page (focused).
+  function openNewTab(priv) {
+    closeMenu();
+    if (narrow) setSidebar(false);
+    invoke('new_tab', { private: !!priv });
   }
 
   // Focuses an input the chrome opened from a shortcut. After a shortcut a
@@ -3170,22 +3245,17 @@
     ask().then(() => setTimeout(() => { if (!input.hidden && document.activeElement !== input) ask(); }, 150));
   }
 
-  // Back from another app: an open palette or find bar gets focus again.
+  // Back from another app: a shown start page or open find bar gets focus
+  // again (no new tab: only a launch opens one).
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    if (paletteOpen) focusInput($('palette-input'));
-    else if (findOpen) focusInput($('find-input'));
+    if (findOpen) focusInput($('find-input'));
+    else if (startShown) focusInput($('palette-input'));
   });
-
-  function closePalette() {
-    paletteOpen = false;
-    $('palette').hidden = true;
-    $('palette-input').blur();
-    reportLayout();
-  }
 
   $('palette-input').addEventListener('input', () => { paletteSel = 0; renderPalette(); });
   $('palette-input').addEventListener('keydown', (ev) => {
+    if (ev.isComposing) return;
     if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
       ev.preventDefault();
       const n = paletteRows.length;
@@ -3195,11 +3265,32 @@
       ev.preventDefault();
       choosePalette(paletteSel);
     } else if (ev.key === 'Escape') {
+      // A tab, not a dialog: Escape clears what was typed.
       ev.preventDefault();
-      closePalette();
+      ev.stopPropagation();
+      if ($('palette-input').value) { $('palette-input').value = ''; paletteSel = 0; renderPalette(); }
+      else $('palette-input').blur();
     }
   });
-  $('palette').addEventListener('click', (ev) => { if (ev.target === $('palette')) closePalette(); });
+
+  // ⌘⇧] / ⌘⇧[: the next or previous tab in the sidebar's order, wrapping,
+  // as in Chrome. Pins and bookmarks count where they have a tab (one not
+  // yet opened is skipped rather than loaded); a split pair's halves are
+  // stepped through in turn.
+  function cycleTab(step) {
+    if (!state) return;
+    const launcherTabs = new Map();
+    for (const t of state.tabs) if (t.launcher !== null && t.sheet_over === null && !t.private) launcherTabs.set(t.launcher, t.id);
+    const ids = [];
+    for (const n of $('sidebar').querySelectorAll('.pin[data-url], .bm[data-url], .tab[data-tab]')) {
+      const id = n.dataset.tab !== undefined ? Number(n.dataset.tab) : launcherTabs.get(n.dataset.url);
+      if (id !== undefined && !ids.includes(id)) ids.push(id);
+    }
+    if (!ids.length) return;
+    const at = ids.indexOf(shownTab());
+    const next = at < 0 ? ids[step > 0 ? 0 : ids.length - 1] : ids[(at + step + ids.length) % ids.length];
+    if (next !== shownTab()) invoke('activate_tab', { tab: next });
+  }
 
   // ---- keyboard shortcuts -------------------------------------------------
   //
@@ -3245,7 +3336,9 @@
     lastShortcut = { name, at: now };
     chromeLog('debug', `shortcut ${name} via ${via}`);
     if (name === 'new_tab') {
-      openPalette();
+      openNewTab(false);
+    } else if (name === 'next_tab' || name === 'prev_tab') {
+      cycleTab(name === 'next_tab' ? 1 : -1);
     } else if (name === 'reload') {
       const tab = activeTab();
       if (tab) invoke('reload', { tab: tab.id });
@@ -3268,9 +3361,8 @@
       // ⌘S / ⌘⇧S: a new empty tab beside (or below) this one, ready for an
       // address; in a split, its layout changes instead.
       const orientation = name === 'split_columns' ? 'columns' : 'rows';
-      T.core.invoke('split_new', { orientation })
-        .then((id) => { if (id !== null && id !== undefined) beginEdit(); })
-        .catch((e) => toast(String(e)));
+      // The new tab's start page (in its pane) takes the focus.
+      T.core.invoke('split_new', { orientation }).catch((e) => toast(String(e)));
     } else if (name === 'find_next' || name === 'find_prev') {
       // ⌘G / ⌘⇧G: step through the matches; open the bar if it is closed.
       if (findOpen && find.query) findStep(name === 'find_prev');
@@ -3710,7 +3802,7 @@
     const generation = ++selectionGeneration;
     const { tab, rect } = e.payload;
     const shown = state && (tab === state.active || (state.split && (tab === state.split.left || tab === state.split.right)));
-    if (!rect || !shown || paletteOpen || modalOpen || panel) { hideSelection(); return; }
+    if (!rect || !shown || modalOpen || panel) { hideSelection(); return; }
     T.core.invoke('read_selection', { tab }).then((text) => {
       if (generation !== selectionGeneration) return;
       if (!text || !text.trim()) { hideSelection(); return; }
@@ -3761,7 +3853,7 @@
     const { tab, url, rect } = e.payload;
     if (!url || !rect) { if (imageMenu && imageMenu.tab === tab) hideImageMenu(); return; }
     const shown = state && (tab === state.active || (state.split && (tab === state.split.left || tab === state.split.right)));
-    if (!shown || paletteOpen || modalOpen || panel) return;
+    if (!shown || modalOpen || panel) return;
     hideSelection();
     imageMenu = { tab, url };
     placeOverPage($('img-pop'), tab, rect);
@@ -3801,12 +3893,8 @@
   $('back').addEventListener('click', withTab((t) => invoke('go_back', { tab: t.id })));
   $('forward').addEventListener('click', withTab((t) => invoke('go_forward', { tab: t.id })));
   $('reload').addEventListener('click', withTab((t) => invoke('reload', { tab: t.id })));
-  $('menu-new-tab').addEventListener('click', () => { closeMenu(); openPalette(); });
-  $('menu-new-private').addEventListener('click', () => {
-    closeMenu();
-    if (narrow) setSidebar(false);
-    invoke('new_tab', { private: true }).then(beginEdit);
-  });
+  $('menu-new-tab').addEventListener('click', () => openNewTab(false));
+  $('menu-new-private').addEventListener('click', () => openNewTab(true));
 
   $('unsplit').addEventListener('click', withTab((t) => invoke('unsplit', { tab: t.id })));
   $('sheet-close').addEventListener('click', () => { if (state && state.sheet !== null) invoke('close_tab', { tab: state.sheet }); });
@@ -3864,8 +3952,7 @@
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
-    if (paletteOpen) closePalette();
-    else if (!$('copy-modal').hidden) closePageCopy();
+    if (!$('copy-modal').hidden) closePageCopy();
     else if (unblock) closeUnblock();
     else if (confirmAction) closeConfirm();
     else if (findOpen) closeFind();

@@ -304,6 +304,10 @@ pub struct ChatRecord {
     pub cost_micros: u64,
     /// Some reply came from a model without a known price.
     pub unpriced: bool,
+    /// A Define chat (the new-tab page): the word it is about. Such a chat
+    /// has no page: `url`, `page_text` and `selection` are empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub word: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,7 +326,14 @@ pub fn validate_chat(mut c: ChatRecord) -> Option<ChatRecord> {
     if !valid_chat_id(&c.id) || crate::ai::validate_model(&c.model).is_err() {
         return None;
     }
-    c.url = storable_url(&c.url)?;
+    if c.word.is_empty() {
+        c.url = storable_url(&c.url)?;
+    } else {
+        c.word = crate::ai::clean_word(&c.word)?;
+        c.url.clear();
+        c.page_text.clear();
+        c.selection.clear();
+    }
     c.title = clean_title(&c.title);
     c.page_text = crate::ai::clean_multiline(&c.page_text, crate::ai::MAX_CHAT_PAGE_CHARS);
     c.selection = crate::ai::clean_multiline(&c.selection, crate::ai::MAX_CHAT_SELECTION_CHARS);
@@ -1497,8 +1508,15 @@ mod tests {
             output: 2,
             cost_micros: 80,
             unpriced: false,
+            word: String::new(),
         };
         assert!(s.save_chat(chat("c1", 1)).unwrap());
+        // A Define chat has no page; its word is checked instead.
+        let define = ChatRecord { url: String::new(), page_text: "x".into(), word: "ennui".into(), ..chat("c2", 2) };
+        assert!(s.save_chat(define).unwrap());
+        assert!(s.chat("c2").is_some_and(|c| c.word == "ennui" && c.page_text.is_empty()));
+        assert!(!s.save_chat(ChatRecord { word: "two words".into(), ..chat("c4", 4) }).unwrap());
+        s.delete_chat("c2").unwrap();
         assert!(!s.save_chat(chat("../evil", 2)).unwrap(), "ids are file names: validated");
         assert!(!s.save_chat(ChatRecord { url: "javascript:x".into(), ..chat("c3", 3) }).unwrap());
         drop(s);

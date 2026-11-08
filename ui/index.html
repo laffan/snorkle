@@ -182,9 +182,18 @@
   <!-- Shown only where no content view covers it (start page, notices,
        history). -->
   <main id="surface">
-    <!-- A new tab: an empty surface (the address bar says what to do; the
-         EasyList credit is in Settings → General). -->
-    <section id="start" hidden></section>
+    <!-- A new tab (and each launch): the start page, with the new-tab input
+         a little above the middle of the pane and the palette's rows under
+         it. Titles and hosts are set with textContent. (The EasyList credit
+         is in Settings → General.) -->
+    <section id="start" hidden>
+      <div class="palette" role="search" aria-label="New tab">
+        <input id="palette-input" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
+               enterkeyhint="go" placeholder="Search tabs and bookmarks, or enter an address" aria-label="Search tabs and bookmarks, or enter an address"
+               role="combobox" aria-controls="palette-list" aria-expanded="true" aria-autocomplete="list">
+        <ul id="palette-list" class="palette-list" role="listbox"></ul>
+      </div>
+    </section>
 
     <section id="notice" class="notice" hidden>
       <h1 id="notice-title"></h1>
@@ -518,17 +527,6 @@
     <p id="console-note" class="console-note" hidden></p>
     <ol id="console-list" class="console-list"></ol>
   </section>
-
-  <!-- New tab: command palette (over the content area, which is hidden
-       while it is open). Titles and hosts are set with textContent. -->
-  <div id="palette" class="backdrop palette-backdrop" hidden>
-    <div class="palette" role="dialog" aria-label="New tab">
-      <input id="palette-input" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
-             enterkeyhint="go" placeholder="Search tabs and bookmarks, or enter an address" aria-label="Search tabs and bookmarks, or enter an address"
-             role="combobox" aria-controls="palette-list" aria-expanded="true" aria-autocomplete="list">
-      <ul id="palette-list" class="palette-list" role="listbox"></ul>
-    </div>
-  </div>
 
   <!-- Headers view: the page's outline, docked right of the page.
        Heading text is page-controlled: textContent only. -->

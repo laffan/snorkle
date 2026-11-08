@@ -154,6 +154,10 @@ pub enum Shortcut {
     SplitRows,
     /// The n-th item in the sidebar (pins, bookmarks, then tabs).
     Item(u8),
+    /// The next / previous tab in the sidebar's order, wrapping (⌘⇧] and
+    /// ⌘⇧[, as in Chrome and Safari).
+    NextTab,
+    PreviousTab,
 }
 
 /// Modifier bits of a binding besides ⌘ (always required): Shift, Option,
@@ -206,6 +210,8 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
     def("item_3", ShortcutMenu::Tabs, "Go to Item 3", "3", 0, Shortcut::Item(3)),
     def("item_4", ShortcutMenu::Tabs, "Go to Item 4", "4", 0, Shortcut::Item(4)),
     def("item_5", ShortcutMenu::Tabs, "Go to Item 5", "5", 0, Shortcut::Item(5)),
+    def("next_tab", ShortcutMenu::Tabs, "Next Tab", "]", MOD_SHIFT, Shortcut::NextTab),
+    def("prev_tab", ShortcutMenu::Tabs, "Previous Tab", "[", MOD_SHIFT, Shortcut::PreviousTab),
 ];
 
 /// Where a shortcut appears in the iPadOS menu bar.
@@ -239,6 +245,8 @@ impl Shortcut {
             Shortcut::SplitColumns => "split_columns".into(),
             Shortcut::SplitRows => "split_rows".into(),
             Shortcut::Item(n) => format!("item:{n}"),
+            Shortcut::NextTab => "next_tab".into(),
+            Shortcut::PreviousTab => "prev_tab".into(),
         }
     }
 }
@@ -632,7 +640,18 @@ mod tests {
             shortcut_index("split_rows").map(|i| &defaults[i]),
             Some(&KeyBinding { key: "s".into(), mods: MOD_SHIFT })
         );
-        let b = effective_bindings(&[("new_tab".into(), "N".into(), MOD_SHIFT)]).unwrap();
+        // Chrome's and Safari's tab switching: ⌘⇧] / ⌘⇧[ (the unshifted key).
+        assert_eq!(
+            shortcut_index("next_tab").map(|i| &defaults[i]),
+            Some(&KeyBinding { key: "]".into(), mods: MOD_SHIFT })
+        );
+        assert_eq!(
+            shortcut_index("prev_tab").map(|i| &defaults[i]),
+            Some(&KeyBinding { key: "[".into(), mods: MOD_SHIFT })
+        );
+        assert_eq!(Shortcut::NextTab.name(), "next_tab");
+        assert_eq!(Shortcut::PreviousTab.name(), "prev_tab");
+        let b =effective_bindings(&[("new_tab".into(), "N".into(), MOD_SHIFT)]).unwrap();
         assert_eq!(b[0], KeyBinding { key: "n".into(), mods: MOD_SHIFT });
         assert!(effective_bindings(&[("new_tab".into(), "w".into(), 0)]).unwrap_err().contains("Close Tab"));
         let ignored = effective_bindings(&[

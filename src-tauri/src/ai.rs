@@ -230,8 +230,10 @@ pub async fn ai_efforts(s: S<'_>, provider: Provider, model: String) -> Result<V
 /// the URL comes from the core. In a non-private tab the chat is archived
 /// with that context, and later turns (also when continued from the
 /// archive, from any tab) reuse the stored context instead of reading the
-/// page again.
+/// page again. With `word` (Define on the new-tab page), a new chat is about
+/// that single word instead: no page is read and the tab may be empty.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn ai_chat(
     s: S<'_>,
     tab: u64,
@@ -240,13 +242,15 @@ pub async fn ai_chat(
     messages: Vec<ChatMessage>,
     chat_id: Option<String>,
     effort: Option<String>,
+    word: Option<String>,
 ) -> Result<ChatReply, String> {
     let key = key(provider)?;
     // Nothing typed in a private tab is stored, also when it continues an
     // archived chat.
     let tab_private = s.browser().tab(snorkle_core::tabs::TabId(tab)).is_some_and(|t| t.is_private());
     let stored = chat_id.as_deref().and_then(|id| s.store.as_ref()?.chat(id));
-    let (page, private, record) = match stored {
+    let (context, private, record) = match stored {
+        Some(rec) if !rec.word.is_empty() => (Context::Word(rec.word.clone()), tab_private, Some(rec)),
         Some(rec) => {
             let page = ai::PageText {
                 title: rec.title.clone(),
@@ -254,7 +258,11 @@ pub async fn ai_chat(
                 text: rec.page_text.clone(),
                 selection: rec.selection.clone(),
             };
-            (page, tab_private, Some(rec))
+            (Context::Page(page), tab_private, Some(rec))
+        }
+        None if word.is_some() => {
+            let word = word.as_deref().and_then(ai::clean_word).ok_or("Define takes a single word.")?;
+            (Context::Word(word), tab_private, None)
         }
         None => {
             let tab = snorkle_core::tabs::TabId(tab);
@@ -280,17 +288,27 @@ pub async fn ai_chat(
                 .flatten()
                 .and_then(|t| ai::parse_page_text(&t, url.as_str()))
                 .ok_or("The page didn't answer. Wait for it to load and try again.")?;
-            (page, private, None)
+            (Context::Page(page), private, None)
         }
     };
-    let host =
-        snorkle_core::Url::parse(&page.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
-    let mut req = ai::chat_request(provider, &key, &model, &page, &messages)?;
+    let (mut req, what) = match &context {
+        Context::Page(page) => {
+            let host = snorkle_core::Url::parse(&page.url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+                .unwrap_or_default();
+            (ai::chat_request(provider, &key, &model, page, &messages)?, format!("chat about {host} ({model})"))
+        }
+        // The usage log names no word: it is what the user typed.
+        Context::Word(word) => {
+            (ai::define_request(provider, &key, &model, word, &messages)?, format!("definition ({model})"))
+        }
+    };
     if effort.as_deref().is_some_and(|e| !e.is_empty() && e != "default") {
         let support = effort_support(&s, provider, &model).await;
         ai::apply_supported_effort(&mut req, provider, effort.as_deref(), &support)?;
     }
-    let (status, body) = send(&s, provider, Some(&model), &format!("chat about {host} ({model})"), req).await?;
+    let (status, body) = send(&s, provider, Some(&model), &what, req).await?;
     let text = ai::parse_chat_reply(provider, status, &body)?;
     let usage = ai::parse_usage(provider, &body).unwrap_or(ai::Usage { input: 0, output: 0 });
     let cost_micros = ai::estimate_cost_micros(provider, &model, usage);
@@ -298,21 +316,30 @@ pub async fn ai_chat(
     let mut chat_id = None;
     if let (false, Some(store)) = (private, s.store.as_ref()) {
         let now = wall_ms();
-        let mut rec = record.unwrap_or_else(|| ChatRecord {
-            id: format!("c{now}-{}", s.chat_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
-            created_ms: now,
-            updated_ms: now,
-            url: page.url.clone(),
-            title: page.title.clone(),
-            page_text: page.text.clone(),
-            selection: page.selection.clone(),
-            messages: Vec::new(),
-            provider,
-            model: model.clone(),
-            input: 0,
-            output: 0,
-            cost_micros: 0,
-            unpriced: false,
+        let mut rec = record.unwrap_or_else(|| {
+            let (url, title, page_text, selection, word) = match &context {
+                Context::Page(p) => {
+                    (p.url.clone(), p.title.clone(), p.text.clone(), p.selection.clone(), String::new())
+                }
+                Context::Word(w) => (String::new(), w.clone(), String::new(), String::new(), w.clone()),
+            };
+            ChatRecord {
+                id: format!("c{now}-{}", s.chat_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
+                created_ms: now,
+                updated_ms: now,
+                url,
+                title,
+                page_text,
+                selection,
+                word,
+                messages: Vec::new(),
+                provider,
+                model: model.clone(),
+                input: 0,
+                output: 0,
+                cost_micros: 0,
+                unpriced: false,
+            }
         });
         rec.updated_ms = now;
         rec.provider = provider;
@@ -336,6 +363,12 @@ pub async fn ai_chat(
     Ok(ChatReply { chat_id, text, input: usage.input, output: usage.output, cost_micros })
 }
 
+/// What a chat is about: a page, or a word to define.
+enum Context {
+    Page(ai::PageText),
+    Word(String),
+}
+
 /// One archived chat in the list.
 #[derive(Serialize)]
 pub struct ChatSummary {
@@ -346,6 +379,8 @@ pub struct ChatSummary {
     title: String,
     /// The first question, shortened.
     first: String,
+    /// A Define chat's word (empty for page chats).
+    word: String,
     messages: usize,
     cost_micros: u64,
     unpriced: bool,
@@ -369,6 +404,7 @@ pub fn list_chats(s: S<'_>) -> Vec<ChatSummary> {
                 .map(|m| snorkle_core::text::sanitize_page_text(&m.text, 140))
                 .unwrap_or_default(),
             messages: c.messages.len(),
+            word: c.word,
             id: c.id,
             created_ms: c.created_ms,
             updated_ms: c.updated_ms,
@@ -388,6 +424,7 @@ pub struct ChatView {
     host: String,
     title: String,
     selection: String,
+    word: String,
     messages: Vec<ChatEntry>,
     input: u64,
     output: u64,
@@ -409,6 +446,7 @@ pub fn get_chat(s: S<'_>, id: String) -> Option<ChatView> {
         host,
         title: c.title,
         selection: c.selection,
+        word: c.word,
         messages: c.messages,
         input: c.input,
         output: c.output,

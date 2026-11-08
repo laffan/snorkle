@@ -299,7 +299,9 @@ bookmark's page, the confirmation offers Return to Original URL first), ⌘F fin
 ⌘⇧G next / previous match, ⌘\ sidebar, ⌘⇧\ right panels, ⌘S / ⌘⇧S split side by side / top
 and bottom, ⌘D bookmark (on a bookmark's tab: un-bookmark; ⌥⌘D from 2026-11-03 to 2026-11-04,
 when ⌘D split the view), ⌘I images,
-⌘1–5 sidebar items. The sidebar has two modes (Settings → General, or ⌘-click its toggle; its toggle tab reaches 3 pt
+⌘1–5 sidebar items, ⌘⇧] / ⌘⇧[ next / previous tab (2026-11-08; Chrome's and Safari's keys:
+the sidebar's order, wrapping; pins and bookmarks count only where they have a tab, so cycling never
+loads one that was not open). The sidebar has two modes (Settings → General, or ⌘-click its toggle; its toggle tab reaches 3 pt
 into the sidebar, over the resize edge's line, and in attached mode with the sidebar hidden and a
 pointer device it shows only while the pointer is within 100 pt of it: a hover recognizer on the
 window's root view reports the pointer near the left edge, since pages are native views the chrome
@@ -502,6 +504,13 @@ title, visible text and the selection at that moment). Continuing an archived ch
 sends that stored context instead of reading the current page; nothing typed in a private tab is
 stored. Chats can be deleted from the archive.
 
+**Define** (2026-11-08): the start page's Define row starts a new chat in its tab whose first
+message is `Define “word”.`; Rust sends `ai::define_request` (a dictionary system prompt and the
+word, validated again by `ai::clean_word`: letters, with apostrophes or hyphens inside, at most 64)
+and reads no page. Follow-up questions continue it. It is archived like other chats
+(`ChatRecord::word`, with no URL or page text; the archive shows it as "Definition"), except from
+private tabs. The usage log names it "definition", without the word.
+
 ## 5d. In-app console
 
 The Menu → Console panel is docked under the content area (the chrome reports a `bottom`
@@ -521,8 +530,7 @@ errors/warnings, this tab only. Copy puts the visible entries on the clipboard.
 
 ## 5b. Chrome layout
 
-Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T) opens an Arc-style command palette centred over the content area (which is hidden while it is open): typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per
-page, loaded when the palette opens), and the last row searches or goes to the text in a new tab; no tab exists until a row is chosen. The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input. **Define** (single words only, `ai::clean_word`) opens the chat panel with a new chat asking the chat's model for a dictionary-style definition (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both

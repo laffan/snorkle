@@ -11,8 +11,10 @@
 //!   helper the site's domain, the user's existing CSS/JS and their prompt;
 //!   for "Detect Headers" a sample of short heading-like snippets; and for
 //!   the page chat (owner request 2026-11-01) the page's address, title,
-//!   visible text and selection, read only when the user sends a message.
-//!   Never history, cookies or other tabs.
+//!   visible text and selection, read only when the user sends a message;
+//!   for Define on the new-tab page (2026-11-08) only the single word typed
+//!   ([`clean_word`]) and the conversation. Never history, cookies or other
+//!   tabs.
 //! - Page text is page-controlled: bounded and cleaned
 //!   ([`parse_page_text`]), and sent as data inside the system prompt with
 //!   an instruction to ignore instructions in it. Chat replies are shown
@@ -536,6 +538,19 @@ pub fn chat_request(
     messages: &[ChatMessage],
 ) -> Result<HttpRequest, String> {
     let model = validate_model(model)?;
+    let recent = recent_turns(messages)?;
+    let page_json = json!({
+        "url": page.url, "title": page.title, "selected_text": page.selection, "text": page.text,
+    });
+    let system = format!("{CHAT_SYSTEM}\n\nPage:\n{page_json}");
+    let turns: Vec<(ChatRole, &str)> = recent.iter().map(|(r, t)| (*r, t.as_str())).collect();
+    Ok(messages_request(p, key, &model, &system, &turns, 8000))
+}
+
+/// The conversation as sent: trimmed messages, roles alternating from the
+/// user's (repeats merged), at most [`MAX_CHAT_TURNS`], ending with the
+/// user's new message.
+fn recent_turns(messages: &[ChatMessage]) -> Result<Vec<(ChatRole, String)>, String> {
     let mut turns: Vec<(ChatRole, String)> = messages
         .iter()
         .map(|m| (m.role, m.text.trim().chars().take(MAX_CHAT_MESSAGE_CHARS).collect::<String>()))
@@ -556,16 +571,52 @@ pub fn chat_request(
         }
     }
     let skip = merged.len().saturating_sub(MAX_CHAT_TURNS);
-    let mut recent = &merged[skip..];
-    if recent.first().map(|(r, _)| *r) == Some(ChatRole::Assistant) {
-        recent = &recent[1..];
+    merged.drain(..skip);
+    if merged.first().map(|(r, _)| *r) == Some(ChatRole::Assistant) {
+        merged.remove(0);
     }
-    let page_json = json!({
-        "url": page.url, "title": page.title, "selected_text": page.selection, "text": page.text,
-    });
-    let system = format!("{CHAT_SYSTEM}\n\nPage:\n{page_json}");
+    Ok(merged)
+}
+
+/// Characters of a word the new-tab page's Define row accepts.
+pub const MAX_DEFINE_WORD_CHARS: usize = 64;
+
+/// The word to define (the new-tab page's Define row, owner request
+/// 2026-11-08): a single word of letters, optionally with apostrophes or
+/// hyphens inside it, at most [`MAX_DEFINE_WORD_CHARS`]; `None` otherwise.
+pub fn clean_word(input: &str) -> Option<String> {
+    let w = input.trim();
+    let n = w.chars().count();
+    let inner = |c: char| c.is_alphabetic() || matches!(c, '\'' | '\u{2019}' | '-');
+    let ok = (1..=MAX_DEFINE_WORD_CHARS).contains(&n)
+        && w.chars().next().is_some_and(char::is_alphabetic)
+        && w.chars().last().is_some_and(char::is_alphabetic)
+        && w.chars().all(inner);
+    ok.then(|| w.to_string())
+}
+
+const DEFINE_SYSTEM: &str = "You are the dictionary in Snorkle, a web browser. The user typed a single \
+word into a new tab and asked for its definition. Answer like a concise dictionary entry in plain text \
+(no Markdown tables or headings): the word with its pronunciation if useful, then each common sense \
+numbered, with its part of speech and a short example, then a one-line origin if it is known. If the \
+word is misspelt, say which word you think was meant and define that one. If it is not a word you know, \
+say so. The user may then ask follow-up questions about the word.";
+
+/// A chat about the definition of `word` (already [`clean_word`]ed):
+/// no page is read or sent. `messages` as for [`chat_request`].
+pub fn define_request(
+    p: Provider,
+    key: &str,
+    model: &str,
+    word: &str,
+    messages: &[ChatMessage],
+) -> Result<HttpRequest, String> {
+    let model = validate_model(model)?;
+    let word = clean_word(word).ok_or("Define takes a single word.")?;
+    let recent = recent_turns(messages)?;
+    let system = format!("{DEFINE_SYSTEM}\n\nWord: {}", json!(word));
     let turns: Vec<(ChatRole, &str)> = recent.iter().map(|(r, t)| (*r, t.as_str())).collect();
-    Ok(messages_request(p, key, &model, &system, &turns, 8000))
+    Ok(messages_request(p, key, &model, &system, &turns, 4000))
 }
 
 /// Explicit capabilities only: unknown models keep the provider default.
@@ -946,6 +997,30 @@ mod tests {
         let r = script_request(Provider::OpenAi, "k", "gpt-5.1", "e.com", "", "", "x").unwrap();
         let body: Value = serde_json::from_slice(r.body.as_ref().unwrap()).unwrap();
         assert!(body["input"].is_string());
+    }
+
+    #[test]
+    fn define_requests() {
+        assert_eq!(clean_word("  serendipity "), Some("serendipity".into()));
+        assert_eq!(clean_word("Weltanschauung"), Some("Weltanschauung".into()));
+        assert_eq!(clean_word("o'clock"), Some("o'clock".into()));
+        assert_eq!(clean_word("well-being"), Some("well-being".into()));
+        assert_eq!(clean_word("café"), Some("café".into()));
+        for bad in ["", "two words", "abc1", "-ish", "it's-", "a.b", "x\u{202e}y", &"a".repeat(65)] {
+            assert!(clean_word(bad).is_none(), "{bad:?}");
+        }
+        let convo = [ChatMessage { role: ChatRole::User, text: "Define “ennui”.".into() }];
+        let r = define_request(Provider::Anthropic, "k", "claude-sonnet-5-5", "ennui", &convo).unwrap();
+        let body: Value = serde_json::from_slice(r.body.as_ref().unwrap()).unwrap();
+        let system = body["system"].as_str().unwrap();
+        assert!(system.contains("dictionary") && system.ends_with("Word: \"ennui\""));
+        assert!(!system.contains("Page:"), "no page is sent");
+        assert_eq!(body["messages"].as_array().unwrap().len(), 1);
+        let r = define_request(Provider::OpenAi, "k", "gpt-5.1", "ennui", &convo).unwrap();
+        let body: Value = serde_json::from_slice(r.body.as_ref().unwrap()).unwrap();
+        assert!(body["instructions"].as_str().unwrap().contains("dictionary"));
+        assert!(define_request(Provider::OpenAi, "k", "gpt-5.1", "two words", &convo).is_err());
+        assert!(define_request(Provider::OpenAi, "k", "gpt-5.1", "ennui", &[]).is_err(), "must end with the user");
     }
 
     #[test]

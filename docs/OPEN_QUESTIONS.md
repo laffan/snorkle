@@ -709,3 +709,23 @@ alpha. Test hover reveal for video compositing on device. The NASA Mars article
 URL reported in session is blocked by this environment's network policy; local
 DOM checks cover white article panels inside dark roots, fully dark pages,
 and backgrounds that change after load. Live NASA verification is pending.
+
+## Start page, tab switching and Define (2026-11-08)
+
+- **[verify]** ⌘⇧] / ⌘⇧[ on iPad (UIKeyCommand input `]` / `[` plus Shift, as ⌘⇧\ matches `\`)
+  and on macOS (key monitor, `charactersByApplyingModifiers` gives `]`), with a page, the chrome
+  and nothing focused, on a US and a non-US layout. Users who had bound either combination to
+  another shortcut get the clash error and the defaults.
+- **[verify]** Launch on device: the start page shows with its input focused (on iPad without a
+  hardware keyboard this raises the software keyboard), no restored page loads until chosen, and
+  resuming from the background adds no tab. If iOS terminates the app in the background, the next
+  open is a launch and does add one.
+- **[verify]** A cold launch from a link in another app opens only that link (no start page) when
+  iOS delivers the URL before setup finishes; if it arrives later, an empty start tab remains.
+- **[decide]** Choosing another tab, pin or bookmark from the start page closes the empty tab
+  (Chrome's behaviour); ⌘T always opens another empty tab, also from an empty one.
+- **[decide]** "A new tab in the AI chat sidebar" was implemented as a new chat in the chat panel
+  (the panel has one conversation per browser tab and an archive, not tabs of its own), bound to the
+  start page's tab and kept when that tab then navigates.
+- **[verify]** Define with each provider: reply format and cost; checked here only against a mock.
+

@@ -345,6 +345,38 @@ impl Browser {
     /// activates the saved active tab (only that one gets a web view).
     pub fn restore_session(&mut self, session: &Session, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
+        let ids = self.restore_tabs(session, now);
+        match session.active.and_then(|i| ids.get(i)).or(ids.last()).copied() {
+            Some(id) => self.activate_into(id, now, &mut out),
+            None => {
+                self.new_tab_into(Profile::Default, now, &mut out);
+            }
+        }
+        out.push(Effect::NotifyChrome);
+        out
+    }
+
+    /// A launch: restores the saved tabs like [`Browser::restore_session`],
+    /// all unloaded, and greets the user with a new empty tab (the chrome's
+    /// start page) placed after the saved active tab. No restored page is
+    /// loaded until it is chosen.
+    pub fn restore_session_with_start_tab(&mut self, session: &Session, now: u64) -> (TabId, Vec<Effect>) {
+        let mut out = Vec::new();
+        let ids = self.restore_tabs(session, now);
+        let after = session.active.and_then(|i| ids.get(i)).or(ids.last()).copied();
+        let at = after
+            .and_then(|a| self.tabs.iter().position(|t| t.id == a))
+            .map(|i| i + 1)
+            .unwrap_or(self.tabs.len());
+        let id = self.alloc_id();
+        self.tabs.insert(at, Tab::new(id, Profile::Default, now));
+        self.activate_into(id, now, &mut out);
+        out.push(Effect::NotifyChrome);
+        (id, out)
+    }
+
+    /// Adds a saved session's tabs, unloaded; their ids in session order.
+    fn restore_tabs(&mut self, session: &Session, now: u64) -> Vec<TabId> {
         let mut ids = Vec::new();
         for st in &session.tabs {
             let Ok(url) = Url::parse(&st.url) else { continue };
@@ -362,14 +394,7 @@ impl Browser {
             self.tabs.push(tab);
             ids.push(id);
         }
-        match session.active.and_then(|i| ids.get(i)).or(ids.last()).copied() {
-            Some(id) => self.activate_into(id, now, &mut out),
-            None => {
-                self.new_tab_into(Profile::Default, now, &mut out);
-            }
-        }
-        out.push(Effect::NotifyChrome);
-        out
+        ids
     }
 
     pub fn new_tab(&mut self, profile: Profile, now: u64) -> (TabId, Vec<Effect>) {

@@ -56,18 +56,27 @@ pub fn new_tab(s: S<'_>, private: bool) -> u64 {
 }
 
 /// "Google This" on selected text: a new tab (private if the current one
-/// is) with a Google search for `query`. The URL is built here, so the
-/// chrome holds no remote addresses.
+/// is) with a Google search for `query`; the new-tab page's Search row
+/// passes its own tab instead. The URL is built here, so the chrome holds
+/// no remote addresses.
 #[tauri::command]
-pub fn search_google(s: S<'_>, query: String, private: bool) -> Result<u64, String> {
+pub fn search_google(s: S<'_>, query: String, private: bool, tab: Option<u64>) -> Result<u64, String> {
     let q = snorkle_core::text::sanitize_page_text(&query, 300);
     if q.is_empty() {
         return Err("Nothing to search for.".into());
     }
     let url = Url::parse_with_params("https://www.google.com/search", [("q", q.as_str())]).map_err(|e| e.to_string())?;
-    let profile = if private { Profile::Private } else { Profile::Default };
-    let (id, effects) = s.browser().new_tab(profile, now_ms());
-    s.run(effects);
+    // `tab`: search in that tab (the new-tab page), keeping its profile.
+    let existing = tab.map(TabId).filter(|t| s.browser().tab(*t).is_some());
+    let id = match existing {
+        Some(id) => id,
+        None => {
+            let profile = if private { Profile::Private } else { Profile::Default };
+            let (id, effects) = s.browser().new_tab(profile, now_ms());
+            s.run(effects);
+            id
+        }
+    };
     let effects = s.browser().navigate_trusted(id, url, now_ms());
     s.run(effects);
     Ok(id.0)

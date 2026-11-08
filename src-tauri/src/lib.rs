@@ -261,7 +261,16 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     // Injected scripts first, so restored views are created with them.
     let capture = shared.capturing();
     snorkle_content::dispatch_main(move || state::with_host(|h| h.set_console_capture(capture)));
-    let effects = shared.browser().restore_session(&session, state::now_ms());
+    // Each launch greets the user with a new tab (the chrome's start page)
+    // after the restored, unloaded tabs; links that opened the app (cold
+    // launch from another app) are shown instead. Returning from the
+    // background is not a launch: nothing is added then.
+    let pending = std::mem::take(&mut *PENDING_LINKS.lock().unwrap_or_else(|e| e.into_inner()));
+    let effects = if pending.is_empty() {
+        shared.browser().restore_session_with_start_tab(&session, state::now_ms()).1
+    } else {
+        shared.browser().restore_session(&session, state::now_ms())
+    };
     // Per-tab view-mode exemptions come back with the session; scripts are
     // set (with them) before the restored views are created.
     let exemptions = shared.browser().view_exemptions();
@@ -281,7 +290,6 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     );
     scripts::apply(&shared, false);
     shared.run(effects);
-    let pending = std::mem::take(&mut *PENDING_LINKS.lock().unwrap_or_else(|e| e.into_inner()));
     open_links(&shared, pending);
 
     // Content blocking: reuses WebKit's compiled lists when unchanged,

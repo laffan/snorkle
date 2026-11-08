@@ -288,6 +288,38 @@ fn view_exemptions_are_saved_with_the_session() {
 }
 
 #[test]
+fn launch_greets_with_a_new_tab_after_the_saved_active_one() {
+    let mut b = browser(4);
+    for (i, url) in ["https://a.example/", "https://b.example/", "https://c.example/"].iter().enumerate() {
+        let (t, _) = b.new_tab(Profile::Default, i as u64);
+        b.navigate_input(t, url, i as u64).unwrap();
+        webkit_load(&mut b, t, url);
+    }
+    let first = b.view().tabs[0].id;
+    b.activate(first, 5);
+    let session = b.session();
+    assert_eq!(session.active, Some(0));
+
+    let mut b2 = browser(4);
+    let (start, out) = b2.restore_session_with_start_tab(&session, 10);
+    assert!(!out.iter().any(|e| matches!(e, Effect::CreateView { .. })), "no restored page is loaded");
+    assert!(out.contains(&Effect::NotifyChrome));
+    let view = b2.view();
+    assert_eq!(view.active, Some(start));
+    assert_eq!(view.tabs.len(), 4);
+    assert_eq!(view.tabs[1].id, start, "placed after the saved active tab");
+    assert!(view.tabs[1].url.is_none(), "an empty tab: the start page");
+    // An empty tab is never saved, so the next launch does not pile them up.
+    assert_eq!(b2.session().tabs.len(), 3);
+
+    // Nothing saved: just the new tab.
+    let mut b3 = browser(4);
+    let (start, _) = b3.restore_session_with_start_tab(&Session::default(), 0);
+    assert_eq!(b3.view().tabs.len(), 1);
+    assert_eq!(b3.view().active, Some(start));
+}
+
+#[test]
 fn page_zoom_is_per_tab_and_saved_with_the_session() {
     use snorkle_core::tabs::ZoomStep;
     let mut b = browser(4);
