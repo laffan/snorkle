@@ -860,7 +860,12 @@ and backgrounds that change after load. Live NASA verification is pending.
   not on WebKit. NYT's inline video is `<nyt-betamax>`, a web component whose poster and video live
   in its shadow roots: it is now grayed as a player, and media in shadow roots (up to four deep)
   gray their frame in the document and are paused unless pointed at. Checked in Chromium with a
-  mock of its structure, not on nytimes.com. Closed shadow roots are still out of reach. Not covered: a video with no ancestor near its size (it keeps the filter on
+  mock of its structure, not on nytimes.com. Closed shadow roots are still out of reach.
+  "Today's Videos" (the video feed) is drawn inside shadow roots, so the hide-media rules are now
+  adopted into each open shadow root as a constructed stylesheet (assumed: WebKit lets the client
+  world construct and adopt a sheet into a page's shadow root, and the page's CSP does not block
+  it). A component that later replaces its `adoptedStyleSheets` loses the sheet until the next
+  pass (at most 2 s). Not covered: a video with no ancestor near its size (it keeps the filter on
   itself), videos in closed or nested shadow roots, or in an open shadow root whose host is much
   larger than the video. On the device: NYT homepage loops and article videos, playing and
   paused, pointed at and not; in Web Inspector the frame should carry the attribute.

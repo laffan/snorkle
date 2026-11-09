@@ -188,6 +188,19 @@ pub const NO_MEDIA_CSS: &str = concat!(
     "nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo)",
     "{filter:none!important;background-color:transparent!important;animation:none!important}"
 );
+/// [`NO_MEDIA_CSS`] for open shadow roots (2026-11-09): web components
+/// (NYT's video feed) draw their media inside shadow trees, which the
+/// page's style cannot reach, so hide media's tracker adopts this sheet
+/// into each open shadow root it finds. The same rules without the
+/// `:root:has(…)` switch (the sheet is only there while the mode is on;
+/// shadow trees have no `:root`); specificity order is unchanged.
+pub fn shadow_no_media_css() -> String {
+    NO_MEDIA_CSS
+        .replace(":root:not(.snorkle-dark):has(#__snorkle_no_images):has(#__snorkle_no_images) ", "")
+        .replace(":root:not(.snorkle-dark):has(#__snorkle_no_images) ", "")
+        .replace(":root:has(#__snorkle_no_images) ", "")
+}
+
 /// Attribute hide media's tracker puts on each video's frame (see
 /// [`VIDEO_BOX_JS`]).
 pub const VIDEO_BOX_ATTR: &str = "data-snorkle-video-box";
@@ -586,14 +599,17 @@ pub fn scroll_to_heading_js(index: u32) -> String {
 }
 
 /// Hide media's video frames (2026-11-09; the same search as dark mode's
-/// media box, [`DARK_DETECT_JS`]): for each video in the document, and each
-/// video, image or canvas (at least 40 × 40) in open shadow roots up to four
-/// levels deep (web-component players such as `<nyt-betamax>` draw their
-/// poster and create their video there, where the style cannot reach), the
-/// nearest ancestor in the document
+/// media box, [`DARK_DETECT_JS`]): open shadow roots up to four levels deep
+/// get [`shadow_no_media_css`] adopted (web components such as NYT's
+/// `<nyt-betamax>` and its video feed draw their media there, where the
+/// page's style cannot reach). For each video, in the document or in one
+/// of those roots, the nearest ancestor (skipping box-less
+/// `display: contents` wrappers) in a styled tree
 /// whose box matches the video's to within 4 px, else one that contains it
 /// and is at most twice its area (a letterboxed player), else the video
-/// itself (document videos only), is marked [`VIDEO_BOX_ATTR`];
+/// itself, is marked [`VIDEO_BOX_ATTR`]. The pointer tracker cannot see
+/// into shadow trees, so those frames and the images in those roots are
+/// revealed by position;
 /// [`NO_MEDIA_CSS`] grays that element. Shadow roots are watched for changes
 /// and their videos' `play` events (which do not leave the shadow tree) are
 /// heard, so a hidden video there is paused like one in the document.
@@ -603,23 +619,26 @@ pub fn scroll_to_heading_js(index: u32) -> String {
 /// and 1.5 s later (these three also look for shadow roots, which walks
 /// every element). Runs inside the tracker of [`style_js`] (`s` is its
 /// state); constant code.
-const VIDEO_BOX_JS: &str = "var VB='data-snorkle-video-box';s.vb=[];s.roots=[];s.vt=0;s.last=0;s.hooked=new WeakSet();\
+const VIDEO_BOX_JS: &str = "var VB='data-snorkle-video-box';s.vb=[];s.roots=[];s.sheet=null;try{s.sheet=new CSSStyleSheet();s.sheet.replaceSync(SCSS);}catch(e){s.sheet=null;}s.vt=0;s.last=0;s.hooked=new WeakSet();\
 s.scan=function(){s.last=Date.now();var roots=[];var look=function(list,depth){for(var i=0;i<list.length&&i<30000;i++){var r=list[i].shadowRoot;\
 if(r&&roots.indexOf(r)<0){roots.push(r);if(depth<4)look(r.querySelectorAll('*'),depth+1);}}};\
 look(document.querySelectorAll('*'),1);s.roots=roots;\
 roots.forEach(function(r){if(s.hooked.has(r))return;s.hooked.add(r);watch(r);\
-r.addEventListener('play',s.onPlay,true);r.addEventListener('loadedmetadata',s.onMeta,true);});};\
+r.addEventListener('play',s.onPlay,true);r.addEventListener('loadedmetadata',s.onMeta,true);});\
+if(s.sheet)roots.forEach(function(r){try{if(r.adoptedStyleSheets.indexOf(s.sheet)<0)r.adoptedStyleSheets=r.adoptedStyleSheets.concat([s.sheet]);}catch(e){}});};\
 s.media=function(){var out=[].slice.call(document.querySelectorAll('video'));\
-s.roots.forEach(function(r){if(!r.host||!r.host.isConnected)return;r.querySelectorAll('video,img,canvas').forEach(function(m){\
-if(m.tagName==='VIDEO'){out.push(m);return;}var b=m.getBoundingClientRect();if(b.width>=40&&b.height>=40)out.push(m);});});return out;};\
+s.roots.forEach(function(r){if(r.host&&r.host.isConnected)out=out.concat([].slice.call(r.querySelectorAll('video')));});return out;};\
+s.styled=function(n){var t=n.getRootNode();return t===document||s.roots.indexOf(t)>=0;};\
 s.frame=function(v){var r=v.getBoundingClientRect();if(r.width<2||r.height<2)return null;var e=v;\
-for(var i=0;i<12;i++){var p=e.parentElement||(e.parentNode&&e.parentNode.host)||null;\
+for(var i=0;i<16;i++){var p=e.parentElement||(e.parentNode&&e.parentNode.host)||null;\
 if(!p||p===document.body||p===document.documentElement)break;var q=p.getBoundingClientRect();\
+if(q.width===0&&q.height===0){e=p;continue;}\
 var same=Math.abs(q.left-r.left)<=4&&Math.abs(q.top-r.top)<=4&&Math.abs(q.right-r.right)<=4&&Math.abs(q.bottom-r.bottom)<=4;\
 var near=q.left<=r.left+4&&q.top<=r.top+4&&q.right>=r.right-4&&q.bottom>=r.bottom-4&&q.width*q.height<=r.width*r.height*2;\
-if(!same&&!near)break;if(p.getRootNode()===document)return p;if(!same)break;e=p;}\
-return v.getRootNode()===document&&v.tagName==='VIDEO'?v:null;};\
-s.boxes=function(full){s.vt=0;if(full===true||Date.now()-s.last>2000)s.scan();var want=[];\
+if(!same&&!near)break;if(s.styled(p))return p;if(!same)break;e=p;}\
+return s.styled(v)?v:null;};\
+s.boxes=function(full){s.vt=0;if(full===true||Date.now()-s.last>2000)s.scan();var want=[];s.simg=[];\
+s.roots.forEach(function(r){if(r.host&&r.host.isConnected)r.querySelectorAll('img,canvas,svg image,input[type=image]').forEach(function(m){s.simg.push(m);});});\
 s.media().forEach(function(v){var b=s.frame(v);if(b&&want.indexOf(b)<0)want.push(b);\
 if(v.tagName==='VIDEO'&&v.getRootNode()!==document&&!v.paused&&!s.shown(v))v.pause();});\
 s.vb.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(VB);});\
@@ -652,7 +671,8 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              if(s.vb){{clearTimeout(s.vt);clearTimeout(s.vt2);document.removeEventListener('loadedmetadata',s.onMeta,true);\
              window.removeEventListener('resize',s.later);document.removeEventListener('DOMContentLoaded',s.full);\
              window.removeEventListener('load',s.full);s.vb.forEach(function(e){{e.removeAttribute('data-snorkle-video-box');}});\
-             s.roots.forEach(function(r){{r.removeEventListener('play',s.onPlay,true);r.removeEventListener('loadedmetadata',s.onMeta,true);}});}}\
+             s.roots.forEach(function(r){{r.removeEventListener('play',s.onPlay,true);r.removeEventListener('loadedmetadata',s.onMeta,true);\
+             if(s.sheet){{try{{r.adoptedStyleSheets=r.adoptedStyleSheets.filter(function(x){{return x!==s.sheet;}});}}catch(e){{}}}}}});}}\
              delete window[{key}];}})();"
         );
     }
@@ -669,7 +689,9 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              var els=document.elementsFromPoint?document.elementsFromPoint(s.x,s.y):[];\
              for(var i=0;i<els.length;i++){{var e=els[i];if(e.matches&&e.matches(sel))on.push(e);}}\
              document.querySelectorAll('video').forEach(function(v){{if(on.indexOf(v)>=0)return;var r=v.getBoundingClientRect();\
-             if(s.x>=r.left&&s.x<=r.right&&s.y>=r.top&&s.y<=r.bottom)on.push(v);}});}}\
+             if(s.x>=r.left&&s.x<=r.right&&s.y>=r.top&&s.y<=r.bottom)on.push(v);}});\
+             (s.vb||[]).concat(s.simg||[]).forEach(function(b){{if(on.indexOf(b)>=0)return;var r=b.getBoundingClientRect();\
+             if(s.x>=r.left&&s.x<=r.right&&s.y>=r.top&&s.y<=r.bottom)on.push(b);}});}}\
              s.rev.forEach(function(e){{if(on.indexOf(e)<0){{e.removeAttribute({attr});e.removeAttribute({ld});}}}});\
              on.forEach(function(e){{if(!e.hasAttribute({attr}))e.setAttribute({attr},'');s.load(e);}});s.rev=on;}};\
              s.load=function(e){{var p=e.tagName==='IMG'&&!e.complete;if(p&&e.loading==='lazy')e.loading='eager';\
@@ -687,8 +709,9 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              var b=s.frame?s.frame(t):null;return !!(b&&b!==t&&(b.matches(':hover')||b.hasAttribute({attr})||b.querySelector('['+{attr}+']')));}};\
              s.onPlay=function(e){{var t=e.target;if(t&&t.matches&&t.matches(sel)&&!s.shown(t)&&t.pause)t.pause();}};\
              document.addEventListener('play',s.onPlay,true);\
-             document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!s.shown(v))v.pause();}});{vbox}",
+             document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!s.shown(v))v.pause();}});var SCSS={scss};{vbox}",
             sel = json_str(MEDIA_SELECTOR),
+            scss = json_str(&shadow_no_media_css()),
             vbox = VIDEO_BOX_JS
         )
     } else {
@@ -958,6 +981,14 @@ mod tests {
         assert!(MEDIA_SELECTOR.contains("nyt-betamax,") && NO_MEDIA_CSS.contains("nyt-betamax,"));
         assert!(VIDEO_BOX_JS.contains("if(depth<4)look(") && VIDEO_BOX_JS.contains("r.addEventListener('play',s.onPlay,true)"));
         assert!(off.contains("r.removeEventListener('play',s.onPlay,true)"));
+        // Shadow roots (NYT's video feed) get the same rules as an adopted
+        // sheet, without the document-only switch.
+        let shadow = shadow_no_media_css();
+        assert!(!shadow.contains(":root") && !shadow.contains("#__snorkle_no_images"));
+        assert!(shadow.contains(&format!("[{VIDEO_BOX_ATTR}]{{")) && shadow.contains("nyt-betamax,"));
+        assert!(on.contains("adoptedStyleSheets=r.adoptedStyleSheets.concat([s.sheet])"));
+        assert!(off.contains("adoptedStyleSheets=r.adoptedStyleSheets.filter("), "sheet removed when turned off");
+        assert!(VIDEO_BOX_JS.contains("if(q.width===0&&q.height===0){e=p;continue;}"), "display:contents wrappers are skipped");
     }
 
 }

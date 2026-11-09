@@ -250,10 +250,14 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   video's frame (`data-snorkle-video-box`: the nearest same-size ancestor in the document, else one
   at most twice its area that contains it, else the video) and the gray box goes on that frame,
   revealed while pointed at; media inside it get no filter of their own. Web-component players
-  (`<nyt-betamax>`, Mux, Media Chrome, Vidstack, lite-youtube/vimeo) are media themselves, and
-  videos, images and canvases inside open shadow roots up to four deep (where the style cannot
-  reach) gray their nearest frame in the document; videos there are paused when they start unless
-  pointed at (their `play` events do not leave the shadow tree, so each root is listened to).
+  (`<nyt-betamax>`, Mux, Media Chrome, Vidstack, lite-youtube/vimeo) are media themselves. Open
+  shadow roots up to four deep (where the page's style cannot reach; NYT's video feed is drawn
+  entirely in them) get the same rules as an adopted constructed stylesheet
+  (`viewmodes::shadow_no_media_css`, removed when the mode is turned off), video frames are marked in
+  whichever tree they are (skipping `display: contents` wrappers), frames and images there are
+  revealed by pointer position (the tracker cannot see into shadow trees), and videos there are
+  paused when they start unless pointed at (their `play` events do not leave the shadow tree, so
+  each root is listened to).
   Inverted dark pages keep using dark mode's media box, which also covers the players.
 - **Shared content controllers** (fixed 2026-11-09): a popup's web view (a `target=_blank` link,
   `window.open`) is built from WebKit's configuration and so shares its opener's
