@@ -632,7 +632,9 @@ impl Browser {
         }
         let Some(idx) = self.tabs.iter().position(|t| t.id == id) else { return out };
         let tab = self.tabs.remove(idx);
-        if !tab.is_private() && !tab.sheet {
+        // A saved copy's tab is not reopened by ⌘⇧T (it was never an
+        // ordinary tab).
+        if !tab.is_private() && !tab.sheet && tab.saved.is_none() {
             if let Some(url) = tab.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https")) {
                 self.closed.retain(|c| *c != url);
                 self.closed.push(url);
@@ -861,6 +863,31 @@ impl Browser {
         out
     }
 
+    /// The tab showing saved item `item`, if one is open.
+    pub fn saved_tab(&self, item: &str) -> Option<TabId> {
+        self.tabs.iter().find(|t| t.saved.as_ref().is_some_and(|c| c.item == item)).map(|t| t.id)
+    }
+
+    /// Closes the tabs showing saved item `item` (it was removed from the
+    /// list: recovered, bookmarked or deleted).
+    pub fn close_saved(&mut self, item: &str, now: u64) -> Vec<Effect> {
+        let ids: Vec<TabId> =
+            self.tabs.iter().filter(|t| t.saved.as_ref().is_some_and(|c| c.item == item)).map(|t| t.id).collect();
+        let mut out = Vec::new();
+        for id in ids {
+            out.extend(self.close(id, now));
+        }
+        out
+    }
+
+    /// Adding pages: the chosen pages load live in the saved copy's tab
+    /// (`on`) and are captured; the tab shows the archive again after.
+    pub fn set_adding(&mut self, id: TabId, on: bool) {
+        if let Some(c) = self.tab_mut(id).and_then(|t| t.saved.as_mut()) {
+            c.adding = on;
+        }
+    }
+
     /// The Save for Later archive a tab shows, if any.
     pub fn saved_copy(&self, id: TabId) -> Option<&crate::tabs::SavedCopy> {
         self.tab(id).and_then(|t| t.saved.as_ref())
@@ -887,10 +914,10 @@ impl Browser {
     /// choice and nothing navigates; otherwise a link to another page the
     /// archive holds opens that page from the archive. Back/forward is left
     /// to WebKit.
-    fn saved_copy_navigation(&mut self, id: TabId, url: &Url, kind: NavKind) -> Option<(Verdict, Vec<Effect>)> {
+    fn saved_copy_navigation(&mut self, id: TabId, url: &Url, kind: NavKind, now: u64) -> Option<(Verdict, Vec<Effect>)> {
         let blocked = self.blocklist.matches(url);
         let t = self.tab_mut(id)?;
-        let c = t.saved.as_mut().filter(|c| c.committed)?;
+        let c = t.saved.as_mut().filter(|c| c.committed && !c.adding)?;
         let bare = without_fragment(url);
         if let Some(picks) = c.picking.as_mut() {
             let host = c.pages.first().and_then(|p| p.host_str().map(str::to_string));
@@ -907,10 +934,23 @@ impl Browser {
             }
             return Some((Verdict::Cancel, vec![Effect::NotifyChrome]));
         }
-        if blocked || kind == NavKind::BackForward || bare == c.page || !c.pages.contains(&bare) {
+        if kind == NavKind::BackForward || bare == c.page {
             return None;
         }
-        Some((Verdict::Cancel, vec![Effect::OpenSavedPage { tab: id, item: c.item.clone(), url: bare }]))
+        if c.pages.contains(&bare) && !blocked {
+            return Some((Verdict::Cancel, vec![Effect::OpenSavedPage { tab: id, item: c.item.clone(), url: bare }]));
+        }
+        // Leaving the archive: a link or form opens in a new ordinary tab
+        // (through the policy, as a ⌘-click would) and becomes the active
+        // tab; anything else (a script or redirect) goes nowhere.
+        if !matches!(kind, NavKind::LinkActivated | NavKind::FormSubmitted) {
+            return Some((Verdict::Cancel, Vec::new()));
+        }
+        let (fresh, mut out) = self.on_background_tab_request(id, url, now);
+        if let Some(fresh) = fresh {
+            out.extend(self.activate(fresh, now));
+        }
+        Some((Verdict::Cancel, out))
     }
 
     /// Tabs with view-mode exemptions (restored from the session).
@@ -1004,6 +1044,15 @@ impl Browser {
     /// history list). Still goes through policy with `Source::Typed`.
     pub fn navigate_trusted(&mut self, id: TabId, url: Url, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
+        // A saved copy's tab only shows its archive: an address typed there
+        // opens in a new ordinary tab (except the live loads of pages being
+        // added to it).
+        if self.saved_copy(id).is_some_and(|c| !c.adding) {
+            let profile = self.tab(id).map_or(Profile::Default, |t| t.profile);
+            let fresh = self.new_tab_into(profile, now, &mut out);
+            out.extend(self.navigate_trusted(fresh, url, now));
+            return out;
+        }
         let Some(tab) = self.tab_mut(id) else { return out };
         tab.notice = None;
         tab.https = HttpsUpgrade::default();
@@ -1211,7 +1260,7 @@ impl Browser {
         // A tab showing a saved archive: links to its other pages open from
         // the archive; while adding pages, link taps choose pages.
         if frame == Frame::Main && !own_load {
-            if let Some(handled) = self.saved_copy_navigation(id, url, kind) {
+            if let Some(handled) = self.saved_copy_navigation(id, url, kind, now) {
                 return handled;
             }
         }
@@ -1415,13 +1464,10 @@ impl Browser {
         if let Some(t) = self.tab_mut(id) {
             t.provisional = true;
             t.loading = true;
-            // Any load after an offline copy's own replaces it (and after a
-            // saved archive's own).
+            // Any load after an offline copy's own replaces it. (A saved
+            // copy's tab stays one: see `Tab::saved`.)
             if t.offline.is_some_and(|o| o.committed) {
                 t.offline = None;
-            }
-            if t.saved.as_ref().is_some_and(|c| c.committed) {
-                t.saved = None;
             }
         }
         vec![Effect::NotifyChrome]
@@ -1523,9 +1569,6 @@ impl Browser {
         // keeps it from being tried again).
         if provisional && t.offline.is_some_and(|o| !o.committed) {
             t.offline = None;
-        }
-        if provisional && t.saved.as_ref().is_some_and(|c| !c.committed) {
-            t.saved = None;
         }
         if !provisional {
             out.push(Effect::NotifyChrome);
@@ -1788,7 +1831,7 @@ impl Browser {
         let persistable: Vec<&Tab> = self
             .tabs
             .iter()
-            .filter(|t| !t.is_private() && !t.sheet)
+            .filter(|t| !t.is_private() && !t.sheet && t.saved.is_none())
             .filter(|t| t.committed_url.as_ref().map(|u| matches!(u.scheme(), "http" | "https")).unwrap_or(false))
             .collect();
         let active = self.active.and_then(|a| persistable.iter().position(|t| t.id == a));

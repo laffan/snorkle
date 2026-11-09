@@ -183,7 +183,10 @@ pub struct Tab {
     /// An emoji shown instead of the tab's favicon (the Edit dialog);
     /// saved with the session.
     pub emoji: Option<String>,
-    /// The tab shows (or is about to show) a Save for Later archive.
+    /// The tab is a Save for Later archive's own tab (2026-11-09): it is
+    /// not listed with the other tabs or saved in the session, and keeps
+    /// this for its whole life (links that leave the archive open in a new
+    /// ordinary tab), so ordinary tabs never show a saved copy.
     pub saved: Option<SavedCopy>,
 }
 
@@ -206,6 +209,9 @@ pub struct SavedCopy {
     /// Adding pages: the links chosen so far (`None` when not choosing).
     /// While choosing, link taps choose instead of navigating.
     pub picking: Option<Vec<Url>>,
+    /// Adding pages: the chosen pages are loading live in this tab to be
+    /// captured; its navigations follow the ordinary policy meanwhile.
+    pub adding: bool,
 }
 
 /// An offline copy in a tab: when it was saved, and whether its load has

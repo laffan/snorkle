@@ -383,6 +383,9 @@ body.resizing-right, body.resizing { cursor: col-resize; }
   max-width: min(720px, 100%); padding: 6px 14px; font-size: 13px; background: var(--warn-bg);
   border-radius: 12px; border: 1px solid var(--line);
 }
+/* Save for Later's progress: the percentage, and a bar along the bottom. */
+.toast.progress { position: relative; overflow: hidden; min-width: 200px; font-variant-numeric: tabular-nums; }
+.toast-bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--fg); transition: width .25s; }
 
 /* The URL pill: navigation on the left, the address (with the share
    button inside its right end), then the page-actions popup button, the
@@ -866,6 +869,7 @@ body.later-open #side-scroll { display: none; }
 .later-head { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 6px 2px 10px; }
 .later-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 12px 10px; }
 .later-card { position: relative; min-width: 0; }
+.later-card.active .thumb { box-shadow: 0 0 0 2px var(--accent); }
 .later-card .thumb {
   display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; padding: 0;
   background: var(--field); box-shadow: 0 0 0 1px var(--line) inset;

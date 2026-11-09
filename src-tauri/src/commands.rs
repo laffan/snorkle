@@ -710,51 +710,30 @@ pub struct LaterView {
     pages: usize,
 }
 
-/// Save for Later: snapshots what the tab shows (a JPEG thumbnail drawn
-/// by the app from its own web view), captures the page as an archive that
-/// works offline (`saved::capture`, channel C22; 2026-11-09), stores the
-/// tab's committed page (http/https, from the core) with its title, and
-/// closes the tab. Not for private tabs, whose pages are never written. A
-/// tab without a live page is saved without an archive.
+/// Save for Later (`saved::save`): a thumbnail of the tab's page (light
+/// mode, images, full colour; drawn by the app from its own web view), an
+/// archive that works offline (channel C22), the tab's committed page
+/// (http/https, from the core) and title; then the tab closes. Progress
+/// goes to the chrome as `later_progress`. Not for private tabs, whose
+/// pages are never written, or a saved copy's own tab. A tab without a live
+/// page is saved without an archive.
 #[tauri::command]
 pub async fn save_for_later(s: S<'_>, tab: u64) -> Result<(), String> {
     let id = TabId(tab);
     let (url, title, live) = {
         let b = s.browser();
         let t = b.tab(id).ok_or("That tab is gone.")?;
-        if t.is_private() {
-            return Err("Private tabs are not saved.".into());
+        if t.is_private() || t.saved.is_some() {
+            return Err("This tab can't be saved.".into());
         }
         let url = t.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https")).ok_or("Open a web page first.")?;
         let live = t.life == snorkle_core::tabs::Life::Live && t.notice.is_none() && !b.shows_offline_copy(id);
         (url, t.title.clone(), live)
     };
-    let store = s.store.clone().ok_or("Saving is not available.")?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    snorkle_content::dispatch_main(move || with_host(|h| h.thumbnail(id, Box::new(move |jpeg| { let _ = tx.send(jpeg); }))));
-    let thumb = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(3)))
+    let shared = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::saved::save(&shared, id, &url, &title, live))
         .await
         .map_err(|_| "Request failed.".to_string())?
-        .ok()
-        .flatten();
-    let page = url.to_string();
-    let fallback = title.clone();
-    let capture = if live {
-        tauri::async_runtime::spawn_blocking(move || crate::saved::capture(id, &page, &fallback)).await.ok().flatten()
-    } else {
-        None
-    };
-    // The page may have navigated while it was read: save what it showed
-    // when the user asked.
-    let store2 = store.clone();
-    let url2 = url.to_string();
-    tauri::async_runtime::spawn_blocking(move || store2.later().add(&url2, &title, thumb.as_deref(), capture, wall_ms()))
-        .await
-        .map_err(|_| "Request failed.".to_string())?
-        .map_err(|e| e.to_string())?
-        .ok_or("This page can't be saved.")?;
-    with_browser(&s, |b| b.close(id, now_ms()));
-    Ok(())
 }
 
 #[tauri::command]
@@ -838,6 +817,7 @@ pub async fn cancel_adding_pages(s: S<'_>, tab: u64) -> Result<(), String> {
 pub fn restore_later(s: S<'_>, id: String) -> Result<(), String> {
     let store = s.store.clone().ok_or("Saving is not available.")?;
     let Some(item) = store.later().take(&id).map_err(|e| e.to_string())? else { return Ok(()) };
+    with_browser(&s, |b| b.close_saved(&id, now_ms()));
     let url = Url::parse(&item.url).map_err(|e| e.to_string())?;
     let (tab, effects) = s.browser().new_tab(Profile::Default, now_ms());
     s.run(effects);
@@ -852,6 +832,7 @@ pub fn restore_later(s: S<'_>, id: String) -> Result<(), String> {
 pub fn bookmark_later(s: S<'_>, id: String) -> Result<(), String> {
     let store = s.store.clone().ok_or("Saving is not available.")?;
     let Some(item) = store.later().take(&id).map_err(|e| e.to_string())? else { return Ok(()) };
+    with_browser(&s, |b| b.close_saved(&id, now_ms()));
     if !store.is_bookmarked(&item.url) {
         store.add_bookmark(&item.url, &item.title, wall_ms()).map_err(|e| e.to_string())?;
     }
@@ -860,6 +841,7 @@ pub fn bookmark_later(s: S<'_>, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn delete_later(s: S<'_>, id: String) -> Result<(), String> {
+    with_browser(&s, |b| b.close_saved(&id, now_ms()));
     match s.store.as_ref() {
         Some(store) => store.later().take(&id).map(|_| ()).map_err(|e| e.to_string()),
         None => Ok(()),

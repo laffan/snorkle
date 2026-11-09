@@ -808,6 +808,14 @@ and backgrounds that change after load. Live NASA verification is pending.
   from the archive as new entries). Going back to an archive entry WebKit no longer holds in its
   page cache may reload it from the network, i.e. fail offline. A session restored after a
   relaunch reopens a saved copy's tab as the live page.
+- **[decide]** Saved copies have their own tabs (2026-11-09, owner: "normal tabs should operate
+  normally"): unlisted, shown as their card in Save for Later, not restored at launch; links that
+  leave the archive open in a new ordinary tab. Script navigations out of an archive are cancelled,
+  so a page that redirects itself on load stays on the saved copy.
+- **[verify]** Thumbnails in light mode with images and colour: the tab's view modes are turned off
+  and its view drawn light 1.5 s before the snapshot. Check that 1.5 s is enough for images to
+  fade in and background images to load, and that dark mode's inversion is fully removed by then;
+  the page visibly changes for that moment before the tab closes.
 - **[decide]** Clicking a saved page's thumbnail opens its saved copy (it stays in the list);
   Recover opens the live page and removes it, as before. "+" opens the saved copy with scripts off
   (so script-driven links are plain links) and link taps choose pages on the same host (at most 30

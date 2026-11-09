@@ -1277,6 +1277,7 @@ fn saved_copy(page: &str, pages: &[&str]) -> snorkle_core::tabs::SavedCopy {
         saved_ms: 7,
         committed: false,
         picking: None,
+        adding: false,
     }
 }
 
@@ -1311,11 +1312,29 @@ fn saved_archives_open_their_own_pages_and_nothing_else() {
     // Reload reloads from the archive.
     assert!(matches!(b.reload(t).as_slice(), [Effect::OpenSavedPage { .. }]));
 
-    // Any other link leaves the archive (the live page, through the policy).
-    let (v, _) = b.decide_navigation(t, &u("https://elsewhere.example/"), Frame::Main, NavKind::LinkActivated, 0);
-    assert_eq!(v, Verdict::Allow);
-    b.on_provisional_start(t);
-    assert!(b.saved_copy(t).is_none(), "the next load replaces the saved copy");
+    // Any other link opens in a new ordinary tab; the saved copy's tab
+    // stays as it is. Scripts and redirects go nowhere.
+    let (v, out) = b.decide_navigation(t, &u("https://elsewhere.example/"), Frame::Main, NavKind::LinkActivated, 0);
+    assert_eq!(v, Verdict::Cancel);
+    let fresh = b.active().unwrap();
+    assert_ne!(fresh, t);
+    assert!(out.iter().any(|e| matches!(e, Effect::CreateView { tab, then: AfterCreate::Load(u), .. } if *tab == fresh && u.as_str() == "https://elsewhere.example/")));
+    assert!(b.saved_copy(fresh).is_none() && b.saved_copy(t).is_some());
+    assert_eq!(b.decide_navigation(t, &u("https://elsewhere.example/"), Frame::Main, NavKind::Other, 0).0, Verdict::Cancel);
+    // So does an address typed in it.
+    b.activate(t, 0);
+    b.navigate_input(t, "https://typed.example/", 0).unwrap();
+    let typed = b.active().unwrap();
+    assert!(typed != t && typed != fresh && b.saved_copy(t).is_some());
+
+    // Never in the session or ⌘⇧T; reopening the item finds its tab; the
+    // item's removal closes it.
+    webkit_load(&mut b, fresh, "https://elsewhere.example/");
+    assert_eq!(b.session().tabs.iter().map(|x| x.url.as_str()).collect::<Vec<_>>(), vec!["https://elsewhere.example/"]);
+    assert_eq!(b.saved_tab("l1-0"), Some(t));
+    b.close_saved("l1-0", 0);
+    assert!(b.tab(t).is_none() && b.saved_tab("l1-0").is_none());
+    assert!(b.pop_closed().is_none(), "a saved copy's tab is not reopened");
 
     // Never in private tabs.
     let (p, _) = b.new_tab(Profile::Private, 0);

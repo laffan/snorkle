@@ -579,9 +579,12 @@ tabs) and the × of bookmarks and domain headings appear only while the row is p
 touch-only devices: on the active tab or bookmark, and always on domain headings).
 **Save for Later** (2026-11-09; `snorkle_core::later`, `later/`): a tab's tray button snapshots what
 its view shows (`takeSnapshotWithConfiguration`, visible bounds, 320 pt wide, JPEG 0.6, drawn by the
-app from its own web view), saves the page as an **archive** that works offline (below), stores the
+app from its own web view) in light mode, with images and in full colour: the tab's view modes are
+turned off for it and its view drawn light (`force_light`) 1.5 s before the snapshot, so the page
+briefly shows that way before the tab closes (`saved::save`; restored if saving fails). It saves the page as an **archive** that works offline (below), stores the
 committed page, title and thumbnail (≤ 200 pages, ≤ 400 KB each, JPEG magic checked), and closes
-the tab; private tabs and empty tabs have no such button. A tab without a live view is saved without
+the tab; private tabs and empty tabs have no such button. The chrome shows how far it is in a toast
+with a percentage and a bar (`later_progress` events; also while adding pages). A tab without a live view is saved without
 an archive, and one WebKit cannot draw without a thumbnail (the chrome shows the site's letter).
 While any are saved, the same icon sits beside the menu and swaps the sidebar's contents for the
 saved pages (thumbnail, title underneath, the number of pages when more than one). A click on the
@@ -607,10 +610,14 @@ JavaScript off. Reading builds one web archive per page (binary property list, m
 subresources) and loads it with `loadData:MIMEType:@"application/x-webarchive"` under the page's
 own URL with scripts on; WebKit answers the page's requests (scripts, styles, fonts, images,
 `fetch`, XHR) from the archive (`DocumentLoader::scheduleArchiveLoad`), so no URL is rewritten and
-no URL scheme handler exists. The core marks the tab (`Tab::saved`, `Browser::show_saved_copy`; a
-"Saved copy" pill; not written to history): a link to another page of the archive is cancelled and
-that page loaded from the archive (`Effect::OpenSavedPage`), Reload reloads from the archive, any
-other link leaves it through the navigation policy. "+" opens the saved copy with scripts off and
+no URL scheme handler exists. A saved copy has its own tab (`Tab::saved`, `Browser::show_saved_copy`), never an
+ordinary one: it is not listed with the tabs (its card in Save for Later is shown as selected, and
+opening the card again returns to it), not saved in the session or reopened by ⌘⇧T, not written to
+history, and closed when its item leaves the list; its address bar shows a "Saved copy" pill. A
+link to another page of the archive is cancelled and that page loaded from the archive
+(`Effect::OpenSavedPage`); Reload reloads from the archive; any other link or form, and an address
+typed in its bar, opens in a new ordinary tab through the navigation policy (as a ⌘-click would);
+script navigations and redirects out of the archive go nowhere. "+" opens the saved copy with scripts off and
 a bar above the pill: each link tapped on the page (same host, at most 30 pages) is chosen or
 unchosen in the core instead of navigating; Add loads each chosen page live in that tab, captures
 it the same way into the same archive (resources shared), and shows the saved copy again.

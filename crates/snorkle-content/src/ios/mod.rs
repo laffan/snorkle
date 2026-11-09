@@ -410,11 +410,24 @@ impl ContentHost {
         }
     }
 
+    /// Save for Later's thumbnail (2026-11-09): draws the tab's view in
+    /// light mode (`on`), whatever the app's appearance and dark pages
+    /// mode say, or as they say again.
+    pub fn force_light(&mut self, tab: TabId, on: bool) {
+        let Some(v) = self.views.get(&tab) else { return };
+        if on {
+            set_light(&v.web);
+        } else {
+            set_dark(&v.web, self.injections.view_for(tab).dark);
+        }
+    }
+
     /// Reads `tab`'s page for the AI chat (title, visible text, selection;
     /// `snorkle_core::ai::PAGE_TEXT_JS`). `done` runs on the main thread.
     /// Save for Later: a JPEG thumbnail of what the tab's view shows now
     /// (its visible bounds, `THUMB_WIDTH` points wide at the screen's
-    /// scale, view modes included), or `None` without a live view or if
+    /// scale, as the view is drawn now: `saved::save` turns view modes off and
+    /// draws it light first), or `None` without a live view or if
     /// WebKit cannot draw it (e.g. a view that is not on screen).
     pub fn thumbnail(&mut self, tab: TabId, done: crate::ThumbDone) {
         let Some(v) = self.views.get(&tab) else {
@@ -1186,6 +1199,14 @@ const GLIDE_SECONDS: f64 = 0.25;
 
 /// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
 /// and the default canvas); otherwise the system's.
+fn set_light(web: &WKWebView) {
+    let color = UIColor::whiteColor();
+    web.setOpaque(false);
+    web.setBackgroundColor(Some(&color));
+    unsafe { web.scrollView() }.setBackgroundColor(Some(&color));
+    web.setOverrideUserInterfaceStyle(UIUserInterfaceStyle::Light);
+}
+
 fn set_dark(web: &WKWebView, dark: bool) {
     // Set the native canvas before navigation can create its first document.
     let color = if dark { UIColor::blackColor() } else { UIColor::systemBackgroundColor() };

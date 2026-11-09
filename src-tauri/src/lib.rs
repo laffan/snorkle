@@ -233,6 +233,11 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::IconsChanged => handle.emit_to(CHROME_LABEL, "icons", ()),
             ChromeEvent::Console(entry) => handle.emit_to(CHROME_LABEL, "console", entry),
             ChromeEvent::ConsoleReset => handle.emit_to(CHROME_LABEL, "console_reset", ()),
+            ChromeEvent::LaterProgress(tab, kind, percent) => handle.emit_to(
+                CHROME_LABEL,
+                "later_progress",
+                serde_json::json!({ "tab": tab, "kind": kind, "percent": percent }),
+            ),
             ChromeEvent::Downloads(list) => handle.emit_to(CHROME_LABEL, "downloads", list),
             ChromeEvent::DownloadPrompt { ask, tab, from } => handle.emit_to(
                 CHROME_LABEL,

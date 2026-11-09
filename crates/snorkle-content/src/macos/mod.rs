@@ -394,6 +394,18 @@ impl ContentHost {
         }
     }
 
+    /// Save for Later's thumbnail (2026-11-09): draws the tab's view in
+    /// light mode (`on`), whatever the app's appearance and dark pages
+    /// mode say, or as they say again.
+    pub fn force_light(&mut self, tab: TabId, on: bool) {
+        let Some(v) = self.views.get(&tab) else { return };
+        if on {
+            set_light(&v.web);
+        } else {
+            set_dark(&v.web, self.injections.view_for(tab).dark);
+        }
+    }
+
     /// Save for Later: a JPEG thumbnail of what the tab's view shows now
     /// (its visible bounds, `THUMB_WIDTH` points wide), or `None` without a
     /// live view or if WebKit cannot draw it.
@@ -959,6 +971,12 @@ const SPLIT_GAP: f64 = 8.0;
 
 /// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
 /// and the default canvas); otherwise the window's.
+fn set_light(web: &WKWebView) {
+    unsafe { web.setUnderPageBackgroundColor(Some(&NSColor::whiteColor())) };
+    let a = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua });
+    let _: () = unsafe { msg_send![web, setAppearance: a.as_deref()] };
+}
+
 fn set_dark(web: &WKWebView, dark: bool) {
     let color = if dark { NSColor::blackColor() } else { NSColor::windowBackgroundColor() };
     unsafe { web.setUnderPageBackgroundColor(Some(&color)) };

@@ -88,6 +88,9 @@ pub enum ChromeEvent<'a> {
     ImageMenu(TabId, Option<(&'a str, snorkle_core::selection::SelectionRect)>),
     /// Console entries were removed (cleared, or the private session ended).
     ConsoleReset,
+    /// Save for Later: how far saving a tab ("save") or adding pages to a
+    /// saved one ("add") is, in percent.
+    LaterProgress(TabId, &'static str, u8),
     /// The downloads list changed (started, progress, finished, removed).
     Downloads(&'a [DownloadItem]),
     /// A frame inside a tab's page wants to download a file: the user

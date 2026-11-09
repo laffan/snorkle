@@ -106,6 +106,7 @@
     renderOs();
     renderTabs();
     renderLauncherSelection();
+    renderLaterSelection();
     renderViewMode();
     renderToolbar(tab);
     renderSurface(tab);
@@ -154,7 +155,7 @@
 
   // Tabs that can join a same-site group: listed, and not in a split pair.
   function groupable(t) {
-    return t.sheet_over === null && t.launcher === null && !pairOf(t.id);
+    return t.sheet_over === null && t.launcher === null && !t.saved && !pairOf(t.id);
   }
 
   // The split pair holding a tab, if any.
@@ -226,7 +227,7 @@
   function renderTabs() {
     refreshTabIcons(false);
     const key = JSON.stringify([
-      state.tabs.map((t) => [t.id, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
+      state.tabs.map((t) => [t.id, !!t.saved, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
       state.active,
       state.splits,
       tabIcons.version,
@@ -240,9 +241,10 @@
     const byId = new Map(state.tabs.map((t) => [t.id, t]));
     const placed = new Set();
     for (const t of state.tabs) {
-      // Pop-up sheets are not tabs (their opener is shown as selected), and
-      // tabs that belong to a pin or bookmark are shown as that item.
-      if (placed.has(t.id) || t.sheet_over !== null || t.launcher !== null) continue;
+      // Pop-up sheets are not tabs (their opener is shown as selected),
+      // tabs that belong to a pin or bookmark are shown as that item, and a
+      // saved copy's tab only as its card in Save for Later.
+      if (placed.has(t.id) || t.sheet_over !== null || t.launcher !== null || t.saved) continue;
       const pair = pairOf(t.id);
       const list = t.private ? priv : normal;
       if (pair && byId.has(pair.left) && byId.has(pair.right)) {
@@ -529,7 +531,7 @@
   function saveForLater(tab) {
     if (savingTabs.has(tab)) return;
     savingTabs.add(tab);
-    toast('Saving for later…');
+    progressToast('Saving for later…', 0);
     T.core.invoke('save_for_later', { tab })
       .then(() => { toast('Saved for later.'); return loadLater(); })
       .catch((e) => toast(String(e)))
@@ -554,6 +556,7 @@
     list.replaceChildren();
     for (const it of laterItems) {
       const card = el('div', 'later-card');
+      card.dataset.item = it.id;
       card.setAttribute('role', 'listitem');
       const thumb = el('button', 'thumb');
       thumb.setAttribute('aria-label', `Open ${it.title || it.host}`);
@@ -594,9 +597,18 @@
       card.appendChild(acts);
       list.appendChild(card);
     }
+    renderLaterSelection();
   }
 
   $('later-btn').addEventListener('click', () => setLater(!laterOpen));
+
+  // The card whose saved copy is the shown tab is shown as selected.
+  function renderLaterSelection() {
+    const id = state && shownTab();
+    const t = state && state.tabs.find((x) => x.id === id);
+    const item = t && t.saved ? t.saved.item : null;
+    document.querySelectorAll('.later-card').forEach((c) => c.classList.toggle('active', c.dataset.item === item));
+  }
 
   // Adding pages ("+" on a saved page): its saved copy shows with scripts
   // off and each link tapped on the page is chosen (again: unchosen); Rust
@@ -618,6 +630,7 @@
   }
   $('pick-cancel').addEventListener('click', withTab((t) => invoke('cancel_adding_pages', { tab: t.id })));
   $('pick-add').addEventListener('click', withTab((t) => {
+    progressToast('Adding pages…', 0);
     T.core.invoke('finish_adding_pages', { tab: t.id })
       .then((n) => { toast(n ? `Added ${n} page${n === 1 ? '' : 's'}.` : 'No pages added.'); return loadLater(); })
       .catch((e) => toast(String(e)));
@@ -3434,9 +3447,31 @@
   document.addEventListener('securitypolicyviolation', (e) =>
     chromeLog('error', `CSP blocked ${e.blockedURI.slice(0, 40)} (${e.violatedDirective})`));
 
+  // A toast that stays while something runs, with how far it is (Save for
+  // Later: Rust's `later_progress` events). A plain toast replaces it.
+  function progressToast(label, percent) {
+    const p = Math.max(0, Math.min(100, Math.round(percent)));
+    const t = $('toast');
+    t.textContent = `${label} ${p}%`;
+    const bar = el('span', 'toast-bar');
+    bar.style.width = p + '%';
+    t.appendChild(bar);
+    t.classList.add('progress');
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; t.classList.remove('progress'); reportLayout(); }, 120000);
+    reportLayout();
+  }
+  T.event.listen('later_progress', (e) => {
+    const { kind, percent } = e.payload || {};
+    if (percent >= 100) return; // the command's own toast follows
+    progressToast(kind === 'add' ? 'Adding pages…' : 'Saving for later…', percent);
+  });
+
   function toast(msg) {
     chromeLog('info', 'toast: ' + msg);
     const t = $('toast');
+    t.classList.remove('progress');
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toastTimer);
@@ -3486,7 +3521,7 @@
     if (state) {
       for (const t of state.tabs) {
         // Empty tabs (this one included) are not worth switching to.
-        if (t.sheet_over !== null || t.launcher !== null || !t.url) continue;
+        if (t.sheet_over !== null || t.launcher !== null || t.saved || !t.url) continue;
         out.push({ kind: t.private ? 'Private' : 'Tab', title: t.name || t.title || t.url.registrable, host: t.url.registrable, run: (here) => leaveStart(here, invoke('activate_tab', { tab: t.id })) });
       }
     }

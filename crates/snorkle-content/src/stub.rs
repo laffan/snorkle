@@ -98,6 +98,8 @@ impl ContentHost {
         done(None);
     }
 
+    pub fn force_light(&mut self, _tab: TabId, _on: bool) {}
+
     pub fn load_archive(&mut self, _tab: TabId, _url: &url::Url, _data: Vec<u8>, _scripts: bool) {}
 
     pub fn image_result(

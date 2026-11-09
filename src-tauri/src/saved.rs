@@ -19,15 +19,17 @@
 //! open from the archive (`Browser::show_saved_copy`,
 //! `Effect::OpenSavedPage`).
 
+use std::collections::BTreeSet;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use snorkle_core::later::{self, PageCapture};
 use snorkle_core::tabs::{Profile, SavedCopy, TabId};
+use snorkle_core::viewmodes::Kind;
 use snorkle_core::webarchive;
 use snorkle_core::Url;
 
-use crate::state::{now_ms, with_host, Shared};
+use crate::state::{now_ms, with_host, ChromeEvent, Shared};
 
 /// Largest WebKit archive read (its subresources and the live document).
 const MAX_WEBKIT_ARCHIVE: usize = 96 * 1024 * 1024;
@@ -76,9 +78,11 @@ fn webkit_archive(tab: TabId) -> Option<Vec<u8>> {
 
 /// Captures the page `tab` shows, as page `page_url` (blocking: call it
 /// off the main thread). `None` when the tab has no live page to read.
-pub fn capture(tab: TabId, page_url: &str, fallback_title: &str) -> Option<PageCapture> {
+/// `progress` gets how far it is, 0–100.
+pub fn capture(tab: TabId, page_url: &str, fallback_title: &str, progress: &dyn Fn(u8)) -> Option<PageCapture> {
     let started = Instant::now();
     let wk = webkit_archive(tab);
+    progress(15);
     let (wk_main, mut resources) = match wk.as_deref() {
         Some(bytes) => (webarchive::read_main(bytes), webarchive::read_subresources(bytes).unwrap_or_default()),
         None => (None, Vec::new()),
@@ -86,6 +90,7 @@ pub fn capture(tab: TabId, page_url: &str, fallback_title: &str) -> Option<PageC
     drop(wk);
     let report = run_js(tab, later::CAPTURE_START_JS.to_string(), later::MAX_START_BYTES, Duration::from_secs(30))
         .and_then(|t| later::parse_start(&t));
+    progress(25);
     if let Some(report) = &report {
         let have: std::collections::HashSet<String> =
             resources.iter().filter_map(|r| later::clean_url(&r.url)).map(|u| u.to_string()).collect();
@@ -96,10 +101,12 @@ pub fn capture(tab: TabId, page_url: &str, fallback_title: &str) -> Option<PageC
             .filter(|(_, u)| u.as_ref().is_some_and(|u| !have.contains(u.as_str())))
             .map(|(i, _)| i)
             .collect();
-        'fetch: for chunk in wanted.chunks(FETCH_BATCH) {
+        let rounds = wanted.len().div_ceil(FETCH_BATCH).max(1);
+        'fetch: for (n, chunk) in wanted.chunks(FETCH_BATCH).enumerate() {
             if started.elapsed() > CAPTURE_BUDGET {
                 break;
             }
+            progress((25 + 70 * n / rounds) as u8);
             run_js(tab, later::fetch_js(chunk), 64, Duration::from_secs(45));
             loop {
                 let Some(text) =
@@ -116,6 +123,7 @@ pub fn capture(tab: TabId, page_url: &str, fallback_title: &str) -> Option<PageC
         }
         run_js(tab, later::END_JS.to_string(), 64, Duration::from_secs(5));
     }
+    progress(100);
     // The server's HTML runs its scripts as it did online; WebKit's copy of
     // the live document (when the HTML could not be fetched again) already
     // ran them and is shown with JavaScript off.
@@ -132,6 +140,94 @@ pub fn capture(tab: TabId, page_url: &str, fallback_title: &str) -> Option<PageC
     Some(PageCapture { url: page_url.to_string(), title, html, scripts, resources })
 }
 
+/// Save for Later (blocking): a thumbnail of the tab's page in light mode,
+/// with images and in full colour (owner request 2026-11-09: the tab's view
+/// modes are turned off for it and its view drawn light first), the
+/// archive when the tab has a live page (`live`), then the item is stored
+/// and the tab closed. The chrome is told how far it is
+/// (`ChromeEvent::LaterProgress`). If storing fails, the tab gets its view
+/// modes back.
+pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool) -> Result<(), String> {
+    let store = shared.store.clone().ok_or("Saving is not available.")?;
+    let report = |p: u8| (shared.emit)(ChromeEvent::LaterProgress(tab, "save", p.min(100)));
+    report(1);
+    let modes = live.then(|| plain_view(shared, tab));
+    report(8);
+    let thumb = thumbnail(tab);
+    report(12);
+    let capture =
+        if live { capture(tab, url.as_str(), title, &|p| report(12 + (p as u32 * 84 / 100) as u8)) } else { None };
+    let added = store.later().add(url.as_str(), title, thumb.as_deref(), capture, wall_ms());
+    match added {
+        Ok(Some(_)) => {}
+        failed => {
+            if let Some(before) = modes {
+                restore_view(shared, tab, before);
+            }
+            return Err(match failed {
+                Err(e) => e.to_string(),
+                _ => "This page can't be saved.".into(),
+            });
+        }
+    }
+    report(100);
+    let effects = shared.browser().close(tab, now_ms());
+    shared.run(effects);
+    Ok(())
+}
+
+fn wall_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// Turns the tab's view modes off (black and white, hidden media, dark)
+/// and draws its view in light mode, then waits for the page to show its
+/// images. Returns the tab's exemptions before.
+fn plain_view(shared: &Arc<Shared>, tab: TabId) -> BTreeSet<Kind> {
+    let before = shared.exempt().get(&tab).cloned().unwrap_or_default();
+    let mut all = before.clone();
+    all.extend([Kind::Desaturate, Kind::HideMedia, Kind::Dark]);
+    set_exempt(shared, tab, all);
+    snorkle_content::dispatch_main(move || with_host(|h| h.force_light(tab, true)));
+    // Hidden images fade in (0.3 s) and CSS background images start
+    // loading only now.
+    std::thread::sleep(Duration::from_millis(1500));
+    before
+}
+
+fn restore_view(shared: &Arc<Shared>, tab: TabId, before: BTreeSet<Kind>) {
+    set_exempt(shared, tab, before);
+    snorkle_content::dispatch_main(move || with_host(|h| h.force_light(tab, false)));
+}
+
+fn set_exempt(shared: &Arc<Shared>, tab: TabId, set: BTreeSet<Kind>) {
+    let kinds: Vec<Kind> = set.iter().copied().collect();
+    if set.is_empty() {
+        shared.exempt().remove(&tab);
+    } else {
+        shared.exempt().insert(tab, set);
+    }
+    let effects = shared.browser().set_view_exempt(tab, &kinds);
+    shared.run(effects);
+    crate::scripts::apply(shared, true);
+}
+
+fn thumbnail(tab: TabId) -> Option<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        let tx2 = tx.clone();
+        let mut ran = false;
+        with_host(|h| {
+            ran = true;
+            h.thumbnail(tab, Box::new(move |jpeg| drop(tx.send(jpeg))));
+        });
+        if !ran {
+            let _ = tx2.send(None);
+        }
+    });
+    wait(rx, Duration::from_secs(3)).flatten()
+}
+
 /// Shows page `page` (the first page when `None`) of saved item `item` in
 /// `tab`, or in a new tab when `tab` is `None` (blocking: reads the
 /// archive). With `picking`, the page is shown with JavaScript off and link
@@ -145,16 +241,27 @@ pub fn show(
 ) -> Result<TabId, String> {
     let store = shared.store.clone().ok_or("Saving is not available.")?;
     let open = store.later().archive(item, page).ok_or("This page has no saved copy.")?;
-    let tab = match tab {
-        Some(t) => {
-            let b = shared.browser();
-            let ok = b.tab(t).is_some_and(|t| !t.is_private());
-            if !ok {
+    // A saved copy has its own tab (never an ordinary one): opening the
+    // item again returns to it.
+    let existing = shared.browser().saved_tab(item);
+    let tab = match (tab, existing) {
+        (Some(t), _) => {
+            if shared.browser().saved_copy(t).is_none_or(|c| c.item != item) {
                 return Err("That tab is gone.".into());
             }
             t
         }
-        None => {
+        (None, Some(t)) if !picking => {
+            let effects = shared.browser().activate(t, now_ms());
+            shared.run(effects);
+            return Ok(t);
+        }
+        (None, Some(t)) => {
+            let effects = shared.browser().activate(t, now_ms());
+            shared.run(effects);
+            t
+        }
+        (None, None) => {
             let (t, effects) = shared.browser().new_tab(Profile::Default, now_ms());
             shared.run(effects);
             t
@@ -167,6 +274,7 @@ pub fn show(
         saved_ms: open.saved_ms,
         committed: false,
         picking: picking.then(Vec::new),
+        adding: false,
     };
     let effects = shared.browser().show_saved_copy(tab, copy);
     shared.run(effects);
@@ -194,8 +302,13 @@ pub fn add_pages(shared: &Arc<Shared>, tab: TabId, item: &str, links: Vec<Url>) 
     let store = shared.store.clone().ok_or("Saving is not available.")?;
     let total = links.len();
     let mut captures = Vec::new();
+    shared.browser().set_adding(tab, true);
+    let report = |done: usize, p: u8| {
+        let overall = (done * 100 + p as usize) / total.max(1);
+        (shared.emit)(ChromeEvent::LaterProgress(tab, "add", overall.min(99) as u8));
+    };
     for (i, link) in links.into_iter().enumerate() {
-        shared.toast(&format!("Adding page {} of {total}…", i + 1));
+        report(i, 0);
         let effects = shared.browser().navigate_trusted(tab, link.clone(), now_ms());
         shared.run(effects);
         if !wait_loaded(shared, tab, Duration::from_secs(40)) {
@@ -204,14 +317,16 @@ pub fn add_pages(shared: &Arc<Shared>, tab: TabId, item: &str, links: Vec<Url>) 
         // Lazy content and data requests settle after the load event.
         std::thread::sleep(Duration::from_millis(1500));
         let title = shared.browser().tab(tab).map(|t| t.title.clone()).unwrap_or_default();
-        if let Some(c) = capture(tab, link.as_str(), &title) {
+        if let Some(c) = capture(tab, link.as_str(), &title, &|p| report(i, 30 + p * 70 / 100)) {
             captures.push(c);
         }
     }
     let added = captures.len();
-    if added > 0 {
-        store.later().add_pages(item, captures).map_err(|e| e.to_string())?;
-    }
+    let stored =
+        if added > 0 { store.later().add_pages(item, captures).map(|_| ()).map_err(|e| e.to_string()) } else { Ok(()) };
+    shared.browser().set_adding(tab, false);
+    (shared.emit)(ChromeEvent::LaterProgress(tab, "add", 100));
+    stored?;
     show(shared, Some(tab), item, None, false)?;
     Ok(added)
 }
