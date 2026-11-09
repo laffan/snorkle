@@ -598,25 +598,54 @@ pub fn clean_word(input: &str) -> Option<String> {
 const DEFINE_SYSTEM: &str = "You are the dictionary in Snorkle, a web browser. The user typed a single \
 word into a new tab and asked for its definition. Answer like a concise dictionary entry in plain text \
 (no Markdown tables or headings): the word with its pronunciation if useful, then each common sense \
-numbered, with its part of speech and a short example, then a one-line origin if it is known. If the \
-word is misspelt, say which word you think was meant and define that one. If it is not a word you know, \
-say so. The user may then ask follow-up questions about the word.";
+numbered, with its part of speech and a short example, then a one-line origin if it is known. If it is \
+not a word you know, say so. The user may then ask follow-up questions about the word.";
+
+/// Added to [`DEFINE_SYSTEM`] for the first request of a Define (owner
+/// request 2026-11-09): a likely misspelling is answered with only the
+/// word meant, so the chrome can ask before defining anything.
+const DEFINE_SPELLING: &str = "Before defining: if the word looks misspelt (it is not a real word, or \
+it is a rare word that is almost certainly a typo for a common one), reply with exactly one line \
+`SPELLING: <the word you think was meant>` and nothing else. Otherwise define it.";
+
+/// Added instead when the user confirmed which word to define.
+const DEFINE_EXACT: &str = "The user confirmed this spelling: define the word exactly as given, \
+without suggesting another spelling.";
 
 /// A chat about the definition of `word` (already [`clean_word`]ed):
-/// no page is read or sent. `messages` as for [`chat_request`].
+/// no page is read or sent. `messages` as for [`chat_request`]. With
+/// `check_spelling`, the model is asked to answer a likely misspelling with
+/// only the word it thinks was meant ([`parse_spelling`]).
 pub fn define_request(
     p: Provider,
     key: &str,
     model: &str,
     word: &str,
     messages: &[ChatMessage],
+    check_spelling: bool,
 ) -> Result<HttpRequest, String> {
     let model = validate_model(model)?;
     let word = clean_word(word).ok_or("Define takes a single word.")?;
     let recent = recent_turns(messages)?;
-    let system = format!("{DEFINE_SYSTEM}\n\nWord: {}", json!(word));
+    let extra = if check_spelling { DEFINE_SPELLING } else { DEFINE_EXACT };
+    let system = format!("{DEFINE_SYSTEM} {extra}\n\nWord: {}", json!(word));
     let turns: Vec<(ChatRole, &str)> = recent.iter().map(|(r, t)| (*r, t.as_str())).collect();
     Ok(messages_request(p, key, &model, &system, &turns, 4000))
+}
+
+/// The word a spelling-check reply suggests instead of `asked`: the reply
+/// is one line `SPELLING: <word>` (backticks and quotes around it allowed)
+/// naming a different, valid word ([`clean_word`]). `None` for anything
+/// else, which is then a definition.
+pub fn parse_spelling(reply: &str, asked: &str) -> Option<String> {
+    let line = reply.trim().trim_matches('`').trim();
+    if line.contains('\n') {
+        return None;
+    }
+    let rest = line.strip_prefix("SPELLING:").or_else(|| line.strip_prefix("Spelling:"))?;
+    let quotes: &[char] = &['`', '"', '\'', '\u{201c}', '\u{201d}', '\u{2018}', '\u{2019}', '*', '.'];
+    let word = clean_word(rest.trim().trim_matches(quotes))?;
+    (word.to_lowercase() != asked.trim().to_lowercase()).then_some(word)
 }
 
 /// Explicit capabilities only: unknown models keep the provider default.
@@ -1010,17 +1039,27 @@ mod tests {
             assert!(clean_word(bad).is_none(), "{bad:?}");
         }
         let convo = [ChatMessage { role: ChatRole::User, text: "Define “ennui”.".into() }];
-        let r = define_request(Provider::Anthropic, "k", "claude-sonnet-5-5", "ennui", &convo).unwrap();
+        let r = define_request(Provider::Anthropic, "k", "claude-sonnet-5-5", "ennui", &convo, true).unwrap();
         let body: Value = serde_json::from_slice(r.body.as_ref().unwrap()).unwrap();
         let system = body["system"].as_str().unwrap();
         assert!(system.contains("dictionary") && system.ends_with("Word: \"ennui\""));
+        assert!(system.contains("SPELLING:"), "first request checks the spelling");
+        let r = define_request(Provider::Anthropic, "k", "claude-sonnet-5-5", "ennui", &convo, false).unwrap();
+        let body: Value = serde_json::from_slice(r.body.as_ref().unwrap()).unwrap();
+        assert!(!body["system"].as_str().unwrap().contains("SPELLING:"), "confirmed words are defined as given");
         assert!(!system.contains("Page:"), "no page is sent");
         assert_eq!(body["messages"].as_array().unwrap().len(), 1);
-        let r = define_request(Provider::OpenAi, "k", "gpt-5.1", "ennui", &convo).unwrap();
+        let r = define_request(Provider::OpenAi, "k", "gpt-5.1", "ennui", &convo, false).unwrap();
         let body: Value = serde_json::from_slice(r.body.as_ref().unwrap()).unwrap();
         assert!(body["instructions"].as_str().unwrap().contains("dictionary"));
-        assert!(define_request(Provider::OpenAi, "k", "gpt-5.1", "two words", &convo).is_err());
-        assert!(define_request(Provider::OpenAi, "k", "gpt-5.1", "ennui", &[]).is_err(), "must end with the user");
+        assert!(define_request(Provider::OpenAi, "k", "gpt-5.1", "two words", &convo, true).is_err());
+        assert!(define_request(Provider::OpenAi, "k", "gpt-5.1", "ennui", &[], true).is_err(), "must end with the user");
+        assert_eq!(parse_spelling("SPELLING: receive", "recieve").as_deref(), Some("receive"));
+        assert_eq!(parse_spelling("`SPELLING: “receive”`", "recieve").as_deref(), Some("receive"));
+        assert_eq!(parse_spelling("SPELLING: Recieve", "recieve"), None, "the same word is no suggestion");
+        assert_eq!(parse_spelling("SPELLING: two words", "x"), None);
+        assert_eq!(parse_spelling("receive /rɪˈsiːv/\n1. verb …", "receive"), None, "a definition");
+        assert_eq!(parse_spelling("SPELLING: receive\nreceive (verb)…", "recieve"), None, "only one line");
     }
 
     #[test]

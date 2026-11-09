@@ -31,5 +31,6 @@ pub mod text;
 pub mod url_display;
 pub mod userscripts;
 pub mod viewmodes;
+pub mod webarchive;
 
 pub use url::Url;

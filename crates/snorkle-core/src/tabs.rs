@@ -177,6 +177,35 @@ pub struct Tab {
     /// tab has no back history of its own, Back loads that page (WebKit
     /// cannot give a new web view another view's history). Memory only.
     pub back_to: Option<Url>,
+    /// The user's own name for the tab (the Edit dialog, 2026-11-09),
+    /// shown instead of the page's title; saved with the session.
+    pub name: Option<String>,
+    /// An emoji shown instead of the tab's favicon (the Edit dialog);
+    /// saved with the session.
+    pub emoji: Option<String>,
+    /// The tab shows (or is about to show) a Save for Later archive.
+    pub saved: Option<SavedCopy>,
+}
+
+/// A Save for Later archive shown in a tab (2026-11-09): which saved item,
+/// which of its pages, and the links chosen while adding pages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedCopy {
+    /// The saved item's id (`later::valid_id`).
+    pub item: String,
+    /// The page shown (no fragment).
+    pub page: Url,
+    /// Every page the archive holds (no fragments); links to them open
+    /// them from the archive.
+    pub pages: Vec<Url>,
+    /// When the item was saved (Unix ms).
+    pub saved_ms: u64,
+    /// Whether its load has committed (until then the next provisional
+    /// start is its own).
+    pub committed: bool,
+    /// Adding pages: the links chosen so far (`None` when not choosing).
+    /// While choosing, link taps choose instead of navigating.
+    pub picking: Option<Vec<Url>>,
 }
 
 /// An offline copy in a tab: when it was saved, and whether its load has
@@ -186,6 +215,9 @@ pub struct OfflineCopy {
     pub saved_ms: u64,
     pub committed: bool,
 }
+
+/// Longest tab name the Edit dialog keeps (characters).
+pub const MAX_TAB_NAME_CHARS: usize = 300;
 
 /// Page scale levels, in percent (the steps of the ⋯ menu's − and +).
 pub const ZOOM_LEVELS: [u16; 9] = [50, 67, 75, 80, 90, 100, 110, 125, 150];
@@ -248,6 +280,9 @@ impl Tab {
             landing: None,
             back_to: None,
             launcher: None,
+            name: None,
+            emoji: None,
+            saved: None,
         }
     }
 

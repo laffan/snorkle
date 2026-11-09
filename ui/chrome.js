@@ -22,6 +22,8 @@
   if (macOS) document.documentElement.classList.add('macos');
 
   let state = null;
+  // Define cards on start pages, by tab (see defineWord).
+  const defines = new Map();
   let editing = false;
   let consoleOpen = false;
   // ⋯ → Attach URL Bar (remembered): the address bar is a full-width bar
@@ -213,13 +215,18 @@
     return fallback();
   }
   function tabIcon(t) {
+    if (t.emoji) return emojiIcon(t.emoji);
     return rowIcon(t.url && t.url.full, t.url, tabIcons.hosts.get(t.id));
+  }
+  // The user's emoji (the Edit dialog) in place of a row's favicon.
+  function emojiIcon(e) {
+    return el('span', 'tab-icon emoji-icon', e);
   }
 
   function renderTabs() {
     refreshTabIcons(false);
     const key = JSON.stringify([
-      state.tabs.map((t) => [t.id, t.title, t.private, t.live, t.url && t.url.registrable, t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
+      state.tabs.map((t) => [t.id, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
       state.active,
       state.splits,
       tabIcons.version,
@@ -317,7 +324,7 @@
     node.appendChild(tabIcon(t));
     // One line: the page's title (its site until it has one).
     const open = el('button', 'open');
-    open.appendChild(el('span', 't', t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
+    open.appendChild(el('span', 't', t.name || t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
     if (t.url) open.title = t.url.registrable;
     open.addEventListener('click', () => {
       if (suppressClick) return;
@@ -342,11 +349,11 @@
     acts.appendChild(close);
     node.appendChild(acts);
     node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'tab', id: t.id, private: t.private, paired: !!pair }));
-    // Right-click: the item menu, with Copy URL (tabs with a page only).
+    // Right-click: the item menu (Copy URL, Edit…).
     node.addEventListener('contextmenu', (ev) => {
       ev.preventDefault();
       cancelPending();
-      if (t.url) openPinPop({ url: t.url.full, id: t.id }, node, 'tab');
+      openPinPop({ url: t.url ? t.url.full : '', id: t.id }, node, 'tab');
     });
     return node;
   }
@@ -371,6 +378,10 @@
     renderZoom(tab);
     $('private-pill').hidden = !(tab && tab.private);
     // A pin's or bookmark's saved copy, shown because the network failed.
+    const saved = $('saved-pill');
+    saved.hidden = !(tab && tab.saved);
+    if (!saved.hidden) saved.title = `Saved for later on ${new Date(tab.saved.saved_ms).toLocaleString()}; works offline. Links to pages it holds open from it.`;
+    renderPickBar(tab);
     const offline = $('offline-pill');
     offline.hidden = !(tab && tab.offline_saved_ms);
     if (!offline.hidden) offline.title = `No connection: this is the copy saved ${new Date(tab.offline_saved_ms).toLocaleString()}. Scripts are off. Reload to try the live page.`;
@@ -403,6 +414,7 @@
     if (!$('start').hidden) renderStart(tab);
     else startTab = null;
     startShown = !$('start').hidden;
+    renderDefine();
   }
 
   function renderNotice(tab, n) {
@@ -488,6 +500,7 @@
   const TRAY_IN = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11M8 10l4 4 4-4';
   const TRAY_OUT = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3M8 7l4-4 4 4';
   const RIBBON = 'M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z';
+  const PLUS = 'M12 5v14M5 12h14';
   function svgIcon(d) {
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
@@ -510,10 +523,17 @@
     return T.core.invoke('list_later').then((items) => { laterItems = items || []; renderLater(); }).catch(() => {});
   }
 
+  // Saving reads the page into an archive first (Rust: `saved::capture`),
+  // which can take a few seconds on a large page; the tab closes after.
+  const savingTabs = new Set();
   function saveForLater(tab) {
+    if (savingTabs.has(tab)) return;
+    savingTabs.add(tab);
+    toast('Saving for later…');
     T.core.invoke('save_for_later', { tab })
       .then(() => { toast('Saved for later.'); return loadLater(); })
-      .catch((e) => toast(String(e)));
+      .catch((e) => toast(String(e)))
+      .finally(() => savingTabs.delete(tab));
   }
 
   function setLater(open) {
@@ -545,12 +565,18 @@
       } else {
         thumb.appendChild(el('span', 'letter', (it.host || '?').charAt(0).toUpperCase()));
       }
-      // The thumbnail itself recovers the page too.
-      thumb.addEventListener('click', () => laterAction('restore_later', it.id, () => { if (narrow) setSidebar(false); }));
+      // The thumbnail opens the saved copy (offline; it stays in the list),
+      // or the live page when there is none.
+      thumb.addEventListener('click', () => {
+        if (it.pages) invoke('open_later', { id: it.id }).then(() => { if (narrow) setSidebar(false); });
+        else laterAction('restore_later', it.id, () => { if (narrow) setSidebar(false); });
+      });
+      thumb.title = it.pages ? 'Open the saved copy' : 'Open the page';
       card.appendChild(thumb);
       const title = el('div', 't', it.title || it.host);
       title.title = it.host;
       card.appendChild(title);
+      if (it.pages > 1) card.appendChild(el('div', 'pages', `${it.pages} pages`));
       const acts = el('div', 'later-actions');
       const btn = (d, label, run) => {
         const b = el('button');
@@ -560,7 +586,9 @@
         b.addEventListener('click', (ev) => { ev.stopPropagation(); run(); });
         acts.appendChild(b);
       };
-      btn(TRAY_OUT, 'Recover', () => laterAction('restore_later', it.id, () => { if (narrow) setSidebar(false); }));
+      btn(TRAY_OUT, 'Recover (open the live page)', () => laterAction('restore_later', it.id, () => { if (narrow) setSidebar(false); }));
+      // "+": add pages to the saved copy by tapping links in it.
+      if (it.pages) btn(PLUS, 'Add pages', () => invoke('add_later_pages', { id: it.id }).then(() => { if (narrow) setSidebar(false); }));
       btn(RIBBON, 'Bookmark', () => laterAction('bookmark_later', it.id, () => { loadBookmarks(); toast('Bookmarked.'); }));
       btn(null, 'Delete', () => laterAction('delete_later', it.id));
       card.appendChild(acts);
@@ -569,6 +597,31 @@
   }
 
   $('later-btn').addEventListener('click', () => setLater(!laterOpen));
+
+  // Adding pages ("+" on a saved page): its saved copy shows with scripts
+  // off and each link tapped on the page is chosen (again: unchosen); Rust
+  // keeps the choice (`Browser::saved_copy_navigation`). Add loads each
+  // chosen page and saves it into the same copy.
+  let pickKey = '';
+  function renderPickBar(tab) {
+    const picking = tab && tab.saved && tab.saved.picking;
+    const bar = $('pick-bar');
+    const key = picking ? JSON.stringify(picking) : '';
+    if (!picking) { if (!bar.hidden) { bar.hidden = true; pickKey = ''; reportLayout(); } return; }
+    if (key === pickKey && !bar.hidden) return;
+    pickKey = key;
+    const n = picking.length;
+    $('pick-text').textContent = n ? `${n} page${n === 1 ? '' : 's'} chosen: ${picking.slice(0, 3).join(', ')}${n > 3 ? '…' : ''}` : 'Tap links on this page to add their pages.';
+    $('pick-text').title = picking.join('\n');
+    $('pick-add').textContent = n ? `Add ${n} Page${n === 1 ? '' : 's'}` : 'Done';
+    if (bar.hidden) { bar.hidden = false; reportLayout(); }
+  }
+  $('pick-cancel').addEventListener('click', withTab((t) => invoke('cancel_adding_pages', { tab: t.id })));
+  $('pick-add').addEventListener('click', withTab((t) => {
+    T.core.invoke('finish_adding_pages', { tab: t.id })
+      .then((n) => { toast(n ? `Added ${n} page${n === 1 ? '' : 's'}.` : 'No pages added.'); return loadLater(); })
+      .catch((e) => toast(String(e)));
+  }));
 
   // ---- start page (a new tab) ----------------------------------------------
   //
@@ -1043,10 +1096,10 @@
     if (state) renderLauncherSelection();
   }
 
-  // Pin and bookmark menu (right-click or ⌘-click): Return to Original
-  // URL, Edit Bookmark (Edit URL for pins); for pins also Return to Bookmark
-  // and Use Emoji for Icon.
-  // Placed under the item, inside the sidebar.
+  // Item menu (right-click or ⌘-click on a pin or bookmark, right-click on
+  // a tab): Copy URL and Edit… for all three; Return to Original URL for
+  // pins and bookmarks; Return to Bookmark for pins. Placed under the item,
+  // inside the sidebar.
   let pinMenu = null; // the pin, bookmark or tab, plus { kind: 'pin' | 'bookmark' | 'tab' }
   function openPinPop(p, node, kind = 'pin') {
     closeMenu();
@@ -1056,20 +1109,13 @@
     pop.style.top = Math.round(node.getBoundingClientRect().bottom - side.top + 6) + 'px';
     for (const e of pop.querySelectorAll('.pin-only')) e.hidden = kind !== 'pin';
     for (const e of pop.querySelectorAll('.item-only')) e.hidden = kind === 'tab';
-    $('item-edit').textContent = kind === 'bookmark' ? 'Edit Bookmark…' : 'Edit URL…';
-    $('pin-emoji-form').hidden = true;
-    $('pin-emoji-hint').hidden = true;
-    $('item-url-form').hidden = true;
-    $('pin-emoji-clear').hidden = kind !== 'pin' || !p.emoji;
+    $('item-copy').hidden = kind === 'tab' && !p.url;
     pop.hidden = false;
     syncMenuOpen();
   }
   function closePinPop() {
     if ($('pin-pop').hidden) return;
     $('pin-pop').hidden = true;
-    $('pin-emoji-input').blur();
-    $('item-url-input').blur();
-    $('item-title-input').blur();
     pinMenu = null;
     syncMenuOpen();
   }
@@ -1083,7 +1129,7 @@
   $('item-copy').addEventListener('click', () => {
     const p = pinMenu;
     closePinPop();
-    if (!p) return;
+    if (!p || !p.url) return;
     navigator.clipboard.writeText(itemPageUrl(p)).then(() => toast('Address copied.'), () => toast('Could not copy (clipboard unavailable).'));
   });
   // Back to the address the item was saved with, in its own tab.
@@ -1093,54 +1139,119 @@
     if (p) openLink(p.url, true);
   });
   $('item-edit').addEventListener('click', () => {
-    $('item-edit').hidden = true;
-    $('item-url-form').hidden = false;
-    const input = $('item-url-input');
-    input.value = pinMenu ? pinMenu.url : '';
-    const bookmark = pinMenu && pinMenu.kind === 'bookmark';
-    $('item-title-field').hidden = !bookmark;
-    $('item-title-input').value = pinMenu ? pinMenu.title || '' : '';
-    focusInput(bookmark ? $('item-title-input') : input, true);
-  });
-  $('item-url-form').addEventListener('submit', (ev) => {
-    ev.preventDefault();
     const p = pinMenu;
-    const value = $('item-url-input').value.trim();
-    if (!p || !value) return;
-    const title = p.kind === 'bookmark' ? $('item-title-input').value.trim() : null;
-    T.core.invoke('edit_item_url', { url: p.url, newUrl: value, title }).then(() => {
-      closePinPop();
-      return Promise.all([loadPins(), loadBookmarks()]);
-    }).catch((e) => toast(String(e)));
+    closePinPop();
+    if (p) openEdit(p);
   });
   $('pin-to-bookmark').addEventListener('click', () => {
     const p = pinMenu;
     closePinPop();
     if (p) invoke('unpin', { url: p.url, bookmarkIndex: 0 }).then(() => Promise.all([loadPins(), loadBookmarks()]));
   });
-  $('pin-emoji').addEventListener('click', () => {
-    $('pin-emoji').hidden = true;
-    $('pin-emoji-form').hidden = false;
-    $('pin-emoji-hint').hidden = false;
-    const input = $('pin-emoji-input');
-    input.value = (pinMenu && pinMenu.emoji) || '';
-    focusInput(input, true);
-  });
-  $('pin-emoji-form').addEventListener('submit', (ev) => {
+
+  // ---- Edit (owner request 2026-11-09) -----------------------------------
+  //
+  // One dialog for tabs, pins and bookmarks: title, URL and an emoji shown
+  // instead of the favicon. Tabs: the title is the tab's own name (empty
+  // follows the page's title), a changed URL loads in the tab like the
+  // address bar, and name and emoji are kept with the tab (Rust:
+  // `set_tab_label`). Pins and bookmarks: `edit_item_url` (title and URL,
+  // validated in Rust) and `set_pin_emoji`. The emoji is typed (emoji
+  // keyboard or the system picker) or picked from the grid; the grid does
+  // not depend on the system picker, which did not fill the field on the
+  // iPad when the field sat in the sidebar's menu.
+  const EMOJI = ['⭐', '📌', '🔖', '📚', '📰', '📝', '📅', '📧', '💬', '🎵', '🎬', '📷', '🛒', '💰', '🏦', '📈',
+    '🧭', '🗺️', '✈️', '🏠', '🍳', '☕', '🎮', '⚽', '🧪', '💡', '🔧', '💻', '🤖', '🔒', '❤️', '🔥',
+    '✅', '🚀', '🌱', '🐱', '🐶', '🎓', '🏥', '⚖️'];
+  let editItem = null; // { kind, url, title, emoji, id, name }
+
+  function openEdit(p) {
+    closeMenu();
+    let item;
+    if (p.kind === 'tab') {
+      const t = state && state.tabs.find((x) => x.id === p.id);
+      if (!t) return;
+      item = { kind: 'tab', id: t.id, url: t.url ? t.url.full : '', title: t.name || '', placeholder: t.title || (t.url ? t.url.registrable : 'New Tab'), emoji: t.emoji || '' };
+    } else {
+      item = { kind: p.kind, url: p.url, title: p.title || '', placeholder: p.display ? p.display.registrable : '', emoji: p.emoji || '' };
+    }
+    editItem = item;
+    $('edit-title').textContent = item.kind === 'tab' ? 'Edit Tab' : item.kind === 'pin' ? 'Edit Pin' : 'Edit Bookmark';
+    $('edit-name').value = item.title;
+    $('edit-name').placeholder = item.placeholder;
+    $('edit-url').value = item.url;
+    $('edit-url').placeholder = item.kind === 'tab' ? 'Search or enter address' : 'Web address';
+    $('edit-emoji').value = item.emoji;
+    $('edit-msg').textContent = '';
+    renderEmojiGrid();
+    $('edit-modal').hidden = false;
+    document.body.classList.add('edit-open');
+    reportLayout();
+    focusInput($('edit-name'), true);
+  }
+
+  function closeEdit() {
+    if ($('edit-modal').hidden) return;
+    $('edit-modal').hidden = true;
+    document.body.classList.remove('edit-open');
+    for (const id of ['edit-name', 'edit-url', 'edit-emoji']) $(id).blur();
+    editItem = null;
+    reportLayout();
+  }
+
+  function renderEmojiGrid() {
+    const grid = $('emoji-grid');
+    const current = $('edit-emoji').value.trim();
+    if (!grid.childElementCount) {
+      for (const e of EMOJI) {
+        const b = el('button', null, e);
+        b.type = 'button';
+        b.dataset.emoji = e;
+        b.setAttribute('aria-label', e);
+        // Keep the focus (and any open keyboard) where it is.
+        b.addEventListener('pointerdown', (ev) => ev.preventDefault());
+        b.addEventListener('click', () => {
+          $('edit-emoji').value = $('edit-emoji').value.trim() === e ? '' : e;
+          renderEmojiGrid();
+        });
+        grid.appendChild(b);
+      }
+    }
+    for (const b of grid.children) b.setAttribute('aria-pressed', String(b.dataset.emoji === current));
+  }
+  $('edit-emoji').addEventListener('input', renderEmojiGrid);
+  $('edit-emoji-clear').addEventListener('click', () => { $('edit-emoji').value = ''; renderEmojiGrid(); });
+  $('edit-cancel').addEventListener('click', closeEdit);
+  $('edit-modal').addEventListener('pointerdown', (ev) => { if (ev.target === $('edit-modal')) closeEdit(); });
+
+  $('edit-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const p = pinMenu;
-    const emoji = $('pin-emoji-input').value.trim();
-    if (!p || !emoji) return;
-    T.core.invoke('set_pin_emoji', { url: p.url, emoji }).then((ok) => {
-      if (!ok) { toast('Use one emoji (no spaces).'); return; }
-      closePinPop();
-      loadPins();
-    }).catch((e) => toast(String(e)));
-  });
-  $('pin-emoji-clear').addEventListener('click', () => {
-    const p = pinMenu;
-    closePinPop();
-    if (p) invoke('set_pin_emoji', { url: p.url, emoji: null }).then(loadPins);
+    const item = editItem;
+    if (!item) return;
+    const name = $('edit-name').value.trim();
+    const url = $('edit-url').value.trim();
+    const emoji = $('edit-emoji').value.trim();
+    const fail = (e) => { $('edit-msg').textContent = String(e); };
+    try {
+      if (item.kind === 'tab') {
+        await T.core.invoke('set_tab_label', { tab: item.id, name, emoji: emoji || null });
+        if (url && url !== item.url) await T.core.invoke('navigate', { tab: item.id, input: url });
+      } else {
+        if (!url) { fail('Enter a web address.'); return; }
+        let key = item.url;
+        if (url !== item.url || name !== item.title) {
+          key = await T.core.invoke('edit_item_url', { url: item.url, newUrl: url, title: name });
+        }
+        if (emoji !== item.emoji) {
+          const ok = await T.core.invoke('set_pin_emoji', { url: key, emoji: emoji || null });
+          if (!ok) { fail('Use one emoji (no spaces).'); await Promise.all([loadPins(), loadBookmarks()]); return; }
+        }
+        await Promise.all([loadPins(), loadBookmarks()]);
+      }
+      closeEdit();
+    } catch (e) {
+      fail(e);
+    }
   });
 
   // ---- bookmarks bar ------------------------------------------------------
@@ -1160,12 +1271,11 @@
       const node = el('div', 'bm');
       node.dataset.index = String(index);
       node.dataset.url = b.url;
-      node.appendChild(rowIcon(b.url, b.display, tabIcons.bookmarks.get(b.url)));
+      node.appendChild(b.emoji ? emojiIcon(b.emoji) : rowIcon(b.url, b.display, tabIcons.bookmarks.get(b.url)));
+      // One line, as tabs: the title (its site until it has one).
       const open = el('button', 'open');
       open.appendChild(el('span', 't', b.title || b.display.registrable));
-      const host = el('span', 'h');
-      fillLabels(host, b.display.registrable, false);
-      open.appendChild(host);
+      open.title = b.display.registrable;
       open.addEventListener('click', (ev) => {
         if (suppressClick) return;
         if (ev.metaKey) { openPinPop(b, node, 'bookmark'); return; } // ⌘-click: the item menu
@@ -1192,8 +1302,10 @@
   //
   // Touch: long-press, then move; a move before the long-press fires is a
   // scroll. Mouse and trackpad: press and move (no delay, as on a desktop).
-  // Tab → bookmarks bar: bookmark it at that position. Tab → another tab:
-  // split view. A tab of a split pair → anywhere off its pair: unsplit.
+  // Tab → bookmarks bar: bookmark it at that position. Tab → the middle of
+  // another tab: split view; → the top or bottom edge of one (or below the
+  // last): moved there. A tab of a split pair → anywhere off its pair:
+  // unsplit.
   // Bookmark → bookmarks bar: reorder.
   //
   // Mouse drags used to start on a 120 ms timer even without movement, and
@@ -1275,10 +1387,35 @@
     if (node) {
       const id = Number(node.dataset.tab);
       const other = state.tabs.find((x) => x.id === id);
-      // Tabs of different profiles are never paired.
-      if (id !== item.id && other && other.private === item.private) return { kind: 'tab', id, node };
+      // Tabs of different profiles are never paired or mixed.
+      if (id !== item.id && other && other.private === item.private) {
+        // The top and bottom edges of a row reorder (2026-11-09); its
+        // middle pairs the two tabs in split view, as before.
+        const r = node.getBoundingClientRect();
+        const at = (y - r.top) / Math.max(1, r.height);
+        if (at < REORDER_EDGE) return { kind: 'reorder', before: id, node, edge: 'top' };
+        if (at > 1 - REORDER_EDGE) return { kind: 'reorder', before: tabAfter(id), node, edge: 'bottom' };
+        return { kind: 'tab', id, node };
+      }
+    }
+    // Below the last row of its own list: to the end.
+    const tabList = hit.closest('#tabs, #private-tabs');
+    if (tabList && (tabList.id === 'private-tabs') === !!item.private) {
+      const rows = [...tabList.querySelectorAll('.tab')].filter((n) => n !== dragState.node);
+      const last = rows[rows.length - 1];
+      if (last && y > last.getBoundingClientRect().bottom) return { kind: 'reorder', before: null, node: last, edge: 'bottom' };
     }
     return group ? { kind: 'unsplit', group } : null;
+  }
+
+  // Share of a tab row's height, at its top and at its bottom, where a
+  // dropped tab is moved instead of paired.
+  const REORDER_EDGE = 0.3;
+  // The tab after `id` in the browser's order (null at the end).
+  function tabAfter(id) {
+    const i = state.tabs.findIndex((t) => t.id === id);
+    const next = i >= 0 ? state.tabs[i + 1] : null;
+    return next ? next.id : null;
   }
 
   function showDropFeedback(target) {
@@ -1289,6 +1426,13 @@
     if (!target) return;
     if (target.kind === 'tab') {
       target.node.classList.add('drop-target');
+    } else if (target.kind === 'reorder') {
+      const r = target.node.getBoundingClientRect();
+      const lr = target.node.closest('.tablist').getBoundingClientRect();
+      line.style.left = lr.left + 6 + 'px';
+      line.style.width = lr.width - 12 + 'px';
+      line.style.top = (target.edge === 'top' ? r.top - 1 : r.bottom + 1) + 'px';
+      line.hidden = false;
     } else if (target.kind === 'unsplit') {
       target.group.classList.add('leaving');
     } else if (target.kind === 'pins') {
@@ -1326,6 +1470,10 @@
     if (!commit || !t) return;
     if (d.item.kind === 'tab' && t.kind === 'tab') {
       invoke('split_tabs', { tab: d.item.id, with: t.id });
+    } else if (d.item.kind === 'tab' && t.kind === 'reorder') {
+      // A half of a split pair dragged elsewhere in the list leaves its pair.
+      const unpair = d.item.paired ? invoke('unsplit', { tab: d.item.id }) : Promise.resolve();
+      unpair.then(() => invoke('move_tab', { tab: d.item.id, before: t.before }));
     } else if (t.kind === 'unsplit') {
       invoke('unsplit', { tab: d.item.id });
     } else if (d.item.kind === 'tab' && t.kind === 'bookmarks') {
@@ -2258,6 +2406,7 @@
     const input = $('url-input');
     $('url-display').hidden = true;
     $('share').hidden = true;
+    $('copy-url').hidden = true;
     input.hidden = false;
     input.value = tab && tab.url ? tab.url.full : '';
     input.focus();
@@ -2269,6 +2418,7 @@
     $('url-input').hidden = true;
     $('url-display').hidden = false;
     $('share').hidden = false;
+    $('copy-url').hidden = false;
   }
 
   // ---- layout -----------------------------------------------------------
@@ -2288,7 +2438,7 @@
     // beside the page (shrinking the content area), float over it as a
     // hole (the pill, its popup, toasts: the page is cut out there), or set
     // `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarShown);
+    const overlay = !!panel || modalOpen || !$('edit-modal').hidden || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarShown);
     // Docked right panels (site scripts; or the headers outline and the
     // chat, one above the other when both are open) take the right of the
     // content area, full height, at the width the user dragged.
@@ -2389,7 +2539,7 @@
       if (f && pill) f.h = Math.max(1, pill.y - f.y);
       if (f) out.push(f);
     }
-    for (const id of ['actions-pop', 'confirm-pop', 'sel-pop', 'img-pop', 'toast', 'os-banner']) {
+    for (const id of ['actions-pop', 'confirm-pop', 'pick-bar', 'sel-pop', 'img-pop', 'toast', 'os-banner']) {
       const e = $(id);
       if (e.hidden) continue;
       const h = hole(e, 15);
@@ -3058,24 +3208,108 @@
     return true;
   }
 
-  // The start page's Define row: a new chat in tab `t` (the empty tab)
-  // asking the chat's model for the word's definition. No page is read
-  // (Rust: `ai::define_request`); follow-up questions continue the chat.
-  function defineWord(t, word) {
+  // The start page's Define row (owner request 2026-11-09): the definition
+  // appears in a card above the start page's input, not in the chat panel.
+  // The first request asks the model to check the spelling; a likely
+  // misspelling is answered with the word it thinks was meant, and the
+  // card asks which one to define (nothing is archived until then, so only
+  // the definition stays in the chat archive). Rust: `ai::define_request`;
+  // no page is read. The definition becomes the tab's chat, so "Ask a
+  // follow-up" continues it in the chat panel.
+  // tab id -> { word, asked, state: 'pending' | 'ask' | 'done' | 'error',
+  //             text, suggestion, meta } (`defines`, declared at the top)
+
+  function defineWord(t, word, exact = false) {
     if (!t) return;
-    setChat(true);
     loadAi().then(() => {
-      if (!chatChoice()) { toast('Connect an AI provider in Settings → AI to define words.'); return; }
-      const c = newChat(t.url ? t.url.full : '');
-      c.sticky = true;
-      c.word = word;
-      c.context = `Definition · “${word}”`;
-      chats.set(t.id, c);
-      if (archiveOpen) setArchive(false);
-      chatKey = '';
-      askChat(t, c, `Define “${word}”.`);
+      const choice = chatChoice();
+      if (!choice) { toast('Connect an AI provider in Settings → AI to define words.'); return; }
+      const d = { word, asked: word, state: 'pending', text: '', suggestion: '', meta: '' };
+      defines.set(t.id, d);
+      renderDefine();
+      const messages = [{ role: 'user', text: `Define “${word}”.` }];
+      const effort = $('chat-effort').value;
+      T.core.invoke('ai_chat', { tab: t.id, provider: choice.p, model: choice.id, effort, messages, chatId: null, word, exact })
+        .then((r) => {
+          loadUsage();
+          if (defines.get(t.id) !== d) return;
+          if (r.suggestion) {
+            d.state = 'ask';
+            d.suggestion = r.suggestion;
+            renderDefine();
+            $('define-yes').focus({ preventScroll: true });
+            return;
+          }
+          const cost = r.cost_micros === null || r.cost_micros === undefined ? 'price unknown' : '≈ ' + money(r.cost_micros);
+          d.state = 'done';
+          d.text = r.text;
+          d.meta = `${choice.name} · ${cost}`;
+          // The tab's chat: a follow-up continues this definition.
+          const c = newChat(t.url ? t.url.full : '');
+          c.sticky = true;
+          c.word = word;
+          c.context = `Definition · “${word}”`;
+          c.chatId = r.chat_id || null;
+          c.messages = [...messages, { role: 'assistant', text: r.text }];
+          c.log = [messages[0], { role: 'assistant', text: r.text, meta: `${choice.name} · ${(r.input + r.output).toLocaleString()} tokens · ${cost}` }];
+          c.input = r.input;
+          c.output = r.output;
+          if (r.cost_micros === null || r.cost_micros === undefined) c.unpriced = true; else c.cost = r.cost_micros;
+          chats.set(t.id, c);
+          chatKey = '';
+          renderChat();
+          renderDefine();
+        })
+        .catch((e) => {
+          if (defines.get(t.id) !== d) return;
+          d.state = 'error';
+          d.text = String(e);
+          renderDefine();
+        });
     });
   }
+
+  // The card above the start page's input, for the start page's tab.
+  function renderDefine() {
+    const t = activeTab();
+    const d = t && startShown && !t.url ? defines.get(t.id) : null;
+    const card = $('define-card');
+    card.hidden = !d;
+    if (!d) return;
+    $('define-word').textContent = d.state === 'ask' ? d.asked : d.word;
+    const body = $('define-body');
+    body.className = 'define-body' + (d.state === 'pending' ? ' pending' : d.state === 'error' ? ' error' : '');
+    body.textContent = d.state === 'pending' ? 'Defining…' : d.state === 'ask' ? `Did you mean “${d.suggestion}”?` : d.text;
+    $('define-ask').hidden = d.state !== 'ask';
+    if (d.state === 'ask') {
+      $('define-yes').textContent = `Define “${d.suggestion}”`;
+      $('define-no').textContent = `Define “${d.asked}”`;
+    }
+    $('define-foot').hidden = d.state !== 'done';
+    $('define-meta').textContent = d.meta;
+  }
+
+  function closeDefine() {
+    const t = activeTab();
+    if (t) defines.delete(t.id);
+    renderDefine();
+    if (startShown) focusInput($('palette-input'));
+  }
+  $('define-close').addEventListener('click', closeDefine);
+  $('define-yes').addEventListener('click', () => {
+    const t = activeTab();
+    const d = t && defines.get(t.id);
+    if (d && d.state === 'ask') defineWord(t, d.suggestion, true);
+  });
+  $('define-no').addEventListener('click', () => {
+    const t = activeTab();
+    const d = t && defines.get(t.id);
+    if (d && d.state === 'ask') defineWord(t, d.asked, true);
+  });
+  $('define-more').addEventListener('click', () => {
+    if (archiveOpen) setArchive(false);
+    setChat(true);
+  });
 
   $('chat-btn').addEventListener('click', () => setChat(!chatOpen));
   $('chat-close').addEventListener('click', () => setChat(false));
@@ -3253,7 +3487,7 @@
       for (const t of state.tabs) {
         // Empty tabs (this one included) are not worth switching to.
         if (t.sheet_over !== null || t.launcher !== null || !t.url) continue;
-        out.push({ kind: t.private ? 'Private' : 'Tab', title: t.title || t.url.registrable, host: t.url.registrable, run: (here) => leaveStart(here, invoke('activate_tab', { tab: t.id })) });
+        out.push({ kind: t.private ? 'Private' : 'Tab', title: t.name || t.title || t.url.registrable, host: t.url.registrable, run: (here) => leaveStart(here, invoke('activate_tab', { tab: t.id })) });
       }
     }
     for (const p of pins) out.push({ kind: 'Pinned', title: p.title || p.display.registrable, host: p.display.registrable, run: (here) => leaveStart(here, openLink(p.url)) });
@@ -3297,7 +3531,7 @@
       if (looksLikeAddress(q)) head.push({ kind: 'Go to', title: q, host: '', hits: [], run: (here) => goHere(here, q) });
       head.push({ kind: 'Search', title: q, host: '', hits: [], run: (here) => invoke('search_google', { query: q, private: !!(here && here.private), tab: here ? here.id : null }) });
       // Define (owner request 2026-11-08): a single word only; the AI's
-      // definition opens as a new chat in the chat panel.
+      // definition appears above the input (2026-11-09).
       if (singleWord(q)) head.push({ kind: 'Define', title: q, host: '', hits: [], run: (here) => defineWord(here, q) });
       rows = head.concat(rows);
     }
@@ -4014,6 +4248,12 @@
     navigator.clipboard.writeText(url).then(() => toast('Image address copied.'), () => toast('Could not copy (clipboard unavailable).'));
   });
 
+  // Copy: the page's committed address (from Rust's DisplayUrl).
+  $('copy-url').addEventListener('click', withTab((t) => {
+    if (!t.url) { toast('Open a page to copy its address.'); return; }
+    navigator.clipboard.writeText(t.url.full).then(() => toast('Address copied.'), () => toast('Could not copy (clipboard unavailable).'));
+  }));
+
   // Share: the system share sheet for this page, pointing at the button.
   $('share').addEventListener('click', withTab((t) => {
     if (!t.url) { toast('Open a page to share it.'); return; }
@@ -4089,7 +4329,8 @@
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
-    if (laterOpen && $('sidebar').contains(document.activeElement)) setLater(false);
+    if (!$('edit-modal').hidden) closeEdit();
+    else if (laterOpen && $('sidebar').contains(document.activeElement)) setLater(false);
     else if (!$('copy-modal').hidden) closePageCopy();
     else if (unblock) closeUnblock();
     else if (confirmAction) closeConfirm();

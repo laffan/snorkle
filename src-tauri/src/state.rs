@@ -348,6 +348,7 @@ impl Shared {
                     self.storage(StorageJob::History { url: url.to_string(), title })
                 }
                 Effect::PersistSession(s) => self.storage(StorageJob::Session(s)),
+                Effect::OpenSavedPage { tab, item, url } => crate::saved::open_page(self.clone(), tab, item, url),
                 Effect::ReleasePrivateData => {
                     self.drop_private_downloads();
                     self.console_log().drop_private();

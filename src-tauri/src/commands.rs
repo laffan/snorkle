@@ -200,6 +200,9 @@ pub struct Entry {
     /// Where a history search matched the page's saved text.
     #[serde(skip_serializing_if = "Option::is_none")]
     snippet: Option<String>,
+    /// Bookmarks only: the emoji shown instead of the favicon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    emoji: Option<String>,
 }
 
 fn entry(url: &str, title: &str) -> Option<Entry> {
@@ -211,6 +214,7 @@ fn entry(url: &str, title: &str) -> Option<Entry> {
         visited_ms: None,
         cache_bytes: None,
         snippet: None,
+        emoji: None,
     })
 }
 
@@ -218,7 +222,12 @@ fn entry(url: &str, title: &str) -> Option<Entry> {
 pub fn list_bookmarks(s: S<'_>) -> Vec<Entry> {
     s.store
         .as_ref()
-        .map(|st| st.bookmarks().iter().filter_map(|b| entry(&b.url, &b.title)).collect())
+        .map(|st| {
+            st.bookmarks()
+                .iter()
+                .filter_map(|b| Some(Entry { emoji: st.pin_emoji(&b.url), ..entry(&b.url, &b.title)? }))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -467,6 +476,22 @@ pub fn split_tabs(s: S<'_>, tab: u64, with: u64) {
     with_browser(&s, |b| b.split(TabId(tab), TabId(with), now_ms()));
 }
 
+/// Dragging a tab in the sidebar: moves it just before `before`, or to
+/// the end of the list.
+#[tauri::command]
+pub fn move_tab(s: S<'_>, tab: u64, before: Option<u64>) {
+    with_browser(&s, |b| b.move_tab(TabId(tab), before.map(TabId)));
+}
+
+/// The Edit dialog for a tab: its own name (shown instead of the page's
+/// title; empty clears it) and an emoji shown instead of its favicon.
+#[tauri::command]
+pub fn set_tab_label(s: S<'_>, tab: u64, name: Option<String>, emoji: Option<String>) -> Result<(), String> {
+    let effects = s.browser().set_tab_label(TabId(tab), name.as_deref(), emoji.as_deref())?;
+    s.run(effects);
+    Ok(())
+}
+
 /// Ends the split pair holding `tab` (dragging a tab out of its pair, or
 /// the toolbar's Unsplit button).
 #[tauri::command]
@@ -681,23 +706,28 @@ pub struct LaterView {
     saved_ms: u64,
     /// `data:image/jpeg;base64,…` (the app's own snapshot), if any.
     thumb: Option<String>,
+    /// Pages its archive holds (0: no archive; the page opens live).
+    pages: usize,
 }
 
 /// Save for Later: snapshots what the tab shows (a JPEG thumbnail drawn
-/// by the app from its own web view), stores the tab's committed page
-/// (http/https, from the core) with its title, and closes the tab. Not for
-/// private tabs, whose pages are never written.
+/// by the app from its own web view), captures the page as an archive that
+/// works offline (`saved::capture`, channel C22; 2026-11-09), stores the
+/// tab's committed page (http/https, from the core) with its title, and
+/// closes the tab. Not for private tabs, whose pages are never written. A
+/// tab without a live page is saved without an archive.
 #[tauri::command]
 pub async fn save_for_later(s: S<'_>, tab: u64) -> Result<(), String> {
     let id = TabId(tab);
-    let (url, title) = {
+    let (url, title, live) = {
         let b = s.browser();
         let t = b.tab(id).ok_or("That tab is gone.")?;
         if t.is_private() {
             return Err("Private tabs are not saved.".into());
         }
         let url = t.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https")).ok_or("Open a web page first.")?;
-        (url, t.title.clone())
+        let live = t.life == snorkle_core::tabs::Life::Live && t.notice.is_none() && !b.shows_offline_copy(id);
+        (url, t.title.clone(), live)
     };
     let store = s.store.clone().ok_or("Saving is not available.")?;
     let (tx, rx) = std::sync::mpsc::channel();
@@ -707,7 +737,22 @@ pub async fn save_for_later(s: S<'_>, tab: u64) -> Result<(), String> {
         .map_err(|_| "Request failed.".to_string())?
         .ok()
         .flatten();
-    store.later().add(url.as_str(), &title, thumb.as_deref(), wall_ms()).map_err(|e| e.to_string())?.ok_or("This page can't be saved.")?;
+    let page = url.to_string();
+    let fallback = title.clone();
+    let capture = if live {
+        tauri::async_runtime::spawn_blocking(move || crate::saved::capture(id, &page, &fallback)).await.ok().flatten()
+    } else {
+        None
+    };
+    // The page may have navigated while it was read: save what it showed
+    // when the user asked.
+    let store2 = store.clone();
+    let url2 = url.to_string();
+    tauri::async_runtime::spawn_blocking(move || store2.later().add(&url2, &title, thumb.as_deref(), capture, wall_ms()))
+        .await
+        .map_err(|_| "Request failed.".to_string())?
+        .map_err(|e| e.to_string())?
+        .ok_or("This page can't be saved.")?;
     with_browser(&s, |b| b.close(id, now_ms()));
     Ok(())
 }
@@ -722,6 +767,7 @@ pub fn list_later(s: S<'_>) -> Vec<LaterView> {
         .map(|it| LaterView {
             host: Url::parse(&it.url).ok().map(|u| url_display::display(&u).registrable).unwrap_or_default(),
             thumb: if it.thumb { later.thumb_url(&it.id) } else { None },
+            pages: it.pages.len(),
             id: it.id,
             url: it.url,
             title: it.title,
@@ -730,7 +776,64 @@ pub fn list_later(s: S<'_>) -> Vec<LaterView> {
         .collect()
 }
 
-/// Opens a saved page in a new tab (and removes it from the list).
+/// Opens a saved page's archive (offline) in a new tab; it stays in the
+/// list.
+#[tauri::command]
+pub async fn open_later(s: S<'_>, id: String) -> Result<(), String> {
+    let shared = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::saved::show(&shared, None, &id, None, false).map(|_| ()))
+        .await
+        .map_err(|_| "Request failed.".to_string())?
+}
+
+/// "+" on a saved page: opens its archive in a new tab, with scripts off,
+/// where tapping links chooses pages to add (`finish_adding_pages`).
+#[tauri::command]
+pub async fn add_later_pages(s: S<'_>, id: String) -> Result<(), String> {
+    let shared = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::saved::show(&shared, None, &id, None, true).map(|_| ()))
+        .await
+        .map_err(|_| "Request failed.".to_string())?
+}
+
+/// Adds the pages chosen in `tab` to its saved item: each is loaded live in
+/// the tab and captured, then the saved copy is shown again. Returns how
+/// many pages were added.
+#[tauri::command]
+pub async fn finish_adding_pages(s: S<'_>, tab: u64) -> Result<usize, String> {
+    let tab = TabId(tab);
+    let (item, links) = s.browser().take_picks(tab).ok_or("Nothing is being added.")?;
+    let shared = s.inner().clone();
+    let effects = shared.browser().set_picking(tab, false);
+    shared.run(effects);
+    tauri::async_runtime::spawn_blocking(move || {
+        if links.is_empty() {
+            crate::saved::show(&shared, Some(tab), &item, None, false).map(|_| 0)
+        } else {
+            crate::saved::add_pages(&shared, tab, &item, links)
+        }
+    })
+    .await
+    .map_err(|_| "Request failed.".to_string())?
+}
+
+/// Stops choosing pages to add and shows the saved copy again.
+#[tauri::command]
+pub async fn cancel_adding_pages(s: S<'_>, tab: u64) -> Result<(), String> {
+    let tab = TabId(tab);
+    let (item, page) = {
+        let mut b = s.browser();
+        let page = b.saved_copy(tab).map(|c| c.page.to_string());
+        let Some((item, _)) = b.take_picks(tab) else { return Ok(()) };
+        (item, page)
+    };
+    let shared = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::saved::show(&shared, Some(tab), &item, page.as_deref(), false).map(|_| ()))
+        .await
+        .map_err(|_| "Request failed.".to_string())?
+}
+
+/// Opens a saved page live in a new tab (and removes it from the list).
 #[tauri::command]
 pub fn restore_later(s: S<'_>, id: String) -> Result<(), String> {
     let store = s.store.clone().ok_or("Saving is not available.")?;
@@ -1102,8 +1205,8 @@ pub async fn edit_item_url(s: S<'_>, url: String, new_url: String, title: Option
     Ok(stored)
 }
 
-/// Sets (or with `None` removes) the emoji a pin shows instead of its
-/// favicon ("Use Emoji for Icon"; validated by `storage::clean_emoji`).
+/// Sets (or with `None` removes) the emoji a pin or bookmark shows instead
+/// of its favicon (the Edit dialog; validated by `storage::clean_emoji`).
 #[tauri::command]
 pub async fn set_pin_emoji(s: S<'_>, url: String, emoji: Option<String>) -> Result<bool, String> {
     let Some(store) = s.store.clone() else { return Ok(false) };
@@ -1122,7 +1225,7 @@ pub async fn unpin(s: S<'_>, url: String, bookmark_index: Option<usize>) -> Resu
     if let (Some(p), Some(i)) = (store.remove_pin(&url).map_err(|e| e.to_string())?, bookmark_index) {
         store.insert_bookmark(&p.url, &p.title, i, p.created_ms).map_err(|e| e.to_string())?;
     }
-    Ok(())
+    store.prune_item_emoji().map_err(|e| e.to_string())
 }
 
 // ---- downloads ----------------------------------------------------------------

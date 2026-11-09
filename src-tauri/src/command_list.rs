@@ -102,4 +102,10 @@ pub const COMMANDS: &[&str] = &[
     "bookmark_later",
     "delete_later",
     "set_pull_to_refresh",
+    "move_tab",
+    "set_tab_label",
+    "open_later",
+    "add_later_pages",
+    "finish_adding_pages",
+    "cancel_adding_pages",
 ];

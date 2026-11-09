@@ -189,6 +189,10 @@ pub struct ChatReply {
     /// Estimated cost in millionths of a dollar; `None` for a model without
     /// a known price.
     cost_micros: Option<u64>,
+    /// Define only: the word the model thinks was meant (the typed one looks
+    /// misspelt). Nothing was defined or archived; the chrome asks which
+    /// word to define and sends it again with `exact`.
+    suggestion: Option<String>,
 }
 
 fn wall_ms() -> u64 {
@@ -231,7 +235,10 @@ pub async fn ai_efforts(s: S<'_>, provider: Provider, model: String) -> Result<V
 /// with that context, and later turns (also when continued from the
 /// archive, from any tab) reuse the stored context instead of reading the
 /// page again. With `word` (Define on the new-tab page), a new chat is about
-/// that single word instead: no page is read and the tab may be empty.
+/// that single word instead: no page is read and the tab may be empty. Its
+/// first request asks the model to check the spelling unless `exact` (the
+/// user confirmed the word); a suggested spelling is returned without
+/// archiving anything, so only the definition the user chose is kept.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn ai_chat(
@@ -243,6 +250,7 @@ pub async fn ai_chat(
     chat_id: Option<String>,
     effort: Option<String>,
     word: Option<String>,
+    exact: Option<bool>,
 ) -> Result<ChatReply, String> {
     let key = key(provider)?;
     // Nothing typed in a private tab is stored, also when it continues an
@@ -291,6 +299,9 @@ pub async fn ai_chat(
             (Context::Page(page), private, None)
         }
     };
+    // A new Define asks for a spelling check first (one question only).
+    let check_spelling =
+        matches!(context, Context::Word(_)) && record.is_none() && messages.len() == 1 && exact != Some(true);
     let (mut req, what) = match &context {
         Context::Page(page) => {
             let host = snorkle_core::Url::parse(&page.url)
@@ -301,7 +312,7 @@ pub async fn ai_chat(
         }
         // The usage log names no word: it is what the user typed.
         Context::Word(word) => {
-            (ai::define_request(provider, &key, &model, word, &messages)?, format!("definition ({model})"))
+            (ai::define_request(provider, &key, &model, word, &messages, check_spelling)?, format!("definition ({model})"))
         }
     };
     if effort.as_deref().is_some_and(|e| !e.is_empty() && e != "default") {
@@ -312,6 +323,18 @@ pub async fn ai_chat(
     let text = ai::parse_chat_reply(provider, status, &body)?;
     let usage = ai::parse_usage(provider, &body).unwrap_or(ai::Usage { input: 0, output: 0 });
     let cost_micros = ai::estimate_cost_micros(provider, &model, usage);
+    if let (true, Context::Word(word)) = (check_spelling, &context) {
+        if let Some(suggestion) = ai::parse_spelling(&text, word) {
+            return Ok(ChatReply {
+                chat_id: None,
+                text: String::new(),
+                input: usage.input,
+                output: usage.output,
+                cost_micros,
+                suggestion: Some(suggestion),
+            });
+        }
+    }
     // Archive (never for private tabs).
     let mut chat_id = None;
     if let (false, Some(store)) = (private, s.store.as_ref()) {
@@ -360,7 +383,7 @@ pub async fn ai_chat(
             chat_id = Some(id);
         }
     }
-    Ok(ChatReply { chat_id, text, input: usage.input, output: usage.output, cost_micros })
+    Ok(ChatReply { chat_id, text, input: usage.input, output: usage.output, cost_micros, suggestion: None })
 }
 
 /// What a chat is about: a page, or a word to define.

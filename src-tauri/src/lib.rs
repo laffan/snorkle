@@ -8,6 +8,7 @@ mod ai;
 mod command_list;
 pub mod commands;
 mod pins;
+mod saved;
 mod scripts;
 pub mod state;
 
@@ -129,6 +130,12 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::bookmark_later,
         commands::delete_later,
         commands::set_pull_to_refresh,
+        commands::move_tab,
+        commands::set_tab_label,
+        commands::open_later,
+        commands::add_later_pages,
+        commands::finish_adding_pages,
+        commands::cancel_adding_pages,
     ])
 }
 

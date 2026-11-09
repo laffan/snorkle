@@ -88,6 +88,14 @@ pub enum Effect {
         url: Url,
         title: String,
     },
+    /// A tab showing a Save for Later archive followed a link to another
+    /// page the archive holds (or reloads): the platform loads that page
+    /// from the archive and calls [`Browser::show_saved_copy`].
+    OpenSavedPage {
+        tab: TabId,
+        item: String,
+        url: Url,
+    },
     PersistSession(Session),
     /// Chrome state changed; re-render from [`Browser::view`].
     NotifyChrome,
@@ -218,6 +226,24 @@ pub struct TabView {
     /// Set while the tab shows a saved offline copy: when it was saved
     /// (Unix ms).
     pub offline_saved_ms: Option<u64>,
+    /// The user's own name for the tab (shown instead of `title`).
+    pub name: Option<String>,
+    /// An emoji shown instead of the favicon.
+    pub emoji: Option<String>,
+    /// Set while the tab shows a Save for Later archive.
+    pub saved: Option<SavedView>,
+}
+
+/// A Save for Later archive in a tab, as the chrome shows it.
+#[derive(Clone, Debug, Serialize)]
+pub struct SavedView {
+    pub item: String,
+    pub saved_ms: u64,
+    /// Pages the archive holds.
+    pub pages: usize,
+    /// Adding pages: the chosen links (path and query, cleaned), or `None`
+    /// when not choosing.
+    pub picking: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -391,6 +417,8 @@ impl Browser {
             tab.view_exempt = clean_exempt(&st.exempt);
             tab.url_bar_attached = st.url_bar_attached;
             tab.zoom = st.zoom.map(crate::tabs::clean_zoom).unwrap_or(crate::tabs::DEFAULT_ZOOM);
+            tab.name = st.name.as_deref().and_then(clean_tab_name);
+            tab.emoji = st.emoji.as_deref().and_then(crate::storage::clean_emoji);
             self.tabs.push(tab);
             ids.push(id);
         }
@@ -796,9 +824,93 @@ impl Browser {
         self.tab(id).and_then(|t| t.landing.clone())
     }
 
-    /// Whether the tab shows an offline copy (its page is not saved again).
+    /// Whether the tab shows an offline copy or a Save for Later archive
+    /// (its page is not saved again, nor its text read for history).
     pub fn shows_offline_copy(&self, id: TabId) -> bool {
-        self.tab(id).is_some_and(|t| t.offline.is_some())
+        self.tab(id).is_some_and(|t| t.offline.is_some() || t.saved.is_some())
+    }
+
+    /// Shows a Save for Later archive in a non-private tab (owner request
+    /// 2026-11-09): the platform loads `copy.page` from the archive right
+    /// after these effects, as the browser's own load (its base URL is the
+    /// page's). Creates the tab's web view if it has none, without loading
+    /// anything into it. The copy is not written to history.
+    pub fn show_saved_copy(&mut self, id: TabId, copy: crate::tabs::SavedCopy) -> Vec<Effect> {
+        let mut out = Vec::new();
+        if !self.os.allows_browsing() {
+            return out;
+        }
+        let Some(t) = self.tab_mut(id) else { return out };
+        if t.is_private() || t.sheet {
+            return out;
+        }
+        let page = copy.page.clone();
+        t.notice = None;
+        t.offline = None;
+        t.https = HttpsUpgrade::default();
+        t.loading = true;
+        t.progress = 0;
+        t.saved = Some(copy);
+        if t.life == Life::Live {
+            t.expected_load = Some((page, Source::Typed));
+        } else {
+            self.ensure_live(id, AfterCreate::Restore { fallback: None }, Some((page, Source::Typed)), &mut out);
+        }
+        self.sync_visibility(&mut out);
+        out.push(Effect::NotifyChrome);
+        out
+    }
+
+    /// The Save for Later archive a tab shows, if any.
+    pub fn saved_copy(&self, id: TabId) -> Option<&crate::tabs::SavedCopy> {
+        self.tab(id).and_then(|t| t.saved.as_ref())
+    }
+
+    /// Adding pages to a saved item: starts (with no link chosen) or ends
+    /// choosing links in the tab showing its archive.
+    pub fn set_picking(&mut self, id: TabId, on: bool) -> Vec<Effect> {
+        let Some(c) = self.tab_mut(id).and_then(|t| t.saved.as_mut()) else { return Vec::new() };
+        c.picking = on.then(Vec::new);
+        vec![Effect::NotifyChrome]
+    }
+
+    /// Ends choosing links and returns the item and the chosen links.
+    pub fn take_picks(&mut self, id: TabId) -> Option<(String, Vec<Url>)> {
+        let c = self.tab_mut(id)?.saved.as_mut()?;
+        let picks = c.picking.take()?;
+        Some((c.item.clone(), picks))
+    }
+
+    /// A main-frame navigation in a tab showing a Save for Later archive:
+    /// `Some` when the archive handles it instead of the network. While
+    /// adding pages, a link to another page of the same host toggles its
+    /// choice and nothing navigates; otherwise a link to another page the
+    /// archive holds opens that page from the archive. Back/forward is left
+    /// to WebKit.
+    fn saved_copy_navigation(&mut self, id: TabId, url: &Url, kind: NavKind) -> Option<(Verdict, Vec<Effect>)> {
+        let blocked = self.blocklist.matches(url);
+        let t = self.tab_mut(id)?;
+        let c = t.saved.as_mut().filter(|c| c.committed)?;
+        let bare = without_fragment(url);
+        if let Some(picks) = c.picking.as_mut() {
+            let host = c.pages.first().and_then(|p| p.host_str().map(str::to_string));
+            let eligible = kind == NavKind::LinkActivated
+                && matches!(bare.scheme(), "http" | "https")
+                && bare.host_str().map(str::to_string) == host
+                && !c.pages.contains(&bare);
+            if eligible {
+                if let Some(at) = picks.iter().position(|p| *p == bare) {
+                    picks.remove(at);
+                } else if c.pages.len() + picks.len() < crate::later::MAX_PAGES {
+                    picks.push(bare);
+                }
+            }
+            return Some((Verdict::Cancel, vec![Effect::NotifyChrome]));
+        }
+        if blocked || kind == NavKind::BackForward || bare == c.page || !c.pages.contains(&bare) {
+            return None;
+        }
+        Some((Verdict::Cancel, vec![Effect::OpenSavedPage { tab: id, item: c.item.clone(), url: bare }]))
     }
 
     /// Tabs with view-mode exemptions (restored from the session).
@@ -832,6 +944,52 @@ impl Browser {
             return Vec::new();
         }
         vec![Effect::PersistSession(self.session()), Effect::NotifyChrome]
+    }
+
+    /// The Edit dialog (owner request 2026-11-09): the tab's own name,
+    /// shown instead of its page's title, and an emoji shown instead of its
+    /// favicon. `None` or an empty name clears it. Err when the emoji is
+    /// not acceptable (`storage::clean_emoji`) or the tab is gone.
+    pub fn set_tab_label(&mut self, id: TabId, name: Option<&str>, emoji: Option<&str>) -> Result<Vec<Effect>, &'static str> {
+        let emoji = match emoji.map(str::trim).filter(|e| !e.is_empty()) {
+            Some(e) => Some(crate::storage::clean_emoji(e).ok_or("Use one emoji (no spaces).")?),
+            None => None,
+        };
+        let t = self.tab_mut(id).ok_or("That tab is gone.")?;
+        t.name = name.and_then(clean_tab_name);
+        t.emoji = emoji;
+        let private = t.is_private();
+        let mut out = Vec::new();
+        if !private {
+            out.push(Effect::PersistSession(self.session()));
+        }
+        out.push(Effect::NotifyChrome);
+        Ok(out)
+    }
+
+    /// Dragging a tab in the sidebar (owner request 2026-11-09): moves `id`
+    /// just before `before`, or to the end of the list. Only the order
+    /// changes (pairs, pins' and bookmarks' tabs stay as they are); private
+    /// and other tabs are listed separately, so their relative order does
+    /// not matter.
+    pub fn move_tab(&mut self, id: TabId, before: Option<TabId>) -> Vec<Effect> {
+        if before == Some(id) {
+            return Vec::new();
+        }
+        let Some(from) = self.tabs.iter().position(|t| t.id == id) else { return Vec::new() };
+        if before.is_some_and(|b| !self.tabs.iter().any(|t| t.id == b)) {
+            return Vec::new();
+        }
+        let tab = self.tabs.remove(from);
+        let at = before.and_then(|b| self.tabs.iter().position(|t| t.id == b)).unwrap_or(self.tabs.len());
+        let private = tab.is_private();
+        self.tabs.insert(at, tab);
+        let mut out = Vec::new();
+        if !private {
+            out.push(Effect::PersistSession(self.session()));
+        }
+        out.push(Effect::NotifyChrome);
+        out
     }
 
     /// Address-bar submission.
@@ -938,6 +1096,10 @@ impl Browser {
     }
 
     pub fn reload(&mut self, id: TabId) -> Vec<Effect> {
+        // A saved archive reloads from the archive, not from the network.
+        if let Some(c) = self.saved_copy(id).filter(|c| c.committed && c.picking.is_none()) {
+            return vec![Effect::OpenSavedPage { tab: id, item: c.item.clone(), url: c.page.clone() }];
+        }
         self.simple(id, Effect::Reload(id), false)
     }
     pub fn stop(&mut self, id: TabId) -> Vec<Effect> {
@@ -1039,13 +1201,21 @@ impl Browser {
         // Our own loads (address bar, upgrade, restore) are recognised by
         // URL equality and keep the source they were issued with; anything
         // else is classified from WebKit's navigation type.
-        let source = match (frame, tab.expected_load.take()) {
-            (Frame::Main, Some((expected, src))) if &expected == url => src,
+        let (source, own_load) = match (frame, tab.expected_load.take()) {
+            (Frame::Main, Some((expected, src))) if &expected == url => (src, true),
             (_, other) => {
                 tab.expected_load = other;
-                classify(kind)
+                (classify(kind), false)
             }
         };
+        // A tab showing a saved archive: links to its other pages open from
+        // the archive; while adding pages, link taps choose pages.
+        if frame == Frame::Main && !own_load {
+            if let Some(handled) = self.saved_copy_navigation(id, url, kind) {
+                return handled;
+            }
+        }
+        let Some(tab) = self.tab_mut(id) else { return (Verdict::Cancel, out) };
         let profile = tab.profile;
         let initiator = tab.committed_url.clone();
         let req = Request { url, frame, source, initiator: initiator.as_ref() };
@@ -1245,9 +1415,13 @@ impl Browser {
         if let Some(t) = self.tab_mut(id) {
             t.provisional = true;
             t.loading = true;
-            // Any load after an offline copy's own replaces it.
+            // Any load after an offline copy's own replaces it (and after a
+            // saved archive's own).
             if t.offline.is_some_and(|o| o.committed) {
                 t.offline = None;
+            }
+            if t.saved.as_ref().is_some_and(|c| c.committed) {
+                t.saved = None;
             }
         }
         vec![Effect::NotifyChrome]
@@ -1268,6 +1442,10 @@ impl Browser {
         if let Some(o) = t.offline.as_mut() {
             o.committed = true;
             // Not a visit: the copy is not written to history.
+            t.history_recorded = true;
+        }
+        if let Some(c) = t.saved.as_mut() {
+            c.committed = true;
             t.history_recorded = true;
         }
         let private = t.is_private();
@@ -1345,6 +1523,9 @@ impl Browser {
         // keeps it from being tried again).
         if provisional && t.offline.is_some_and(|o| !o.committed) {
             t.offline = None;
+        }
+        if provisional && t.saved.as_ref().is_some_and(|c| !c.committed) {
+            t.saved = None;
         }
         if !provisional {
             out.push(Effect::NotifyChrome);
@@ -1621,6 +1802,8 @@ impl Browser {
                     launcher: t.launcher.clone(),
                     url: t.committed_url.as_ref().map(|u| u.to_string()).unwrap_or_default(),
                     title: t.title.clone(),
+                    name: t.name.clone(),
+                    emoji: t.emoji.clone(),
                 })
                 .collect(),
             active,
@@ -1745,7 +1928,39 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
         zoom: t.zoom,
         url_bar_attached: t.url_bar_attached,
         offline_saved_ms: t.offline.filter(|o| o.committed).map(|o| o.saved_ms),
+        name: t.name.clone(),
+        emoji: t.emoji.clone(),
+        saved: t.saved.as_ref().map(|c| SavedView {
+            item: c.item.clone(),
+            saved_ms: c.saved_ms,
+            pages: c.pages.len(),
+            picking: c.picking.as_ref().map(|p| p.iter().map(link_label).collect()),
+        }),
     }
+}
+
+/// How a chosen link is listed while adding pages: its path and query.
+fn link_label(u: &Url) -> String {
+    let mut s = u.path().to_string();
+    if let Some(q) = u.query() {
+        s.push('?');
+        s.push_str(q);
+    }
+    sanitize_page_text(&s, 120)
+}
+
+/// `u` without its fragment (archive pages are kept without one).
+pub fn without_fragment(u: &Url) -> Url {
+    let mut u = u.clone();
+    u.set_fragment(None);
+    u
+}
+
+/// A tab name from the Edit dialog or the session: cleaned like a page
+/// title; empty means none.
+fn clean_tab_name(name: &str) -> Option<String> {
+    let n = sanitize_page_text(name, crate::tabs::MAX_TAB_NAME_CHARS);
+    (!n.trim().is_empty()).then(|| n.trim().to_string())
 }
 
 /// Exemptions as stored: sorted, unique, and only for app-wide modes (the

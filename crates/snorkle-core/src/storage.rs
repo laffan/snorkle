@@ -76,6 +76,12 @@ pub struct SessionTab {
     pub zoom: Option<u16>,
     #[serde(default)]
     pub url_bar_attached: bool,
+    /// The user's own name for the tab (the Edit dialog).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The emoji shown instead of the tab's favicon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
 }
 
 /// Returns the normalised URL string if `s` is an http(s) URL.
@@ -471,7 +477,10 @@ impl Store {
         let blocked =
             crate::blocklist::BlockList::from_settings(load_or_reset(&dir.join(BLOCKED_FILE))).settings().clone();
         let mut pin_emoji: BTreeMap<String, String> = load_or_reset(&dir.join(PIN_EMOJI_FILE));
-        pin_emoji.retain(|url, e| pins.iter().any(|p| &p.url == url) && clean_emoji(e).as_deref() == Some(e.as_str()));
+        pin_emoji.retain(|url, e| {
+            (pins.iter().any(|p| &p.url == url) || bookmarks.iter().any(|b| &b.url == url))
+                && clean_emoji(e).as_deref() == Some(e.as_str())
+        });
         let offline = load_offline(&dir.join(OFFLINE_DIR), |u| {
             pins.iter().any(|p| p.url == u) || bookmarks.iter().any(|b| b.url == u)
         });
@@ -866,19 +875,32 @@ impl Store {
         atomic_write(&self.dir.join(PINS_FILE), &snapshot)
     }
 
-    /// Removes a pin and returns it.
+    /// Removes a pin and returns it. Its emoji is kept, so a pin moved into
+    /// the bookmarks keeps it; [`Store::prune_item_emoji`] drops it when the
+    /// pin was removed for good.
     pub fn remove_pin(&self, url: &str) -> std::io::Result<Option<Bookmark>> {
-        let (removed, snapshot, emoji) = {
+        let (removed, snapshot) = {
             let mut d = self.data();
             let removed = d.pins.iter().position(|b| b.url == url).map(|i| d.pins.remove(i));
-            let emoji = d.pin_emoji.remove(url).map(|_| serde_json::to_vec(&d.pin_emoji)).transpose()?;
-            (removed, serde_json::to_vec(&d.pins)?, emoji)
+            (removed, serde_json::to_vec(&d.pins)?)
         };
         atomic_write(&self.dir.join(PINS_FILE), &snapshot)?;
-        if let Some(emoji) = emoji {
-            atomic_write(&self.dir.join(PIN_EMOJI_FILE), &emoji)?;
-        }
         Ok(removed)
+    }
+
+    /// Drops the emoji of addresses that are neither pinned nor bookmarked.
+    pub fn prune_item_emoji(&self) -> std::io::Result<()> {
+        let snapshot = {
+            let mut d = self.data();
+            let before = d.pin_emoji.len();
+            let Data { pin_emoji, pins, bookmarks, .. } = &mut *d;
+            pin_emoji.retain(|u, _| pins.iter().any(|p| &p.url == u) || bookmarks.iter().any(|b| &b.url == u));
+            if pin_emoji.len() == before {
+                return Ok(());
+            }
+            serde_json::to_vec(&d.pin_emoji)?
+        };
+        atomic_write(&self.dir.join(PIN_EMOJI_FILE), &snapshot)
     }
 
     /// Whether `url` (a committed page URL) is pinned or bookmarked and its
@@ -953,17 +975,20 @@ impl Store {
         let _ = fs::remove_dir_all(self.dir.join(OFFLINE_DIR));
     }
 
-    /// The emoji shown instead of a pin's favicon, if one was chosen.
+    /// The emoji shown instead of a pin's or bookmark's favicon, if one was
+    /// chosen.
     pub fn pin_emoji(&self, url: &str) -> Option<String> {
         self.data().pin_emoji.get(url).cloned()
     }
 
-    /// Sets (or with `None` removes) a pin's emoji icon. False when `url`
-    /// is not pinned or the emoji is not acceptable ([`clean_emoji`]).
+    /// Sets (or with `None` removes) a pin's or bookmark's emoji icon (the
+    /// Edit dialog, 2026-11-09; pins only before). False when `url` is
+    /// neither pinned nor bookmarked or the emoji is not acceptable
+    /// ([`clean_emoji`]).
     pub fn set_pin_emoji(&self, url: &str, emoji: Option<&str>) -> std::io::Result<bool> {
         let snapshot = {
             let mut d = self.data();
-            if !d.pins.iter().any(|p| p.url == url) {
+            if !d.pins.iter().any(|p| p.url == url) && !d.bookmarks.iter().any(|b| b.url == url) {
                 return Ok(false);
             }
             match emoji {
@@ -1180,7 +1205,8 @@ impl Store {
             d.bookmarks.retain(|b| b.url != url);
             serde_json::to_vec(&d.bookmarks)?
         };
-        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)
+        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)?;
+        self.prune_item_emoji()
     }
 
     pub fn bookmarks(&self) -> Vec<Bookmark> {
@@ -1197,6 +1223,8 @@ impl Store {
             Some(u) => {
                 t.url = u;
                 t.title = clean_title(&t.title);
+                t.name = t.name.as_deref().map(clean_title).filter(|n| !n.is_empty());
+                t.emoji = t.emoji.as_deref().and_then(clean_emoji);
                 true
             }
             None => false,
@@ -1870,14 +1898,21 @@ mod tests {
         {
             let s = Store::open(&dir).unwrap();
             s.insert_pin("https://n.example/", "n", 0, 0).unwrap();
-            assert!(!s.set_pin_emoji("https://other.example/", Some("📰")).unwrap(), "only for pins");
+            assert!(!s.set_pin_emoji("https://other.example/", Some("📰")).unwrap(), "only for pins and bookmarks");
+            s.insert_bookmark("https://b.example/", "b", 0, 0).unwrap();
+            assert!(s.set_pin_emoji("https://b.example/", Some("🔖")).unwrap(), "bookmarks too");
             assert!(!s.set_pin_emoji("https://n.example/", Some("not one")).unwrap());
             assert!(s.set_pin_emoji("https://n.example/", Some("📰")).unwrap());
         }
         let s = Store::open(&dir).unwrap();
         assert_eq!(s.pin_emoji("https://n.example/").as_deref(), Some("📰"));
-        s.remove_pin("https://n.example/").unwrap();
-        assert!(s.pin_emoji("https://n.example/").is_none(), "removed with the pin");
+        assert_eq!(s.pin_emoji("https://b.example/").as_deref(), Some("🔖"));
+        let p = s.remove_pin("https://n.example/").unwrap().unwrap();
+        s.insert_bookmark(&p.url, &p.title, 0, 0).unwrap();
+        s.prune_item_emoji().unwrap();
+        assert_eq!(s.pin_emoji("https://n.example/").as_deref(), Some("📰"), "kept when moved to the bookmarks");
+        s.remove_bookmark("https://n.example/").unwrap();
+        assert!(s.pin_emoji("https://n.example/").is_none(), "removed with the item");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2003,8 +2038,10 @@ mod tests {
                     exempt: vec![],
                     zoom: None,
                     url_bar_attached: false,
+                    name: None,
+                    emoji: None,
                 },
-                SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None, exempt: vec![], zoom: None, url_bar_attached: false },
+                SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None, exempt: vec![], zoom: None, url_bar_attached: false, name: None, emoji: None },
             ],
             active: Some(1),
         };

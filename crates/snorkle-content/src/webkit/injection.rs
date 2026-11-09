@@ -40,6 +40,12 @@
 //!   constant watcher (`snorkle_core::imagemenu::watch_js`) added with the
 //!   selection watcher posts an image's URL and position to the same
 //!   handler; `imagemenu::parse_report` parses it strictly.
+//! - Save for Later (channel C22, owner request 2026-11-09): [`call_async`]
+//!   runs `snorkle_core::later`'s constant capture code in the client world
+//!   when the user saves a page or adds pages to a saved one, and reads
+//!   back its string result (the page's HTML, the URLs it loaded, then the
+//!   resources as base64), bounded per call; `snorkle_core::later` parses
+//!   and checks everything before it is stored.
 
 #![allow(non_snake_case)]
 
@@ -75,6 +81,19 @@ impl WKWebView {
         unsafe fn evaluateJavaScript_inFrame_inContentWorld_completionHandler(
             &self,
             source: &NSString,
+            frame: Option<&WKFrameInfo>,
+            world: &WKContentWorld,
+            completion: Option<&block2::DynBlock<dyn Fn(*mut AnyObject, *mut NSError)>>,
+        );
+
+        /// iOS 14+. Like the above, but awaits a returned promise (Save for
+        /// Later's capture, channel C22).
+        #[unsafe(method(callAsyncJavaScript:arguments:inFrame:inContentWorld:completionHandler:))]
+        #[unsafe(method_family = none)]
+        unsafe fn callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler(
+            &self,
+            body: &NSString,
+            arguments: Option<&objc2_foundation::NSDictionary<NSString, AnyObject>>,
             frame: Option<&WKFrameInfo>,
             world: &WKContentWorld,
             completion: Option<&block2::DynBlock<dyn Fn(*mut AnyObject, *mut NSError)>>,
@@ -320,6 +339,37 @@ pub fn read_now(mtm: MainThreadMarker, web: &WKWebView, source: &str, done: crat
         let world = WKContentWorld::defaultClientWorld(mtm);
         web.evaluateJavaScript_inFrame_inContentWorld_completionHandler(
             &NSString::from_str(source),
+            None,
+            &world,
+            Some(&*block),
+        );
+    }
+}
+
+/// Save for Later's capture (channel C22, owner request 2026-11-09): runs
+/// constant code (`snorkle_core::later`: the capture script, or one that
+/// fetches resources by index, the only values put into it) as an async
+/// function body in the main frame, client world, and hands its string
+/// result to `done` if it is at most `max` bytes (page-controlled: the
+/// page's HTML and resources, parsed by `snorkle_core::later`); `None` for
+/// anything else, including a larger result. WebKit calls the completion
+/// once, on the main thread, after the function's promise settles.
+pub fn call_async(mtm: MainThreadMarker, web: &WKWebView, body: &str, max: usize, done: crate::TextDone) {
+    let done = std::cell::Cell::new(Some(done));
+    let block = block2::RcBlock::new(move |result: *mut AnyObject, _error: *mut NSError| {
+        let Some(done) = done.take() else { return };
+        let text = unsafe { result.as_ref() }
+            .and_then(|r| r.downcast_ref::<NSString>())
+            .filter(|s| s.len() <= max)
+            .map(|s| s.to_string())
+            .filter(|t| t.len() <= max);
+        done(text);
+    });
+    unsafe {
+        let world = WKContentWorld::defaultClientWorld(mtm);
+        web.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler(
+            &NSString::from_str(body),
+            None,
             None,
             &world,
             Some(&*block),

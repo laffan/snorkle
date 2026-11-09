@@ -491,23 +491,57 @@ impl ContentHost {
     /// or bookmarked page); `done` gets its bytes, or `None` (failed, or
     /// larger than `storage::MAX_OFFLINE_COPY_BYTES`).
     pub fn save_offline(&mut self, tab: TabId, done: crate::DataDone) {
+        self.web_archive(tab, snorkle_core::storage::MAX_OFFLINE_COPY_BYTES, done);
+    }
+
+    /// WebKit's web archive of the tab's page as it is now
+    /// (`createWebArchiveData`), at most `max` bytes; `None` otherwise.
+    /// Save for Later reads the resources WebKit holds for the page from it.
+    pub fn web_archive(&mut self, tab: TabId, max: usize, done: crate::DataDone) {
         let Some(v) = self.views.get(&tab) else { return done(None) };
         let done = Cell::new(Some(done));
         let block = RcBlock::new(move |data: *mut NSData, _error: *mut NSError| {
             let Some(done) = done.take() else { return };
             let data = unsafe { data.as_ref() };
-            done(data.filter(|d| d.length() <= snorkle_core::storage::MAX_OFFLINE_COPY_BYTES).map(|d| d.to_vec()));
+            done(data.filter(|d| d.length() <= max).map(|d| d.to_vec()));
         });
         unsafe { v.web.createWebArchiveDataWithCompletionHandler(&block) };
+    }
+
+    /// Save for Later's capture (channel C22): runs the constant capture
+    /// code (`snorkle_core::later`) in the page's client world, main frame,
+    /// awaiting its promise, and hands its string result (at most `max`
+    /// bytes) to `done`; `None` otherwise.
+    pub fn run_capture(&mut self, tab: TabId, body: &str, max: usize, done: crate::TextDone) {
+        match self.views.get(&tab) {
+            Some(v) => injection::call_async(self.mtm, &v.web, body, max, done),
+            None => done(None),
+        }
     }
 
     /// Shows an offline copy (web archive) in the tab, with `url` as its
     /// base URL, and JavaScript off for that load. The core has already
     /// accepted it (`Browser::use_offline_copy`).
     pub fn load_offline(&mut self, tab: TabId, url: &Url, data: Vec<u8>) {
+        self.load_archive(tab, url, data, false);
+    }
+
+    /// Loads a web archive in the tab with `url` as its base URL: an
+    /// offline copy (JavaScript off) or a Save for Later archive (its
+    /// page's scripts run, JavaScript off only for a copy of the live
+    /// document or while choosing links). The core has already accepted it
+    /// (`Browser::use_offline_copy`, `Browser::show_saved_copy`).
+    pub fn load_archive(&mut self, tab: TabId, url: &Url, data: Vec<u8>, scripts: bool) {
         let Some(v) = self.views.get(&tab) else { return };
         let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(url.as_str())) else { return };
-        OFFLINE_LOADS.with(|s| s.borrow_mut().insert(Retained::as_ptr(&v.web) as usize));
+        OFFLINE_LOADS.with(|s| {
+            let key = Retained::as_ptr(&v.web) as usize;
+            if scripts {
+                s.borrow_mut().remove(&key);
+            } else {
+                s.borrow_mut().insert(key);
+            }
+        });
         let data = NSData::with_bytes(&data);
         unsafe {
             v.web.loadData_MIMEType_characterEncodingName_baseURL(
@@ -840,7 +874,10 @@ impl ContentHost {
                 Effect::ReleasePrivateData => self.release_private_store(),
                 Effect::OpenExternal(url) => open_external(self.mtm, url),
                 // Handled by the app layer, not the content host.
-                Effect::RecordHistory { .. } | Effect::PersistSession(_) | Effect::NotifyChrome => {}
+                Effect::RecordHistory { .. }
+                | Effect::PersistSession(_)
+                | Effect::NotifyChrome
+                | Effect::OpenSavedPage { .. } => {}
             }
         }
     }

@@ -783,3 +783,48 @@ and backgrounds that change after load. Live NASA verification is pending.
 - **[decide]** Scheme names: `snorkle`, `snorkle-http`, `snorkle-https`. Another app could claim the
   same names; iOS then picks one of the apps, undefined which.
 
+
+## Define inline, tab order and labels, Edit, Copy, Save for Later archives (2026-11-09)
+
+- **[verify]** Save for Later archives on iPad and Mac (nothing here was run on Apple hardware;
+  the capture scripts were run in Chromium against a local test page, the archive format against
+  Python's `plistlib`). Assumed from WebKit's source (`WebLoaderStrategy::scheduleLoad` →
+  `DocumentLoader::scheduleArchiveLoad`; `disallowWebArchive` lets `loadData:` archives through in
+  the main frame): a web archive loaded with `loadData:` and scripts on runs the page's scripts,
+  and WebKit answers their requests (scripts, styles, fonts, images, `fetch`, `XMLHttpRequest`)
+  from the archive when it holds the URL, else from the network. Check on a real article
+  (interactive piece, a Next.js site, a page with web fonts) in airplane mode.
+- **[verify]** `callAsyncJavaScript` in the default client world: `fetch` there uses the page's
+  origin and cookies (same-origin resources) and `performance.getEntriesByType('resource')` sees
+  the page's loads. Cross-origin resources without CORS headers cannot be read by the script; they
+  come from WebKit's own archive of the page (`createWebArchiveData`), which holds what the
+  document references, not what scripts fetched. A cross-origin data request without CORS is
+  therefore missing offline.
+- **[verify]** POST requests, WebSockets, service workers and media larger than 15 MB are not
+  archived; pages that need them degrade offline (as in thedailyprophet). Pages whose HTML could
+  not be fetched again are saved as WebKit's copy of the live document and shown with
+  JavaScript off.
+- **[verify]** Back and forward between pages of a saved copy are left to WebKit (links open pages
+  from the archive as new entries). Going back to an archive entry WebKit no longer holds in its
+  page cache may reload it from the network, i.e. fail offline. A session restored after a
+  relaunch reopens a saved copy's tab as the live page.
+- **[decide]** Clicking a saved page's thumbnail opens its saved copy (it stays in the list);
+  Recover opens the live page and removes it, as before. "+" opens the saved copy with scripts off
+  (so script-driven links are plain links) and link taps choose pages on the same host (at most 30
+  pages per saved page); Add loads each chosen page live in that tab, saves it into the same
+  archive and shows the saved copy again. Pages a site loads only through scripts (single-page
+  app routes without real links) cannot be chosen this way.
+- **[decide]** Limits: 15 MB per resource, 80 MB per saved page (all its pages), 1 GB for all
+  archives (the oldest lose their archive first and keep address, title and thumbnail), 1,500
+  resources, 90 s per capture.
+- **[verify]** Emoji in the Edit dialog on iPad: the dialog is no longer inside the sidebar (whose
+  flyout could hide when the system emoji picker appeared, taking the field with it; assumed cause,
+  not reproduced), and a grid of common emoji fills the field without the system picker.
+- **[verify]** Define's spelling check depends on the model following the `SPELLING:` instruction;
+  a model that defines a misspelling directly still gives a definition (no question is asked).
+- **[decide]** Dragging a tab onto the top or bottom 30% of another row moves it there; the middle
+  pairs them in split view, as before. A split half dropped between rows leaves its pair. Same-site
+  groups are still drawn at their first member's position, so order inside a group follows the
+  drag but a group does not split.
+- **[verify]** The Copy button sits beside Share inside the address field; with a narrow address
+  field (narrow windows), check the address is not hidden by the two buttons.

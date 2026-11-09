@@ -104,6 +104,9 @@ fn no_webkit_page_to_native_channels() {
             (INJECTION_FILE, "WKScriptMessageHandler"),
             (INJECTION_FILE, "addScriptMessageHandler"),
             (INJECTION_FILE, "pageWorld"),
+            // Owner request 2026-11-09: Save for Later's capture (C22), run
+            // only when the user saves a page or adds pages to a saved one.
+            (INJECTION_FILE, "callAsyncJavaScript"),
             // Owner request 2026-11-03: downloads into the app's staging folder (D1).
             (DOWNLOADS_FILE, "WKDownload"),
             (DELEGATES_FILE, "WKDownload"),

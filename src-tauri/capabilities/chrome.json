@@ -110,6 +110,12 @@
     "allow-restore-later",
     "allow-bookmark-later",
     "allow-delete-later",
-    "allow-set-pull-to-refresh"
+    "allow-set-pull-to-refresh",
+    "allow-move-tab",
+    "allow-set-tab-label",
+    "allow-open-later",
+    "allow-add-later-pages",
+    "allow-finish-adding-pages",
+    "allow-cancel-adding-pages"
   ]
 }

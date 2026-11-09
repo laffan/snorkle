@@ -90,7 +90,7 @@ processes as for Safari.
 
 | # | Boundary | Direction | Mechanism | Enforced by |
 |---|---|---|---|---|
-| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). Exception, only when the user sends a page-chat message: the result of one constant script (title, visible text, selection) is read back (§5g, C17). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
+| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). Exception, only when the user sends a page-chat message: the result of one constant script (title, visible text, selection) is read back (§5g, C17). Exception, only when the user saves a page for later or adds pages to a saved one: constant capture code reads back the page's HTML, the URLs it loaded and those resources (§5b, C22). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
 | B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants every app command in `command_list.rs` and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews inside the content area (between the status bar, the sidebar and any docked panel; down to the bottom of the window), `clipsToBounds`. The URL pill, its popup and toasts float over the content area as **holes**: every container is masked there and does not take touches there, so the chrome below shows through and a page can never draw over or under them (§5f). Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Other chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs` (`apply_mask`), `ios/keys.rs` (`pointInside`), `snorkle_content::sanitize_holes`, `Browser::sync_visibility`, `browser_invariants.rs` |
@@ -422,12 +422,17 @@ smaller; sites that serve an enlarged layout to a narrow iPad window get their w
 
 **Pins and bookmarks:** opening one returns to its tab as it was left (since 2026-11-03; before,
 it always loaded the item's page again). Right-click or ⌘-click on one opens its menu: Copy URL (the page its tab shows, or the saved
-address if it has no tab; ordinary tabs get a menu with only this, on right-click), Return to
-Original URL (its tab loads the saved address) and Edit URL (read like the address bar, addresses
-only; title, place and emoji are kept, its tab follows via `Browser::rekey_launcher`, its offline
-copy is dropped). **Pins:** up to 12 (three rows of four); their menu adds Return to
-Bookmark (moves it to the top of the bookmarks) and Use Emoji for Icon (an emoji shown instead of
-the favicon, stored in `pin-emoji.json`, validated by `storage::clean_emoji`). **Appearance**
+address if it has no tab), Edit… and Return to Original URL (its tab loads the saved address);
+tabs get the same menu on right-click without Return to Original URL. **Edit** (2026-11-09) is one
+dialog for tabs, pins and bookmarks: title, URL and an emoji shown instead of the favicon (typed, or
+chosen from a grid of common emoji). For a pin or bookmark the URL is read like the address bar
+(addresses only; place is kept, its tab follows via `Browser::rekey_launcher`, its offline copy is
+dropped when the URL changes) and the emoji is stored in `pin-emoji.json` for pins and bookmarks
+alike (`storage::clean_emoji`; kept when a pin moves into the bookmarks, dropped with the item). For
+a tab the title is its own name (`Tab::name`, shown instead of the page's title; empty follows the
+page), the emoji `Tab::emoji` (both saved with the session, `Browser::set_tab_label`), and a changed
+URL loads in the tab like the address bar. Bookmark rows are one line, like tabs. **Pins:** up to 12
+(three rows of four); their menu adds Return to Bookmark (moves it to the top of the bookmarks). **Appearance**
 (Settings → General: System, Light, Dark) sets the chrome's colours (`data-theme`) and the
 window's `overrideUserInterfaceStyle`, so system UI and content views without dark pages mode
 follow it.
@@ -469,7 +474,8 @@ the image natively (ephemeral session, no cookies, `image/*` only, ≤ 25 MB): C
 pasteboard, Share opens the share sheet with it as a file, Download opens the Files export
 picker. iOS's own long-press callout is turned off for images.
 
-The share button (inside the address field, at its right end) opens the system share sheet for the
+The copy button (beside it, 2026-11-09) puts the page's committed URL on the clipboard. The share
+button (inside the address field, at its right end) opens the system share sheet for the
 page's committed URL, as a popover from the button (so Instapaper and other share extensions
 appear). Selecting text on a page shows a small menu above it, cut out of the page: Google This
 (a new tab), Ask AI (opens the chat with the quote as a draft) and Define (the system
@@ -538,10 +544,14 @@ title, visible text and the selection at that moment). Continuing an archived ch
 sends that stored context instead of reading the current page; nothing typed in a private tab is
 stored. Chats can be deleted from the archive.
 
-**Define** (2026-11-08): the start page's Define row starts a new chat in its tab whose first
-message is `Define “word”.`; Rust sends `ai::define_request` (a dictionary system prompt and the
-word, validated again by `ai::clean_word`: letters, with apostrophes or hyphens inside, at most 64)
-and reads no page. Follow-up questions continue it. It is archived like other chats
+**Define** (2026-11-08; inline since 2026-11-09): the start page's Define row asks `Define “word”.`;
+Rust sends `ai::define_request` (a dictionary system prompt and the word, validated again by
+`ai::clean_word`: letters, with apostrophes or hyphens inside, at most 64) and reads no page. The
+first request also asks the model to answer a likely misspelling with only `SPELLING: <word>`
+(`ai::parse_spelling`); that answer is returned as a suggestion and nothing is archived, and the card
+above the start page's input asks "Did you mean …?" with a button to define either spelling, sent
+again with `exact` (no spelling check). The definition is shown in that card, not in the chat panel,
+and becomes the tab's chat: "Ask a follow-up" opens the panel to continue it. It is archived like other chats
 (`ChatRecord::word`, with no URL or page text; the archive shows it as "Definition"), except from
 private tabs. The usage log names it "definition", without the word.
 
@@ -569,14 +579,42 @@ tabs) and the × of bookmarks and domain headings appear only while the row is p
 touch-only devices: on the active tab or bookmark, and always on domain headings).
 **Save for Later** (2026-11-09; `snorkle_core::later`, `later/`): a tab's tray button snapshots what
 its view shows (`takeSnapshotWithConfiguration`, visible bounds, 320 pt wide, JPEG 0.6, drawn by the
-app from its own web view), stores the committed page, title and thumbnail (≤ 200 pages, ≤ 400 KB
-each, JPEG magic checked), and closes the tab; private tabs and empty tabs have no such button. A
-tab without a live view, or one WebKit cannot draw, is saved without a thumbnail (the chrome shows
-the site's letter). While any are saved, the same icon sits beside the menu and swaps the sidebar's
-contents for the saved pages (thumbnail, title underneath), each with Recover (a new tab; also a
-click on the thumbnail), Bookmark (added at the end of the bookmarks) and Delete on hover; each
-action removes the page from the list.
-Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input. **Define** (single words only, `ai::clean_word`) opens the chat panel with a new chat asking the chat's model for a dictionary-style definition (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
+app from its own web view), saves the page as an **archive** that works offline (below), stores the
+committed page, title and thumbnail (≤ 200 pages, ≤ 400 KB each, JPEG magic checked), and closes
+the tab; private tabs and empty tabs have no such button. A tab without a live view is saved without
+an archive, and one WebKit cannot draw without a thumbnail (the chrome shows the site's letter).
+While any are saved, the same icon sits beside the menu and swaps the sidebar's contents for the
+saved pages (thumbnail, title underneath, the number of pages when more than one). A click on the
+thumbnail opens the saved copy in a new tab (it stays in the list; without an archive it opens the
+live page). On hover: Recover (the live page in a new tab), "+" (add pages), Bookmark (added at the
+end of the bookmarks) and Delete; Recover, Bookmark and Delete remove the page from the list.
+
+*Archives* (the method of laffan/thedailyprophet, without its element removal, as WebKit web
+archives; `snorkle_core::webarchive`, `src-tauri/src/saved.rs`): the page's HTML is kept as the
+server sends it and every resource the page loaded under its original URL. Capture reads, from the
+app's own web view: WebKit's archive of the page (`createWebArchiveData`, parsed in Rust: the
+resources WebKit holds, cross-origin ones included), then a constant script run with
+`callAsyncJavaScript` in the page's client world (C22, `later::CAPTURE_START_JS`) that fetches the
+HTML again with the page's session (`cache: force-cache`) and lists what the page loaded (resource
+timeline, element sources, `srcset`, stylesheets and their `url()`s, inline styles); the resources
+WebKit did not have are fetched in the client world (same-origin with cookies, others without),
+eight at a time by index, and handed over as base64 in pieces of about 8 MB. Everything is checked
+in Rust (http(s) URLs without fragments or credentials, MIME types and charsets as plain tokens,
+15 MB per resource, 80 MB and 1,500 resources per saved page, 90 s per capture, 1 GB for all
+archives with the oldest dropped first) and written under app-chosen names in `later/<id>/`. If the
+HTML cannot be fetched again, WebKit's copy of the live document is kept instead and shown with
+JavaScript off. Reading builds one web archive per page (binary property list, main resource and
+subresources) and loads it with `loadData:MIMEType:@"application/x-webarchive"` under the page's
+own URL with scripts on; WebKit answers the page's requests (scripts, styles, fonts, images,
+`fetch`, XHR) from the archive (`DocumentLoader::scheduleArchiveLoad`), so no URL is rewritten and
+no URL scheme handler exists. The core marks the tab (`Tab::saved`, `Browser::show_saved_copy`; a
+"Saved copy" pill; not written to history): a link to another page of the archive is cancelled and
+that page loaded from the archive (`Effect::OpenSavedPage`), Reload reloads from the archive, any
+other link leaves it through the navigation policy. "+" opens the saved copy with scripts off and
+a bar above the pill: each link tapped on the page (same host, at most 30 pages) is chosen or
+unchosen in the core instead of navigating; Add loads each chosen page live in that tab, captures
+it the same way into the same archive (resources shared), and shows the saved copy again.
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto the middle of another pairs them in split view, onto the top or bottom 30% of a row (or below the last) moves it there (2026-11-09, `Browser::move_tab`; the session keeps the order), and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input. **Define** (single words only, `ai::clean_word`) shows the chat's model's dictionary-style definition in a card above the input (2026-11-09; before, it opened the chat panel), after asking which word was meant if the model thinks it is misspelt (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both

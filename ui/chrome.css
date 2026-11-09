@@ -344,6 +344,7 @@ body.resizing-right, body.resizing { cursor: col-resize; }
   border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); font-size: 14px;
 }
 .confirm-pop #confirm-text { flex: 1 1 220px; }
+.pick-bar #pick-text { flex: 1 1 220px; }
 .pillbtn.primary { background: var(--fg); color: var(--bar); }
 
 /* Page actions: opens above the pill's ⋯ button, over the page. */
@@ -407,12 +408,13 @@ body.narrow #omnibox { flex: 1 1 auto; width: auto; }
   width: 100%; height: 38px; border-radius: 19px; background: var(--field);
   padding: 0 12px; font-size: 16px;
 }
-/* Room for the share button on the right, and as much on the left so the
-   address stays centred in the field. */
-#url-display { display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; padding: 0 36px; }
+/* Room for the copy and share buttons on the right, and as much on the
+   left so the address stays centred in the field. */
+#url-display { display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; padding: 0 68px; }
 body.narrow #url-display { padding-left: 12px; }
 #toolbar .omni-share { position: absolute; right: 3px; top: 3px; min-width: 32px; width: 32px; height: 32px; border-radius: 16px; color: var(--muted); }
 #toolbar .omni-share:hover { color: var(--fg); }
+#toolbar .omni-copy { right: 35px; }
 #url-input { border: 2px solid var(--accent); outline: none; }
 .security { font-size: 13px; margin-right: 6px; white-space: nowrap; }
 .security:empty { display: none; }
@@ -535,6 +537,14 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 }
 .modal { width: min(520px, 100%); }
 /* Settings: section list on the left, content on the right. */
+/* Edit (tabs, pins, bookmarks). */
+.modal.edit-item { width: min(460px, 100%); max-height: 100%; overflow-y: auto; }
+.emoji-row { display: flex; gap: 8px; align-items: center; }
+.emoji-row input { flex: 1; min-width: 0; font-size: 20px; }
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 4px; margin-top: 6px; }
+.emoji-grid button { height: 38px; border-radius: 8px; font-size: 22px; line-height: 1; filter: none; }
+.emoji-grid button[aria-pressed="true"] { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }
+.edit-msg:empty { display: none; }
 .modal.settings { width: min(820px, 100%); height: min(620px, 100%); padding: 0; display: flex; overflow: hidden; }
 .settings-nav { flex: 0 0 180px; padding: 20px 10px; border-right: 1px solid var(--line); background: var(--side); display: flex; flex-direction: column; gap: 2px; }
 .settings-nav h1 { font-size: 20px; margin: 0 8px 12px; }
@@ -681,6 +691,24 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .palette-list .h { color: var(--muted); font-size: 13px; flex: 0 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 40%; }
 .palette-list .kind { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; flex: 0 0 auto; width: 64px; }
 .palette-list mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
+/* Define: the definition sits above the input (the input stays where it
+   is), scrolling inside its card when long. */
+.define-card {
+  position: absolute; left: 50%; bottom: calc(60% + 43px); transform: translateX(-50%);
+  width: min(640px, calc(100% - 48px)); max-height: calc(40% - 55px);
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 18px;
+  background: var(--bar); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .14); overflow: hidden;
+}
+.define-head { display: flex; align-items: center; gap: 8px; flex: none; }
+.define-word { flex: 1; min-width: 0; font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.define-head .icon { width: 30px; height: 30px; font-size: 20px; }
+.define-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; white-space: pre-wrap; line-height: 1.45; user-select: text; -webkit-user-select: text; }
+.define-body.pending { color: var(--muted); }
+.define-body.error { color: var(--danger); }
+.define-ask { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
+.define-foot { display: flex; align-items: center; gap: 12px; flex: none; }
+.define-foot .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- pinned grid ------------------------------------------------------- */
 .pingrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-height: 60px; padding: 2px; border-radius: 12px; }
@@ -707,13 +735,6 @@ body.dragging .pin > .unpin { opacity: 0; pointer-events: none; }
 .pin .emoji { font-size: 26px; line-height: 1; pointer-events: none; }
 /* Pin menu (right-click / ⌘-click), placed under the pin in the sidebar. */
 .popup.pin-pop { left: 10px; right: 10px; bottom: auto; min-width: 0; z-index: 6; }
-.pin-emoji-form { display: flex; gap: 6px; padding: 6px; }
-#item-url-form { flex-direction: column; }
-#item-url-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-#item-url-form input { font-size: 14px; text-align: left; color: var(--fg); }
-.pin-emoji-form input { flex: 1; min-width: 0; font-size: 22px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); text-align: center; }
-.popup .pin-emoji-form button { padding: 8px 14px; justify-content: center; }
-.pin-emoji-hint { margin: 0 8px 6px; }
 .letter { width: 28px; height: 28px; border-radius: 8px; color: #fff; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; }
 .pin > .unpin {
   position: absolute; top: -4px; right: -4px; width: 20px; height: 20px; border-radius: 10px;
@@ -820,6 +841,7 @@ body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
 /* Tab favicons (2026-11-04): the site's icon, a bundled one, or its letter,
    left of the title. Clicks go to the row. */
 .tab > .tab-icon, .bm > .tab-icon { flex: 0 0 18px; width: 18px; height: 18px; margin-left: 10px; border-radius: 4px; object-fit: contain; pointer-events: none; }
+:is(.tab, .bm) > span.tab-icon.emoji-icon { display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; }
 :is(.tab, .bm) > span.tab-icon.letter { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; }
 :is(.tab, .bm) > .tab-icon + .open { padding-left: 8px; }
 .tab-group > .tab > .tab-icon { margin-left: 6px; }
@@ -851,14 +873,15 @@ body.later-open #side-scroll { display: none; }
 .later-card .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
 .later-card .thumb .letter { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: var(--muted); }
 .later-card .t { font-size: 12px; line-height: 1.3; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.later-card .pages { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .later-actions {
-  position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; padding: 2px; border-radius: 8px;
+  position: absolute; top: 4px; right: 4px; display: flex; gap: 0; padding: 2px; border-radius: 8px;
   background: var(--bar); box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
   opacity: 0; pointer-events: none; transition: opacity .1s;
 }
-.later-actions button { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg); font-size: 17px; }
+.later-actions button { width: 24px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg); font-size: 17px; }
 .later-actions button:hover { background: var(--field); }
-.later-actions svg { width: 16px; height: 16px; }
+.later-actions svg { width: 15px; height: 15px; }
 .later-card:focus-within .later-actions { opacity: 1; pointer-events: auto; }
 @media (any-hover: hover) { .later-card:hover .later-actions { opacity: 1; pointer-events: auto; } }
 @media (any-hover: none) { .later-actions { opacity: 1; pointer-events: auto; } }

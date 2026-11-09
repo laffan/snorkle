@@ -487,6 +487,8 @@ fn saved_zoom_is_snapped_to_a_level() {
             exempt: vec![],
             zoom: Some(4000),
             url_bar_attached: false,
+            name: None,
+            emoji: None,
         }],
         active: Some(0),
     };
@@ -658,6 +660,8 @@ fn session_restore_is_lazy() {
                 exempt: vec![],
                 zoom: None,
                 url_bar_attached: false,
+                name: None,
+                emoji: None,
             })
             .collect(),
         active: Some(3),
@@ -1227,4 +1231,116 @@ fn url_bar_attachment_is_per_tab_and_restored() {
     let tabs = restored.view().tabs;
     assert!(tabs[0].url_bar_attached);
     assert!(!tabs[1].url_bar_attached);
+}
+
+// ---- tab order and labels (2026-11-09) -------------------------------------
+
+#[test]
+fn tabs_reorder_and_keep_their_labels_across_launches() {
+    let mut b = browser(4);
+    let (a, _) = b.new_tab(Profile::Default, 0);
+    webkit_load(&mut b, a, "https://a.example/");
+    let (c, _) = b.new_tab(Profile::Default, 0);
+    webkit_load(&mut b, c, "https://c.example/");
+    let (d, _) = b.new_tab(Profile::Default, 0);
+    webkit_load(&mut b, d, "https://d.example/");
+    let order = |b: &Browser| b.view().tabs.iter().map(|t| t.id).collect::<Vec<_>>();
+    let out = b.move_tab(d, Some(a));
+    assert_eq!(order(&b), vec![d, a, c]);
+    assert!(out.iter().any(|e| matches!(e, Effect::PersistSession(s) if s.tabs[0].url == "https://d.example/")));
+    b.move_tab(d, None);
+    assert_eq!(order(&b), vec![a, c, d], "None moves to the end");
+    assert!(b.move_tab(a, Some(a)).is_empty() && b.move_tab(a, Some(TabId(999))).is_empty());
+    assert_eq!(order(&b), vec![a, c, d]);
+
+    b.set_tab_label(c, Some("  Reading \u{202e}list "), Some("📚")).unwrap();
+    assert!(b.set_tab_label(c, None, Some("two emoji ok?")).is_err(), "not an emoji");
+    let v = b.view().tabs.into_iter().find(|t| t.id == c).unwrap();
+    assert_eq!((v.name.as_deref(), v.emoji.as_deref()), (Some("Reading list"), Some("📚")));
+    let session = b.session();
+    let mut b2 = browser(4);
+    b2.restore_session(&session, 0);
+    let v = b2.view().tabs.into_iter().find(|t| t.title.is_empty() && t.name.is_some()).expect("restored with its name");
+    assert_eq!(v.emoji.as_deref(), Some("📚"));
+    b.set_tab_label(c, Some("   "), None).unwrap();
+    let v = b.view().tabs.into_iter().find(|t| t.id == c).unwrap();
+    assert!(v.name.is_none() && v.emoji.is_none(), "cleared");
+}
+
+// ---- Save for Later archives (2026-11-09) ----------------------------------
+
+fn saved_copy(page: &str, pages: &[&str]) -> snorkle_core::tabs::SavedCopy {
+    snorkle_core::tabs::SavedCopy {
+        item: "l1-0".into(),
+        page: u(page),
+        pages: pages.iter().map(|p| u(p)).collect(),
+        saved_ms: 7,
+        committed: false,
+        picking: None,
+    }
+}
+
+/// The host loading the archive: WebKit asks about its base URL, commits.
+fn load_saved(b: &mut Browser, tab: TabId, page: &str) {
+    let (v, _) = b.decide_navigation(tab, &u(page), Frame::Main, NavKind::Other, 0);
+    assert_eq!(v, Verdict::Allow, "the archive's own load");
+    b.on_provisional_start(tab);
+    b.on_commit(tab, u(page));
+    let out = b.on_finish(tab);
+    assert!(!out.iter().any(|e| matches!(e, Effect::RecordHistory { .. })), "a saved copy is not a visit");
+}
+
+#[test]
+fn saved_archives_open_their_own_pages_and_nothing_else() {
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    let out = b.show_saved_copy(t, saved_copy("https://a.example/one", &["https://a.example/one", "https://a.example/two"]));
+    assert!(out.iter().any(|e| matches!(e, Effect::CreateView { then: AfterCreate::Restore { fallback: None }, .. })), "a view, nothing loaded");
+    load_saved(&mut b, t, "https://a.example/one");
+    assert!(b.shows_offline_copy(t));
+    let view = b.view().tabs.into_iter().find(|x| x.id == t).unwrap();
+    assert_eq!(view.saved.as_ref().map(|s| (s.pages, s.saved_ms)), Some((2, 7)));
+
+    // A link to the archive's other page opens it from the archive.
+    let (v, out) = b.decide_navigation(t, &u("https://a.example/two#part"), Frame::Main, NavKind::LinkActivated, 0);
+    assert_eq!(v, Verdict::Cancel);
+    assert!(out.iter().any(|e| matches!(e, Effect::OpenSavedPage { url, item, .. } if url.as_str() == "https://a.example/two" && item == "l1-0")));
+    // Same page (an anchor) and back/forward are WebKit's.
+    assert_eq!(b.decide_navigation(t, &u("https://a.example/one#x"), Frame::Main, NavKind::LinkActivated, 0).0, Verdict::Allow);
+    assert_eq!(b.decide_navigation(t, &u("https://a.example/two"), Frame::Main, NavKind::BackForward, 0).0, Verdict::Allow);
+    // Reload reloads from the archive.
+    assert!(matches!(b.reload(t).as_slice(), [Effect::OpenSavedPage { .. }]));
+
+    // Any other link leaves the archive (the live page, through the policy).
+    let (v, _) = b.decide_navigation(t, &u("https://elsewhere.example/"), Frame::Main, NavKind::LinkActivated, 0);
+    assert_eq!(v, Verdict::Allow);
+    b.on_provisional_start(t);
+    assert!(b.saved_copy(t).is_none(), "the next load replaces the saved copy");
+
+    // Never in private tabs.
+    let (p, _) = b.new_tab(Profile::Private, 0);
+    assert!(b.show_saved_copy(p, saved_copy("https://a.example/one", &["https://a.example/one"])).is_empty());
+    assert!(b.saved_copy(p).is_none());
+}
+
+#[test]
+fn choosing_pages_to_add_navigates_nowhere() {
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    let mut copy = saved_copy("https://a.example/one", &["https://a.example/one"]);
+    copy.picking = Some(Vec::new());
+    b.show_saved_copy(t, copy);
+    load_saved(&mut b, t, "https://a.example/one");
+    let link = |b: &mut Browser, url: &str, kind| b.decide_navigation(t, &u(url), Frame::Main, kind, 0).0;
+    assert_eq!(link(&mut b, "https://a.example/two#x", NavKind::LinkActivated), Verdict::Cancel);
+    assert_eq!(link(&mut b, "https://a.example/three", NavKind::LinkActivated), Verdict::Cancel);
+    assert_eq!(link(&mut b, "https://other.example/", NavKind::LinkActivated), Verdict::Cancel, "other sites are not added");
+    assert_eq!(link(&mut b, "https://a.example/one", NavKind::LinkActivated), Verdict::Cancel, "already in the archive");
+    assert_eq!(link(&mut b, "https://a.example/four", NavKind::Other), Verdict::Cancel, "only link taps choose");
+    assert_eq!(link(&mut b, "https://a.example/three", NavKind::LinkActivated), Verdict::Cancel, "a second tap unchooses");
+    let view = b.view().tabs.into_iter().find(|x| x.id == t).unwrap();
+    assert_eq!(view.saved.unwrap().picking, Some(vec!["/two".to_string()]));
+    let (item, picks) = b.take_picks(t).unwrap();
+    assert_eq!((item.as_str(), picks), ("l1-0", vec![u("https://a.example/two")]));
+    assert!(b.take_picks(t).is_none());
 }

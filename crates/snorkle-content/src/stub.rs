@@ -90,6 +90,16 @@ impl ContentHost {
 
     pub fn load_offline(&mut self, _tab: TabId, _url: &url::Url, _data: Vec<u8>) {}
 
+    pub fn web_archive(&mut self, _tab: TabId, _max: usize, done: crate::DataDone) {
+        done(None);
+    }
+
+    pub fn run_capture(&mut self, _tab: TabId, _body: &str, _max: usize, done: crate::TextDone) {
+        done(None);
+    }
+
+    pub fn load_archive(&mut self, _tab: TabId, _url: &url::Url, _data: Vec<u8>, _scripts: bool) {}
+
     pub fn image_result(
         &mut self,
         _action: snorkle_core::imagemenu::ImageAction,
