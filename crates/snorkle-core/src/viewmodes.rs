@@ -168,8 +168,25 @@ pub const NO_MEDIA_CSS: &str = concat!(
     ":root:has(#__snorkle_no_images) [data-snorkle-loading][data-snorkle-loading][data-snorkle-loading]",
     "{background-color:#c8c8c8!important;filter:grayscale(1) contrast(0) brightness(var(--snorkle-pulse,1.57))!important;",
     "animation:snorkle-pulse 1.1s ease-in-out infinite!important}",
-    "*,*::before,*::after{background-image:none!important}"
+    "*,*::before,*::after{background-image:none!important}",
+    // Video (2026-11-09): WebKit does not reliably apply a filter on a
+    // playing <video> itself (its picture is a separate layer), so the gray
+    // box goes on the video's frame, marked by the tracker
+    // (VIDEO_BOX_ATTR); media inside it get no filter of their own (two
+    // ids, so this beats the rules above). Inverted dark pages use dark
+    // mode's media box instead (DARK_CSS).
+    ":root:not(.snorkle-dark):has(#__snorkle_no_images) [data-snorkle-video-box]",
+    "{background-color:#c8c8c8!important;filter:grayscale(1) contrast(0) brightness(1.57)!important;",
+    "transition:filter .3s ease-out,background-color .3s ease-out!important}",
+    ":root:not(.snorkle-dark):has(#__snorkle_no_images) [data-snorkle-video-box]:is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
+    "{background-color:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
+    ":root:not(.snorkle-dark):has(#__snorkle_no_images):has(#__snorkle_no_images) [data-snorkle-video-box] :is(",
+    "img,input[type=image],svg image,video,canvas,object,embed,iframe)",
+    "{filter:none!important;background-color:transparent!important;animation:none!important}"
 );
+/// Attribute hide media's tracker puts on each video's frame (see
+/// [`VIDEO_BOX_JS`]).
+pub const VIDEO_BOX_ATTR: &str = "data-snorkle-video-box";
 /// Attribute the pointer tracker puts on the media under the pointer.
 pub const REVEAL_ATTR: &str = "data-snorkle-reveal";
 /// Attribute the pointer tracker puts on an image under the pointer that
@@ -564,6 +581,38 @@ pub fn scroll_to_heading_js(index: u32) -> String {
     )
 }
 
+/// Hide media's video frames (2026-11-09; the same search as dark mode's
+/// media box, [`DARK_DETECT_JS`]): for each video, in the document and in
+/// open shadow roots one level deep, the nearest ancestor in the document
+/// whose box matches the video's to within 4 px, else one that contains it
+/// and is at most twice its area (a letterboxed player), else the video
+/// itself, is marked [`VIDEO_BOX_ATTR`]; [`NO_MEDIA_CSS`] grays that
+/// element. Refreshed when the document changes (at most every 0.5 s),
+/// when a video's size becomes known, on resize, at document end, on load
+/// and 1.5 s later (these three also look for shadow roots, which walks
+/// every element). Runs inside the tracker of [`style_js`] (`s` is its
+/// state); constant code.
+const VIDEO_BOX_JS: &str = "var VB='data-snorkle-video-box';s.vb=[];s.hosts=[];s.vt=0;\
+s.vids=function(full){var out=[].slice.call(document.querySelectorAll('video'));\
+if(full){s.hosts=[];var all=document.querySelectorAll('*');for(var i=0;i<all.length&&i<30000;i++){if(all[i].shadowRoot)s.hosts.push(all[i]);}}\
+s.hosts.forEach(function(e){var r=e.shadowRoot;if(r&&e.isConnected)out=out.concat([].slice.call(r.querySelectorAll('video')));});return out;};\
+s.frame=function(v){var r=v.getBoundingClientRect();if(r.width<2||r.height<2)return null;var e=v;\
+for(var i=0;i<8;i++){var p=e.parentElement||(e.parentNode&&e.parentNode.host)||null;\
+if(!p||p===document.body||p===document.documentElement)break;var q=p.getBoundingClientRect();\
+var same=Math.abs(q.left-r.left)<=4&&Math.abs(q.top-r.top)<=4&&Math.abs(q.right-r.right)<=4&&Math.abs(q.bottom-r.bottom)<=4;\
+var near=q.left<=r.left+4&&q.top<=r.top+4&&q.right>=r.right-4&&q.bottom>=r.bottom-4&&q.width*q.height<=r.width*r.height*2;\
+if(!same&&!near)break;if(p.getRootNode()===document)return p;if(!same)break;e=p;}\
+return v.getRootNode()===document?v:null;};\
+s.boxes=function(full){s.vt=0;var want=[];s.vids(full===true).forEach(function(v){var b=s.frame(v);if(b&&want.indexOf(b)<0)want.push(b);});\
+s.vb.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(VB);});\
+want.forEach(function(e){if(!e.hasAttribute(VB))e.setAttribute(VB,'');});s.vb=want;};\
+s.later=function(){if(!s.vt)s.vt=setTimeout(s.boxes,500);};\
+s.full=function(){s.boxes(true);};\
+s.onMeta=function(e){if(e.target&&e.target.tagName==='VIDEO')s.later();};\
+document.addEventListener('loadedmetadata',s.onMeta,true);window.addEventListener('resize',s.later);\
+document.addEventListener('DOMContentLoaded',s.full);window.addEventListener('load',s.full);s.vt2=setTimeout(s.full,1500);\
+if(document.readyState!=='loading')s.full();";
+
 /// Adds (or removes) a fixed style. While on, the style re-attaches itself
 /// if the page removes it (single-page apps that rebuild `<head>`). With
 /// `pause_media`, videos that start playing are paused unless the pointer is
@@ -582,6 +631,9 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              document.removeEventListener('scroll',s.onScroll,true);document.removeEventListener('mouseout',s.onOut,true);\
              document.removeEventListener('load',s.onLoad,true);document.removeEventListener('error',s.onLoad,true);\
              if(s.raf)cancelAnimationFrame(s.raf);s.rev.forEach(function(e){{e.removeAttribute({attr});e.removeAttribute({ld});}});}}\
+             if(s.vb){{clearTimeout(s.vt);clearTimeout(s.vt2);document.removeEventListener('loadedmetadata',s.onMeta,true);\
+             window.removeEventListener('resize',s.later);document.removeEventListener('DOMContentLoaded',s.full);\
+             window.removeEventListener('load',s.full);s.vb.forEach(function(e){{e.removeAttribute('data-snorkle-video-box');}});}}\
              delete window[{key}];}})();"
         );
     }
@@ -615,8 +667,9 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              s.shown=function(t){{return t.matches(':hover')||t.hasAttribute({attr});}};\
              s.onPlay=function(e){{var t=e.target;if(t&&t.matches&&t.matches(sel)&&!s.shown(t)&&t.pause)t.pause();}};\
              document.addEventListener('play',s.onPlay,true);\
-             document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!s.shown(v))v.pause();}});",
-            sel = json_str(MEDIA_SELECTOR)
+             document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!s.shown(v))v.pause();}});{vbox}",
+            sel = json_str(MEDIA_SELECTOR),
+            vbox = VIDEO_BOX_JS
         )
     } else {
         String::new()
@@ -628,7 +681,7 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
         "(function(){{if(window[{key}])return;var s={{}};window[{key}]=s;\
          var st=document.createElement('style');st.id={id};st.textContent={css};s.st=st;\
          var seen=[];var watch=function(n){{if(n&&seen.indexOf(n)<0){{seen.push(n);s.obs.observe(n,{{childList:true,subtree:true}});}}}};\
-         var put=function(){{if(s.queue)s.queue();watch(document.documentElement);watch(document.head);\
+         var put=function(){{if(s.queue)s.queue();if(s.later)s.later();watch(document.documentElement);watch(document.head);\
          var r=document.head||document.documentElement;if(r&&!st.isConnected)r.appendChild(st);}};\
          s.obs=new MutationObserver(put);watch(document);put();{pause}}})();",
         css = json_str(css)
@@ -866,6 +919,20 @@ mod tests {
         }
         assert!(js.contains(DARK_STOP_JS));
         assert!(!js.contains("createElement('style')"), "adds no style");
+    }
+
+
+    #[test]
+    fn hidden_video_is_grayed_on_its_frame() {
+        assert!(NO_MEDIA_CSS.contains(&format!(":root:not(.snorkle-dark):has(#__snorkle_no_images) [{VIDEO_BOX_ATTR}]{{")));
+        assert!(NO_MEDIA_CSS.contains(&format!("[{VIDEO_BOX_ATTR}]:is(:hover,[{REVEAL_ATTR}],:has([{REVEAL_ATTR}]))")));
+        assert!(NO_MEDIA_CSS.contains(":has(#__snorkle_no_images):has(#__snorkle_no_images)"), "inner media lose their own filter");
+        assert!(VIDEO_BOX_JS.contains(&format!("var VB='{VIDEO_BOX_ATTR}'")));
+        let on = style_js("__snorkle_no_images", NO_MEDIA_CSS, true, true);
+        assert!(on.contains("s.boxes=function") && on.contains("if(s.later)s.later();"));
+        assert!(!style_js("__snorkle_grayscale", GRAYSCALE_CSS, true, false).contains("s.boxes"), "only hide media marks frames");
+        let off = style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true);
+        assert!(off.contains(&format!("removeAttribute('{VIDEO_BOX_ATTR}')")), "marks removed when turned off");
     }
 
 }

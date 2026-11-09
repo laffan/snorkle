@@ -245,7 +245,12 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   background images do not. Hidden images and videos are drawn opaque, so lazy-loading
   placeholders kept at `opacity: 0` still show their gray box; an image pointed at before it has
   loaded is marked `data-snorkle-loading` (a lazy one is switched to eager loading) and stays a
-  pulsing gray box until its load or error event, then fades in.
+  pulsing gray box until its load or error event, then fades in. Video (2026-11-09): WebKit does
+  not reliably apply a filter on a playing `<video>` itself, so hide media's tracker marks each
+  video's frame (`data-snorkle-video-box`: the nearest same-size ancestor in the document, else one
+  at most twice its area that contains it, else the video; open shadow roots one level deep, as
+  dark mode's media box) and the gray box goes on that frame, revealed while pointed at; media inside
+  it get no filter of their own. Inverted dark pages keep using dark mode's media box.
 - **Shared content controllers** (fixed 2026-11-09): a popup's web view (a `target=_blank` link,
   `window.open`) is built from WebKit's configuration and so shares its opener's
   `WKUserContentController`; one install of the view-mode scripts serves all of them. The host
