@@ -857,7 +857,10 @@ and backgrounds that change after load. Live NASA verification is pending.
 - **[verify]** Assumed cause, as for dark mode (65): WebKit drops a filter set on a playing
   `<video>` itself but applies one on an ancestor. Hide media now grays each video's frame
   (`data-snorkle-video-box`) instead. Checked in Chromium (marks, debounce, reveal, turning off),
-  not on WebKit. Not covered: a video with no ancestor near its size (it keeps the filter on
+  not on WebKit. NYT's inline video is `<nyt-betamax>`, a web component whose poster and video live
+  in its shadow roots: it is now grayed as a player, and media in shadow roots (up to four deep)
+  gray their frame in the document and are paused unless pointed at. Checked in Chromium with a
+  mock of its structure, not on nytimes.com. Closed shadow roots are still out of reach. Not covered: a video with no ancestor near its size (it keeps the filter on
   itself), videos in closed or nested shadow roots, or in an open shadow root whose host is much
   larger than the video. On the device: NYT homepage loops and article videos, playing and
   paused, pointed at and not; in Web Inspector the frame should carry the attribute.

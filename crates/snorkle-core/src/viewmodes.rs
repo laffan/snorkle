@@ -127,6 +127,7 @@ pub const GRAYSCALE_CSS: &str = "html{filter:grayscale(1)!important}";
 /// sites. Inline SVG icons stay as they are.
 const MEDIA_SELECTOR: &str = concat!(
     "img,input[type=image],svg image,video,canvas,object,embed,",
+    "nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo,",
     "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
     "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
     "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"],",
@@ -152,6 +153,7 @@ const MEDIA_SELECTOR: &str = concat!(
 /// cannot be animated directly; without `@property` the box is still).
 pub const NO_MEDIA_CSS: &str = concat!(
     ":root:has(#__snorkle_no_images) :is(img,input[type=image],svg image,video,canvas,object,embed,",
+    "nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo,",
     "iframe[src*=\"youtube.com/embed\"],iframe[src*=\"youtube-nocookie.com/embed\"],",
     "iframe[src*=\"player.vimeo.com\"],iframe[src*=\"dailymotion.com/embed\"],",
     "iframe[src*=\"player.twitch.tv\"],iframe[src*=\"tiktok.com/embed\"],",
@@ -161,6 +163,7 @@ pub const NO_MEDIA_CSS: &str = concat!(
     "img:not([data-snorkle-reveal]):not(:hover),video:not([data-snorkle-reveal]):not(:hover),[data-snorkle-loading]",
     "{opacity:1!important}",
     ":root:has(#__snorkle_no_images) :is(img:hover,input[type=image]:hover,svg image:hover,video:hover,canvas:hover,object:hover,embed:hover,iframe:hover),",
+    ":root:has(#__snorkle_no_images) :is(nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):is(:hover,:has([data-snorkle-reveal])),",
     ":root:has(#__snorkle_no_images) [data-snorkle-reveal][data-snorkle-reveal]",
     "{background-color:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
     "@property --snorkle-pulse{syntax:'<number>';inherits:false;initial-value:1.57}",
@@ -181,7 +184,8 @@ pub const NO_MEDIA_CSS: &str = concat!(
     ":root:not(.snorkle-dark):has(#__snorkle_no_images) [data-snorkle-video-box]:is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
     "{background-color:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
     ":root:not(.snorkle-dark):has(#__snorkle_no_images):has(#__snorkle_no_images) [data-snorkle-video-box] :is(",
-    "img,input[type=image],svg image,video,canvas,object,embed,iframe)",
+    "img,input[type=image],svg image,video,canvas,object,embed,iframe,",
+    "nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo)",
     "{filter:none!important;background-color:transparent!important;animation:none!important}"
 );
 /// Attribute hide media's tracker puts on each video's frame (see
@@ -238,19 +242,19 @@ pub const DARK_CSS: &str = concat!(
     "html.snorkle-dark:has(#__snorkle_grayscale){filter:invert(1) hue-rotate(180deg) grayscale(1)!important}",
     // Halving RGB is equivalent to a 50% black overlay (alpha is unchanged).
     // Dim before counter-inversion so the root inversion cannot brighten it.
-    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo)",
     "{filter:brightness(.5) invert(1) hue-rotate(180deg)!important;transition:filter .3s ease-out!important}",
-    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):hover",
     "{filter:invert(1) hue-rotate(180deg) brightness(1)!important}",
-    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
+    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo)",
     "{filter:brightness(.5)!important;transition:filter .3s ease-out!important}",
-    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover",
+    "html.snorkle-dark-checked:not(.snorkle-dark):not(:has(#__snorkle_no_images)) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):hover",
     "{filter:brightness(1)!important}",
     // Hidden media on an inverted page: white before root inversion, black
     // on screen. Revealed media remain un-inverted.
-    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
+    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo)",
     "{background:#fff!important;filter:brightness(0) invert(1)!important}",
-    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
+    "html.snorkle-dark:has(#__snorkle_no_images) :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
     "{filter:invert(1) hue-rotate(180deg) grayscale(1) contrast(1) brightness(1)!important}",
     // Revealed before it has loaded: keep the placeholder black.
     "html.snorkle-dark:has(#__snorkle_no_images) :is(img,input[type=image])[data-snorkle-loading][data-snorkle-loading]",
@@ -265,19 +269,19 @@ pub const DARK_CSS: &str = concat!(
     // Media whose nearest flipped ancestor shows the page as it is (exactly
     // one flipped ancestor): no counter-inversion, as on a dark page. The
     // `:not(...)` adds enough specificity to beat each inverted-page rule.
-    "html.snorkle-dark:not(:has(#__snorkle_no_images)) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):not([data-snorkle-flip] [data-snorkle-flip] *)",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):not([data-snorkle-flip] [data-snorkle-flip] *)",
     "{filter:brightness(.5)!important;transition:filter .3s ease-out!important}",
-    "html.snorkle-dark:not(:has(#__snorkle_no_images)) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):hover:not([data-snorkle-flip] [data-snorkle-flip] *)",
+    "html.snorkle-dark:not(:has(#__snorkle_no_images)) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):hover:not([data-snorkle-flip] [data-snorkle-flip] *)",
     "{filter:brightness(1)!important}",
-    "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):not([data-snorkle-flip] [data-snorkle-flip] *):not(:hover):not([data-snorkle-reveal]):not(:has([data-snorkle-reveal]))",
+    "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):not([data-snorkle-flip] [data-snorkle-flip] *):not(:hover):not([data-snorkle-reveal]):not(:has([data-snorkle-reveal]))",
     "{background:#000!important;filter:brightness(0)!important;animation:none!important}",
-    "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box]):not([data-snorkle-flip] [data-snorkle-flip] *):is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
+    "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo):not([data-snorkle-flip] [data-snorkle-flip] *):is(:hover,[data-snorkle-reveal],:has([data-snorkle-reveal]))",
     "{background:transparent!important;filter:grayscale(1) contrast(1) brightness(1)!important}",
     "html.snorkle-dark:has(#__snorkle_no_images) [data-snorkle-flip] :is(img,input[type=image])[data-snorkle-loading][data-snorkle-loading]:not([data-snorkle-flip] [data-snorkle-flip] *)",
     "{background:#000!important;filter:brightness(0)!important;animation:none!important}",
     // Media inside a video's frame: the frame's filter already covers
     // them (two ids, so this beats every rule above).
-    "html:has(#__snorkle_dark):has(#__snorkle_dark) [data-snorkle-media-box] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box])",
+    "html:has(#__snorkle_dark):has(#__snorkle_dark) [data-snorkle-media-box] :is(img,video,canvas,embed,object,iframe,svg image,input[type=image],[data-snorkle-media-box],nyt-betamax,mux-player,mux-video,media-controller,media-player,hls-video,lite-youtube,lite-vimeo)",
     "{filter:none!important}"
 );
 
@@ -582,28 +586,42 @@ pub fn scroll_to_heading_js(index: u32) -> String {
 }
 
 /// Hide media's video frames (2026-11-09; the same search as dark mode's
-/// media box, [`DARK_DETECT_JS`]): for each video, in the document and in
-/// open shadow roots one level deep, the nearest ancestor in the document
+/// media box, [`DARK_DETECT_JS`]): for each video in the document, and each
+/// video, image or canvas (at least 40 × 40) in open shadow roots up to four
+/// levels deep (web-component players such as `<nyt-betamax>` draw their
+/// poster and create their video there, where the style cannot reach), the
+/// nearest ancestor in the document
 /// whose box matches the video's to within 4 px, else one that contains it
 /// and is at most twice its area (a letterboxed player), else the video
-/// itself, is marked [`VIDEO_BOX_ATTR`]; [`NO_MEDIA_CSS`] grays that
-/// element. Refreshed when the document changes (at most every 0.5 s),
+/// itself (document videos only), is marked [`VIDEO_BOX_ATTR`];
+/// [`NO_MEDIA_CSS`] grays that element. Shadow roots are watched for changes
+/// and their videos' `play` events (which do not leave the shadow tree) are
+/// heard, so a hidden video there is paused like one in the document.
+/// Shadow roots are looked for again at most every 2 s. Refreshed when the
+/// document changes (at most every 0.5 s),
 /// when a video's size becomes known, on resize, at document end, on load
 /// and 1.5 s later (these three also look for shadow roots, which walks
 /// every element). Runs inside the tracker of [`style_js`] (`s` is its
 /// state); constant code.
-const VIDEO_BOX_JS: &str = "var VB='data-snorkle-video-box';s.vb=[];s.hosts=[];s.vt=0;\
-s.vids=function(full){var out=[].slice.call(document.querySelectorAll('video'));\
-if(full){s.hosts=[];var all=document.querySelectorAll('*');for(var i=0;i<all.length&&i<30000;i++){if(all[i].shadowRoot)s.hosts.push(all[i]);}}\
-s.hosts.forEach(function(e){var r=e.shadowRoot;if(r&&e.isConnected)out=out.concat([].slice.call(r.querySelectorAll('video')));});return out;};\
+const VIDEO_BOX_JS: &str = "var VB='data-snorkle-video-box';s.vb=[];s.roots=[];s.vt=0;s.last=0;s.hooked=new WeakSet();\
+s.scan=function(){s.last=Date.now();var roots=[];var look=function(list,depth){for(var i=0;i<list.length&&i<30000;i++){var r=list[i].shadowRoot;\
+if(r&&roots.indexOf(r)<0){roots.push(r);if(depth<4)look(r.querySelectorAll('*'),depth+1);}}};\
+look(document.querySelectorAll('*'),1);s.roots=roots;\
+roots.forEach(function(r){if(s.hooked.has(r))return;s.hooked.add(r);watch(r);\
+r.addEventListener('play',s.onPlay,true);r.addEventListener('loadedmetadata',s.onMeta,true);});};\
+s.media=function(){var out=[].slice.call(document.querySelectorAll('video'));\
+s.roots.forEach(function(r){if(!r.host||!r.host.isConnected)return;r.querySelectorAll('video,img,canvas').forEach(function(m){\
+if(m.tagName==='VIDEO'){out.push(m);return;}var b=m.getBoundingClientRect();if(b.width>=40&&b.height>=40)out.push(m);});});return out;};\
 s.frame=function(v){var r=v.getBoundingClientRect();if(r.width<2||r.height<2)return null;var e=v;\
-for(var i=0;i<8;i++){var p=e.parentElement||(e.parentNode&&e.parentNode.host)||null;\
+for(var i=0;i<12;i++){var p=e.parentElement||(e.parentNode&&e.parentNode.host)||null;\
 if(!p||p===document.body||p===document.documentElement)break;var q=p.getBoundingClientRect();\
 var same=Math.abs(q.left-r.left)<=4&&Math.abs(q.top-r.top)<=4&&Math.abs(q.right-r.right)<=4&&Math.abs(q.bottom-r.bottom)<=4;\
 var near=q.left<=r.left+4&&q.top<=r.top+4&&q.right>=r.right-4&&q.bottom>=r.bottom-4&&q.width*q.height<=r.width*r.height*2;\
 if(!same&&!near)break;if(p.getRootNode()===document)return p;if(!same)break;e=p;}\
-return v.getRootNode()===document?v:null;};\
-s.boxes=function(full){s.vt=0;var want=[];s.vids(full===true).forEach(function(v){var b=s.frame(v);if(b&&want.indexOf(b)<0)want.push(b);});\
+return v.getRootNode()===document&&v.tagName==='VIDEO'?v:null;};\
+s.boxes=function(full){s.vt=0;if(full===true||Date.now()-s.last>2000)s.scan();var want=[];\
+s.media().forEach(function(v){var b=s.frame(v);if(b&&want.indexOf(b)<0)want.push(b);\
+if(v.tagName==='VIDEO'&&v.getRootNode()!==document&&!v.paused&&!s.shown(v))v.pause();});\
 s.vb.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(VB);});\
 want.forEach(function(e){if(!e.hasAttribute(VB))e.setAttribute(VB,'');});s.vb=want;};\
 s.later=function(){if(!s.vt)s.vt=setTimeout(s.boxes,500);};\
@@ -633,7 +651,8 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              if(s.raf)cancelAnimationFrame(s.raf);s.rev.forEach(function(e){{e.removeAttribute({attr});e.removeAttribute({ld});}});}}\
              if(s.vb){{clearTimeout(s.vt);clearTimeout(s.vt2);document.removeEventListener('loadedmetadata',s.onMeta,true);\
              window.removeEventListener('resize',s.later);document.removeEventListener('DOMContentLoaded',s.full);\
-             window.removeEventListener('load',s.full);s.vb.forEach(function(e){{e.removeAttribute('data-snorkle-video-box');}});}}\
+             window.removeEventListener('load',s.full);s.vb.forEach(function(e){{e.removeAttribute('data-snorkle-video-box');}});\
+             s.roots.forEach(function(r){{r.removeEventListener('play',s.onPlay,true);r.removeEventListener('loadedmetadata',s.onMeta,true);}});}}\
              delete window[{key}];}})();"
         );
     }
@@ -664,7 +683,8 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
              document.addEventListener('pointermove',s.onMove,{{passive:true,capture:true}});\
              document.addEventListener('scroll',s.onScroll,{{passive:true,capture:true}});\
              document.addEventListener('mouseout',s.onOut,true);\
-             s.shown=function(t){{return t.matches(':hover')||t.hasAttribute({attr});}};\
+             s.shown=function(t){{if(t.matches(':hover')||t.hasAttribute({attr}))return true;\
+             var b=s.frame?s.frame(t):null;return !!(b&&b!==t&&(b.matches(':hover')||b.hasAttribute({attr})||b.querySelector('['+{attr}+']')));}};\
              s.onPlay=function(e){{var t=e.target;if(t&&t.matches&&t.matches(sel)&&!s.shown(t)&&t.pause)t.pause();}};\
              document.addEventListener('play',s.onPlay,true);\
              document.querySelectorAll('video').forEach(function(v){{if(!v.paused&&!s.shown(v))v.pause();}});{vbox}",
@@ -874,7 +894,7 @@ mod tests {
     fn dark_mode_counter_inverts_video_frames() {
         assert!(DARK_DETECT_JS.contains(&format!("BOX='{MEDIA_BOX_ATTR}'")));
         assert!(DARK_DETECT_JS.contains("shadowRoot") && DARK_DETECT_JS.contains("getRootNode()===document"));
-        assert!(DARK_CSS.contains(&format!("input[type=image],[{MEDIA_BOX_ATTR}])")), "frames get the media filters");
+        assert!(DARK_CSS.contains(&format!("input[type=image],[{MEDIA_BOX_ATTR}],nyt-betamax,")), "frames get the media filters");
         // Media inside a frame get no filter of their own, over every
         // other dark rule (two ids in the selector).
         let none = format!("html:has(#__snorkle_dark):has(#__snorkle_dark) [{MEDIA_BOX_ATTR}] :is(");
@@ -933,6 +953,11 @@ mod tests {
         assert!(!style_js("__snorkle_grayscale", GRAYSCALE_CSS, true, false).contains("s.boxes"), "only hide media marks frames");
         let off = style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true);
         assert!(off.contains(&format!("removeAttribute('{VIDEO_BOX_ATTR}')")), "marks removed when turned off");
+        // Web-component players (nyt-betamax) are media themselves, and
+        // media in nested open shadow roots are found and paused there.
+        assert!(MEDIA_SELECTOR.contains("nyt-betamax,") && NO_MEDIA_CSS.contains("nyt-betamax,"));
+        assert!(VIDEO_BOX_JS.contains("if(depth<4)look(") && VIDEO_BOX_JS.contains("r.addEventListener('play',s.onPlay,true)"));
+        assert!(off.contains("r.removeEventListener('play',s.onPlay,true)"));
     }
 
 }

@@ -248,9 +248,13 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   pulsing gray box until its load or error event, then fades in. Video (2026-11-09): WebKit does
   not reliably apply a filter on a playing `<video>` itself, so hide media's tracker marks each
   video's frame (`data-snorkle-video-box`: the nearest same-size ancestor in the document, else one
-  at most twice its area that contains it, else the video; open shadow roots one level deep, as
-  dark mode's media box) and the gray box goes on that frame, revealed while pointed at; media inside
-  it get no filter of their own. Inverted dark pages keep using dark mode's media box.
+  at most twice its area that contains it, else the video) and the gray box goes on that frame,
+  revealed while pointed at; media inside it get no filter of their own. Web-component players
+  (`<nyt-betamax>`, Mux, Media Chrome, Vidstack, lite-youtube/vimeo) are media themselves, and
+  videos, images and canvases inside open shadow roots up to four deep (where the style cannot
+  reach) gray their nearest frame in the document; videos there are paused when they start unless
+  pointed at (their `play` events do not leave the shadow tree, so each root is listened to).
+  Inverted dark pages keep using dark mode's media box, which also covers the players.
 - **Shared content controllers** (fixed 2026-11-09): a popup's web view (a `target=_blank` link,
   `window.open`) is built from WebKit's configuration and so shares its opener's
   `WKUserContentController`; one install of the view-mode scripts serves all of them. The host
