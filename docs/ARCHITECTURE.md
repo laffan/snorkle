@@ -283,7 +283,10 @@ and the containers report points inside a hole as outside themselves, so touches
 hover there reach the chrome. The strip around the pill is transparent and takes no input: the
 page shows and is used there. While the console is open the page ends above it as before. The
 pill centres over the page, between the sidebar and any docked panel. ⌘-click on a link opens it
-in a new tab after the current one without switching to it (§4).
+in a new tab after the current one without switching to it (§4). Back in that tab, while it has
+no back history of its own, loads the page the link was on (`Tab::back_to`, memory only, used
+once; 2026-11-09): WebKit cannot give a new web view another view's history, so this is a load,
+after which Back returns to the link's page and Forward is empty.
 
 The same holes carry the other chrome that floats over the page: the find bar (⌘F), attached to
 the top of the pill (its hole ends where the pill's begins and has only its top corners rounded,
@@ -553,6 +556,18 @@ errors/warnings, this tab only. Copy puts the visible entries on the clipboard.
 
 ## 5b. Chrome layout
 
+Tab rows are one line, the page's title (2026-11-09). A row's buttons (close; Save for Later on
+tabs) and the × of bookmarks and domain headings appear only while the row is pointed at (on
+touch-only devices: on the active tab or bookmark, and always on domain headings).
+**Save for Later** (2026-11-09; `snorkle_core::later`, `later/`): a tab's tray button snapshots what
+its view shows (`takeSnapshotWithConfiguration`, visible bounds, 320 pt wide, JPEG 0.6, drawn by the
+app from its own web view), stores the committed page, title and thumbnail (≤ 200 pages, ≤ 400 KB
+each, JPEG magic checked), and closes the tab; private tabs and empty tabs have no such button. A
+tab without a live view, or one WebKit cannot draw, is saved without a thumbnail (the chrome shows
+the site's letter). While any are saved, the same icon sits beside the menu and swaps the sidebar's
+contents for the saved pages (thumbnail, title underneath), each with Recover (a new tab; also a
+click on the thumbnail), Bookmark (added at the end of the bookmarks) and Delete on hover; each
+action removes the page from the list.
 Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto another pairs them in split view, and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input. **Define** (single words only, `ai::clean_word`) opens the chat panel with a new chat asking the chat's model for a dictionary-style definition (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden

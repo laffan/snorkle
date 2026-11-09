@@ -35,8 +35,16 @@
       <div id="private-head" class="side-section" hidden>Private</div>
       <div id="private-tabs" class="tablist" role="tablist" aria-orientation="vertical"></div>
     </div>
+    <!-- Save for Later: replaces the sidebar's contents while open (the
+         button beside the menu). Thumbnails are the app's own snapshots
+         (data: URLs from Rust); titles are set with textContent. -->
+    <div id="later-view" hidden>
+      <div class="later-head">Saved for Later</div>
+      <div id="later-list" class="later-list" role="list"></div>
+    </div>
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <button id="later-btn" class="icon" aria-label="Saved for later" title="Saved for later" aria-pressed="false" aria-controls="later-view" hidden><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11M8 10l4 4 4-4"/></svg></button>
       <span class="spacer"></span>
       <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><g class="sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g><path class="moon" d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg></button>
       <button id="color" class="icon mode" aria-label="Black and white pages" title="Black and white pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm2.5-4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm5 .5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/><path class="strike-gap" d="M4 3.5l16.5 16.5" fill="none"/><path class="strike" d="M4 3.5l16.5 16.5" fill="none"/></svg></button>

@@ -96,5 +96,10 @@ pub const COMMANDS: &[&str] = &[
     "set_swipe_navigation",
     "set_open_app_links",
     "open_in_app",
+    "save_for_later",
+    "list_later",
+    "restore_later",
+    "bookmark_later",
+    "delete_later",
     "set_pull_to_refresh",
 ];

@@ -916,7 +916,16 @@ impl Browser {
         }
     }
 
-    pub fn go_back(&mut self, id: TabId) -> Vec<Effect> {
+    /// Back. A ⌘-clicked tab with no back history of its own goes to the
+    /// page it was opened from (`Tab::back_to`), once.
+    pub fn go_back(&mut self, id: TabId, now: u64) -> Vec<Effect> {
+        let fallback = self.tab(id).filter(|t| !t.can_go_back && t.notice.is_none()).and_then(|t| t.back_to.clone());
+        if let Some(url) = fallback {
+            if let Some(t) = self.tab_mut(id) {
+                t.back_to = None;
+            }
+            return self.navigate_trusted(id, url, now);
+        }
         self.simple(id, Effect::GoBack(id), true)
     }
     pub fn go_forward(&mut self, id: TabId) -> Vec<Effect> {
@@ -1190,6 +1199,8 @@ impl Browser {
             tab.https.http_url = Some(url.clone());
             tab.https.upgrades = 1;
         }
+        // Back from the new tab returns to the page the link was on.
+        tab.back_to = initiator.filter(|u| matches!(u.scheme(), "http" | "https"));
         self.tabs.insert(insert_at, tab);
         self.load(id, target, source, &mut out);
         self.enforce_budget(now, &mut out);
@@ -1719,7 +1730,7 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
         url: display,
         loading: t.loading,
         progress: t.progress,
-        can_go_back: t.can_go_back || t.notice.is_some(),
+        can_go_back: t.can_go_back || t.notice.is_some() || t.back_to.is_some(),
         can_go_forward: t.can_go_forward,
         security,
         live: t.life == Life::Live,

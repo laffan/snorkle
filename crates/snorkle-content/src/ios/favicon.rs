@@ -70,7 +70,7 @@ impl WKWebView {
 
         #[unsafe(method(takeSnapshotWithConfiguration:completionHandler:))]
         #[unsafe(method_family = none)]
-        unsafe fn takeSnapshotWithConfiguration_completionHandler(
+        pub(super) unsafe fn takeSnapshotWithConfiguration_completionHandler(
             &self,
             config: Option<&WKSnapshotConfiguration>,
             completion: &block2::DynBlock<dyn Fn(*mut UIImage, *mut NSError)>,

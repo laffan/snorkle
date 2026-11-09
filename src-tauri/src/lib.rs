@@ -123,6 +123,11 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::set_swipe_navigation,
         commands::set_open_app_links,
         commands::open_in_app,
+        commands::save_for_later,
+        commands::list_later,
+        commands::restore_later,
+        commands::bookmark_later,
+        commands::delete_later,
         commands::set_pull_to_refresh,
     ])
 }

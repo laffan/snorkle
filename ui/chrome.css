@@ -144,12 +144,12 @@ body.sb-flyout #edge-tab::after {
    progress (the panel itself and its toggle stay opaque). Touch-only
    devices have no hover, so there they stay fully visible. */
 @media (any-hover: hover) {
-  body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #side-bottom) { opacity: .5; transition: opacity .3s ease-in-out; }
+  body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #later-view, #side-bottom) { opacity: .5; transition: opacity .3s ease-in-out; }
   #toolbar { opacity: .5; transition: opacity .15s; }
-  body:not(.narrow) #sidebar:hover :is(#side-scroll, #side-bottom),
-  body:not(.narrow) #sidebar:focus-within :is(#side-scroll, #side-bottom),
-  body.dragging :is(#side-scroll, #side-bottom), body.resizing :is(#side-scroll, #side-bottom),
-  body.menu-open :is(#side-scroll, #side-bottom), #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
+  body:not(.narrow) #sidebar:hover :is(#side-scroll, #later-view, #side-bottom),
+  body:not(.narrow) #sidebar:focus-within :is(#side-scroll, #later-view, #side-bottom),
+  body.dragging :is(#side-scroll, #later-view, #side-bottom), body.resizing :is(#side-scroll, #later-view, #side-bottom),
+  body.menu-open :is(#side-scroll, #later-view, #side-bottom), #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
 }
 body.resizing #sidebar { transition: none; }
 /* macOS: the strip holding the window buttons (they are hidden while the
@@ -190,26 +190,31 @@ body.dragging #side-scroll { overflow-y: hidden; }
 .tab.active .t { font-weight: 600; }
 .tab .h, .bm .h { font-size: 12px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab.discarded .t { opacity: .65; }
-.tab .close, .bm .close { width: 32px; height: 32px; border-radius: 8px; color: var(--muted); font-size: 18px; flex: 0 0 auto; }
-/* A tab's close button appears only while the pointer is over the tab. It
-   floats over the end of the title, so the title keeps its full width.
-   Opacity (not display/visibility) so a first tap on iPadOS still opens
-   the tab instead of only triggering hover. Touch-only devices have no
-   hover, so there it shows on the active tab. */
-.tab .close {
-  position: absolute; right: 2px; top: 50%; margin-top: -16px;
+/* A row's buttons (close; save for later on tabs) appear only while the
+   pointer is over the row (tabs, bookmarks, domain headings). They float
+   over the end of the title, so the title keeps its full width. Opacity
+   (not display/visibility) so a first tap on iPadOS still opens the row
+   instead of only triggering hover. Touch-only devices have no hover, so
+   there they show on the active tab or bookmark, and on domain headings. */
+.tab, .bm, .site-heading { position: relative; }
+.row-actions {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; border-radius: 8px;
   opacity: 0; pointer-events: none; transition: opacity .1s;
   --close-bg: var(--side); background: var(--close-bg); box-shadow: -8px 0 8px -2px var(--close-bg);
 }
-.tab.active .close { --close-bg: var(--tab-active); }
-.tab:focus-within .close { opacity: 1; pointer-events: auto; }
+.row-actions > button { width: 30px; height: 32px; border-radius: 8px; color: var(--muted); font-size: 18px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; }
+.row-actions > button:hover { color: var(--fg); }
+.row-actions svg { width: 17px; height: 17px; }
+.tab.active > .row-actions, .bm.active > .row-actions { --close-bg: var(--tab-active); }
+:is(.tab, .bm, .site-heading):focus-within > .row-actions { opacity: 1; pointer-events: auto; }
 @media (any-hover: hover) {
-  .tab:hover .close { opacity: 1; pointer-events: auto; }
+  :is(.tab, .bm, .site-heading):hover > .row-actions { opacity: 1; pointer-events: auto; }
 }
 @media (any-hover: none) {
-  .tab.active .close { opacity: 1; pointer-events: auto; }
+  :is(.tab.active, .bm.active, .site-heading) > .row-actions { opacity: 1; pointer-events: auto; }
 }
-body.dragging .tab .close { opacity: 0; pointer-events: none; }
+body.dragging .row-actions { opacity: 0; pointer-events: none; }
 
 /* Same-site tabs share a domain heading; all page rows are siblings. */
 .site-group { display: flex; flex-direction: column; gap: 2px; }
@@ -225,7 +230,7 @@ body.dragging .tab .close { opacity: 0; pointer-events: none; }
 .tab-group { display: flex; gap: 2px; padding: 2px; border-radius: 12px; background: var(--tab); }
 .tab-group > .tab { flex: 1 1 0; min-width: 0; }
 .tab-group > .tab > .open { padding-left: 8px; }
-.tab-group > .tab:not(.active) .close { --close-bg: var(--tab); }
+.tab-group > .tab:not(.active) > .row-actions { --close-bg: var(--tab); }
 .tab-group.leaving { box-shadow: 0 0 0 2px var(--accent) inset; background: transparent; }
 .tab-group.leaving > .tab.drag-src { opacity: .15; }
 
@@ -823,8 +828,37 @@ body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
 /* Domain headings are containers, never a parent page. */
 .site-heading { display: flex; align-items: center; min-height: 28px; padding-right: 2px; gap: 4px; }
 .site-heading .site-toggle { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; border: 0; font-weight: 500; color: var(--muted); }
-.site-heading .close { flex: 0 0 32px; width: 32px; height: 32px; padding: 0; border-radius: 8px; color: var(--muted); font-size: 18px; }
+
 
 .chat-foot { flex-wrap: wrap; }
 #chat-model-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #chat-effort { max-width: 125px; font-size: 12px; padding: 4px; }
+
+/* ---- Save for Later ------------------------------------------------------ */
+/* While open, the list replaces the sidebar's contents (pins, bookmarks,
+   tabs). Thumbnails are a snapshot of what each tab showed, cut to 4:3 from
+   the top; the actions appear on hover (always on touch-only devices). */
+#later-view { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 12px; }
+body.later-open #side-scroll { display: none; }
+#later-btn[aria-pressed="true"] { color: var(--fg); background: var(--field); }
+.later-head { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 6px 2px 10px; }
+.later-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 12px 10px; }
+.later-card { position: relative; min-width: 0; }
+.later-card .thumb {
+  display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; padding: 0;
+  background: var(--field); box-shadow: 0 0 0 1px var(--line) inset;
+}
+.later-card .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+.later-card .thumb .letter { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: var(--muted); }
+.later-card .t { font-size: 12px; line-height: 1.3; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.later-actions {
+  position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; padding: 2px; border-radius: 8px;
+  background: var(--bar); box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+  opacity: 0; pointer-events: none; transition: opacity .1s;
+}
+.later-actions button { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg); font-size: 17px; }
+.later-actions button:hover { background: var(--field); }
+.later-actions svg { width: 16px; height: 16px; }
+.later-card:focus-within .later-actions { opacity: 1; pointer-events: auto; }
+@media (any-hover: hover) { .later-card:hover .later-actions { opacity: 1; pointer-events: auto; } }
+@media (any-hover: none) { .later-actions { opacity: 1; pointer-events: auto; } }

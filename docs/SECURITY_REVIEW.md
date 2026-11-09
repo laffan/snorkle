@@ -180,3 +180,14 @@ tab's committed http/https URL from the core, opened by UIKit with
 scheme can be launched; AppKit and the stub report false). No new
 page-to-native channel. Human review pending.
 
+2026-11-09 Save for Later and ⌘-click Back: five new chrome commands
+(capability `chrome`): `save_for_later` (a tab id; the URL and title come from
+the core, private tabs refused), `list_later`, `restore_later`,
+`bookmark_later`, `delete_later` (an id, validated as `l[0-9-]`, also the
+file name). Thumbnails are JPEGs the app draws from its own web view
+(`takeSnapshotWithConfiguration`), checked again (SOI marker, ≤ 400 KB)
+before they are written to `later/` and served to the chrome only as
+`data:image/jpeg` URLs (CSP `img-src 'self' data:`). Back from a ⌘-clicked
+tab navigates to its opener's committed http(s) URL from the core through
+`navigate_trusted`. No new page-to-native channel. Human review pending.
+

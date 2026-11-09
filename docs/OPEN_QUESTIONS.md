@@ -757,3 +757,18 @@ and backgrounds that change after load. Live NASA verification is pending.
 - **[decide]** No prompt before the jump: iOS cannot say whether an app claims an address without
   opening it, so the app is offered from the ⋯ menu instead of asked about on each link.
 
+## Sidebar rows, ⌘-click Back, Save for Later (2026-11-09)
+
+- **[verify]** Save for Later on iPad and Mac: the thumbnail matches what the tab showed (view
+  modes included); saving a tab that is not on screen (from its sidebar row while another tab is
+  shown) may give no thumbnail, since WebKit may not draw a hidden view (then the site's letter is
+  shown). Thumbnail size and JPEG quality (320 pt, 0.6) are guesses to tune.
+- **[decide]** Bookmark and Recover both remove the page from Save for Later (as bookmarking a tab
+  moves it into the bookmark); clicking a thumbnail also recovers it.
+- **[decide]** Back from a ⌘-clicked tab loads the opener's page as a new entry (WebKit cannot
+  prepend history to a new web view): afterwards Back returns to the link's page, not Forward. The
+  alternative, copying the opener's `interactionState`, would also bring its older history and load
+  the opener's page first.
+- **[verify]** Hover-only row buttons with a Magic Keyboard trackpad on iPad (pointer hover) and on
+  touch alone (active row only).
+

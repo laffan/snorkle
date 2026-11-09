@@ -94,7 +94,7 @@ pub fn activate_tab(s: S<'_>, tab: u64) {
 
 #[tauri::command]
 pub fn go_back(s: S<'_>, tab: u64) {
-    with_browser(&s, |b| b.go_back(TabId(tab)));
+    with_browser(&s, |b| b.go_back(TabId(tab), now_ms()));
 }
 
 #[tauri::command]
@@ -669,6 +669,98 @@ pub fn set_appearance(mode: String) {
 pub fn set_swipe_navigation(on: bool) {
     snorkle_content::set_swipe_navigation(on);
     snorkle_content::dispatch_main(move || with_host(|h| h.set_swipe_navigation(on)));
+}
+
+/// A page saved for later, as the chrome lists it.
+#[derive(Serialize)]
+pub struct LaterView {
+    id: String,
+    url: String,
+    title: String,
+    host: String,
+    saved_ms: u64,
+    /// `data:image/jpeg;base64,…` (the app's own snapshot), if any.
+    thumb: Option<String>,
+}
+
+/// Save for Later: snapshots what the tab shows (a JPEG thumbnail drawn
+/// by the app from its own web view), stores the tab's committed page
+/// (http/https, from the core) with its title, and closes the tab. Not for
+/// private tabs, whose pages are never written.
+#[tauri::command]
+pub async fn save_for_later(s: S<'_>, tab: u64) -> Result<(), String> {
+    let id = TabId(tab);
+    let (url, title) = {
+        let b = s.browser();
+        let t = b.tab(id).ok_or("That tab is gone.")?;
+        if t.is_private() {
+            return Err("Private tabs are not saved.".into());
+        }
+        let url = t.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https")).ok_or("Open a web page first.")?;
+        (url, t.title.clone())
+    };
+    let store = s.store.clone().ok_or("Saving is not available.")?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || with_host(|h| h.thumbnail(id, Box::new(move |jpeg| { let _ = tx.send(jpeg); }))));
+    let thumb = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(3)))
+        .await
+        .map_err(|_| "Request failed.".to_string())?
+        .ok()
+        .flatten();
+    store.later().add(url.as_str(), &title, thumb.as_deref(), wall_ms()).map_err(|e| e.to_string())?.ok_or("This page can't be saved.")?;
+    with_browser(&s, |b| b.close(id, now_ms()));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_later(s: S<'_>) -> Vec<LaterView> {
+    let Some(store) = s.store.as_ref() else { return Vec::new() };
+    let later = store.later();
+    later
+        .list()
+        .into_iter()
+        .map(|it| LaterView {
+            host: Url::parse(&it.url).ok().map(|u| url_display::display(&u).registrable).unwrap_or_default(),
+            thumb: if it.thumb { later.thumb_url(&it.id) } else { None },
+            id: it.id,
+            url: it.url,
+            title: it.title,
+            saved_ms: it.saved_ms,
+        })
+        .collect()
+}
+
+/// Opens a saved page in a new tab (and removes it from the list).
+#[tauri::command]
+pub fn restore_later(s: S<'_>, id: String) -> Result<(), String> {
+    let store = s.store.clone().ok_or("Saving is not available.")?;
+    let Some(item) = store.later().take(&id).map_err(|e| e.to_string())? else { return Ok(()) };
+    let url = Url::parse(&item.url).map_err(|e| e.to_string())?;
+    let (tab, effects) = s.browser().new_tab(Profile::Default, now_ms());
+    s.run(effects);
+    let effects = s.browser().navigate_trusted(tab, url, now_ms());
+    s.run(effects);
+    Ok(())
+}
+
+/// Bookmarks a saved page (at the end of the bookmarks) and removes it
+/// from the list.
+#[tauri::command]
+pub fn bookmark_later(s: S<'_>, id: String) -> Result<(), String> {
+    let store = s.store.clone().ok_or("Saving is not available.")?;
+    let Some(item) = store.later().take(&id).map_err(|e| e.to_string())? else { return Ok(()) };
+    if !store.is_bookmarked(&item.url) {
+        store.add_bookmark(&item.url, &item.title, wall_ms()).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_later(s: S<'_>, id: String) -> Result<(), String> {
+    match s.store.as_ref() {
+        Some(store) => store.later().take(&id).map(|_| ()).map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
 }
 
 /// Settings → General → Open links in apps (default off): whether WebKit

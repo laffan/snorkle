@@ -412,6 +412,29 @@ impl ContentHost {
 
     /// Reads `tab`'s page for the AI chat (title, visible text, selection;
     /// `snorkle_core::ai::PAGE_TEXT_JS`). `done` runs on the main thread.
+    /// Save for Later: a JPEG thumbnail of what the tab's view shows now
+    /// (its visible bounds, `THUMB_WIDTH` points wide at the screen's
+    /// scale, view modes included), or `None` without a live view or if
+    /// WebKit cannot draw it (e.g. a view that is not on screen).
+    pub fn thumbnail(&mut self, tab: TabId, done: crate::ThumbDone) {
+        let Some(v) = self.views.get(&tab) else {
+            done(None);
+            return;
+        };
+        let done = RefCell::new(Some(done));
+        unsafe {
+            let cfg = objc2_web_kit::WKSnapshotConfiguration::new(self.mtm);
+            cfg.setSnapshotWidth(Some(&objc2_foundation::NSNumber::new_f64(crate::THUMB_WIDTH)));
+            let block = RcBlock::new(move |image: *mut UIImage, _err: *mut NSError| {
+                let jpeg = image.as_ref().and_then(|i| i.jpeg_representation(crate::THUMB_QUALITY)).map(|d| d.to_vec());
+                if let Some(f) = done.borrow_mut().take() {
+                    f(jpeg);
+                }
+            });
+            v.web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
+        }
+    }
+
     /// ⋯ → Open in App: offers the page's address (http/https, from the
     /// core) to the app that claims it, with UIKit's "universal links only"
     /// option, so nothing opens if no installed app claims it (no browser,

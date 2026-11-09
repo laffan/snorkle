@@ -394,6 +394,28 @@ impl ContentHost {
         }
     }
 
+    /// Save for Later: a JPEG thumbnail of what the tab's view shows now
+    /// (its visible bounds, `THUMB_WIDTH` points wide), or `None` without a
+    /// live view or if WebKit cannot draw it.
+    pub fn thumbnail(&mut self, tab: TabId, done: crate::ThumbDone) {
+        let Some(v) = self.views.get(&tab) else {
+            done(None);
+            return;
+        };
+        let done = RefCell::new(Some(done));
+        unsafe {
+            let cfg = objc2_web_kit::WKSnapshotConfiguration::new(self.mtm);
+            cfg.setSnapshotWidth(Some(&objc2_foundation::NSNumber::new_f64(crate::THUMB_WIDTH)));
+            let block = block2::RcBlock::new(move |image: *mut NSImage, _err: *mut NSError| {
+                let jpeg = image.as_ref().and_then(thumbnail_jpeg);
+                if let Some(f) = done.borrow_mut().take() {
+                    f(jpeg);
+                }
+            });
+            v.web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
+        }
+    }
+
     /// ⋯ → Open in App is an iPadOS feature (AppKit has no "universal
     /// links only" open); the chrome does not offer it here.
     pub fn open_in_app(&mut self, _url: &Url, done: crate::OpenedDone) {
@@ -918,6 +940,17 @@ unsafe fn load(web: &WKWebView, url: &Url) {
     if let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(url.as_str())) {
         web.loadRequest(&NSURLRequest::requestWithURL(&nsurl));
     }
+}
+
+/// Encodes a snapshot as JPEG (Save for Later).
+fn thumbnail_jpeg(image: &NSImage) -> Option<Vec<u8>> {
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImageCompressionFactor};
+    let tiff = image.TIFFRepresentation()?;
+    let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
+    let quality = objc2_foundation::NSNumber::new_f64(crate::THUMB_QUALITY);
+    let quality: Retained<AnyObject> = Retained::into_super(Retained::into_super(Retained::into_super(quality)));
+    let props = objc2_foundation::NSDictionary::from_retained_objects(&[unsafe { NSImageCompressionFactor }], &[quality]);
+    unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::JPEG, &props) }.map(|d| d.to_vec())
 }
 
 /// Opens a non-web URL (mailto:, tel:, …) in another app after the user

@@ -283,7 +283,9 @@
             for (const tab of ids) await invoke('close_tab', { tab });
           }, null, { shortcut: false });
         });
-        head.append(toggle, close);
+        const acts = el('span', 'row-actions');
+        acts.appendChild(close);
+        head.append(toggle, acts);
         box.appendChild(head);
         members.forEach((m) => {
           const node = tabNode(m, null);
@@ -313,23 +315,32 @@
     node.setAttribute('role', 'tab');
     node.setAttribute('aria-selected', String(selected));
     node.appendChild(tabIcon(t));
+    // One line: the page's title (its site until it has one).
     const open = el('button', 'open');
     open.appendChild(el('span', 't', t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
-    if (t.url) {
-      const host = el('span', 'h');
-      fillLabels(host, t.url.registrable, false);
-      open.appendChild(host);
-    }
+    if (t.url) open.title = t.url.registrable;
     open.addEventListener('click', () => {
       if (suppressClick) return;
       invoke('activate_tab', { tab: t.id });
       if (narrow) setSidebar(false);
     });
     node.appendChild(open);
+    const acts = el('span', 'row-actions');
+    // Save for Later: web pages of ordinary tabs (private pages are never
+    // written).
+    if (t.url && !t.private) {
+      const later = el('button', 'later');
+      later.appendChild(svgIcon(TRAY_IN));
+      later.setAttribute('aria-label', 'Save for later');
+      later.title = 'Save for later';
+      later.addEventListener('click', (ev) => { ev.stopPropagation(); saveForLater(t.id); });
+      acts.appendChild(later);
+    }
     const close = el('button', 'close', '×');
     close.setAttribute('aria-label', 'Close tab');
     close.addEventListener('click', (ev) => { ev.stopPropagation(); invoke('close_tab', { tab: t.id }); });
-    node.appendChild(close);
+    acts.appendChild(close);
+    node.appendChild(acts);
     node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'tab', id: t.id, private: t.private, paired: !!pair }));
     // Right-click: the item menu, with Copy URL (tabs with a page only).
     node.addEventListener('contextmenu', (ev) => {
@@ -460,6 +471,104 @@
         primary.hidden = true;
     }
   }
+
+  // ---- Save for Later -------------------------------------------------------
+  //
+  // A tab's tray button snapshots what it shows (Rust, the app's own web
+  // view), stores its page, title and thumbnail, and closes it. While any
+  // are saved, the same icon sits beside the menu; it swaps the sidebar's
+  // contents for the saved pages (thumbnail, title underneath), each with
+  // Recover (open in a new tab), Bookmark and Delete on hover.
+
+  // The SVG namespace, from an icon already in the page (no URL literal
+  // in this file: the remote-code tripwire bans them).
+  const SVG_NS = $('menu').querySelector('svg').namespaceURI;
+  // Paths (24 × 24, stroked): a tray with an arrow into it / out of it,
+  // and a bookmark ribbon.
+  const TRAY_IN = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11M8 10l4 4 4-4';
+  const TRAY_OUT = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3M8 7l4-4 4 4';
+  const RIBBON = 'M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z';
+  function svgIcon(d) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  let laterItems = [];
+  let laterOpen = false;
+
+  function loadLater() {
+    return T.core.invoke('list_later').then((items) => { laterItems = items || []; renderLater(); }).catch(() => {});
+  }
+
+  function saveForLater(tab) {
+    T.core.invoke('save_for_later', { tab })
+      .then(() => { toast('Saved for later.'); return loadLater(); })
+      .catch((e) => toast(String(e)));
+  }
+
+  function setLater(open) {
+    laterOpen = open && laterItems.length > 0;
+    document.body.classList.toggle('later-open', laterOpen);
+    $('later-view').hidden = !laterOpen;
+    $('later-btn').setAttribute('aria-pressed', String(laterOpen));
+  }
+
+  function laterAction(cmd, id, done) {
+    T.core.invoke(cmd, { id }).then(() => { if (done) done(); return loadLater(); }).catch((e) => toast(String(e)));
+  }
+
+  function renderLater() {
+    $('later-btn').hidden = !laterItems.length;
+    if (!laterItems.length) setLater(false);
+    const list = $('later-list');
+    list.replaceChildren();
+    for (const it of laterItems) {
+      const card = el('div', 'later-card');
+      card.setAttribute('role', 'listitem');
+      const thumb = el('button', 'thumb');
+      thumb.setAttribute('aria-label', `Open ${it.title || it.host}`);
+      if (it.thumb && it.thumb.startsWith('data:image/jpeg;base64,')) {
+        const img = el('img');
+        img.alt = '';
+        img.src = it.thumb;
+        thumb.appendChild(img);
+      } else {
+        thumb.appendChild(el('span', 'letter', (it.host || '?').charAt(0).toUpperCase()));
+      }
+      // The thumbnail itself recovers the page too.
+      thumb.addEventListener('click', () => laterAction('restore_later', it.id, () => { if (narrow) setSidebar(false); }));
+      card.appendChild(thumb);
+      const title = el('div', 't', it.title || it.host);
+      title.title = it.host;
+      card.appendChild(title);
+      const acts = el('div', 'later-actions');
+      const btn = (d, label, run) => {
+        const b = el('button');
+        if (d) b.appendChild(svgIcon(d)); else b.textContent = '×';
+        b.setAttribute('aria-label', label);
+        b.title = label;
+        b.addEventListener('click', (ev) => { ev.stopPropagation(); run(); });
+        acts.appendChild(b);
+      };
+      btn(TRAY_OUT, 'Recover', () => laterAction('restore_later', it.id, () => { if (narrow) setSidebar(false); }));
+      btn(RIBBON, 'Bookmark', () => laterAction('bookmark_later', it.id, () => { loadBookmarks(); toast('Bookmarked.'); }));
+      btn(null, 'Delete', () => laterAction('delete_later', it.id));
+      card.appendChild(acts);
+      list.appendChild(card);
+    }
+  }
+
+  $('later-btn').addEventListener('click', () => setLater(!laterOpen));
 
   // ---- start page (a new tab) ----------------------------------------------
   //
@@ -1069,7 +1178,9 @@
         ev.stopPropagation();
         invoke('remove_bookmark', { url: b.url }).then(loadBookmarks);
       });
-      node.append(open, rm);
+      const acts = el('span', 'row-actions');
+      acts.appendChild(rm);
+      node.append(open, acts);
       node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'bookmark', url: b.url, index }));
       list.appendChild(node);
     });
@@ -1097,7 +1208,7 @@
   let dragState = null;
 
   function armDrag(ev, node, item) {
-    if (ev.button > 0 || ev.target.closest('.close, .unpin')) return;
+    if (ev.button > 0 || ev.target.closest('.close, .unpin, .row-actions')) return;
     cancelPending();
     const mouse = ev.pointerType === 'mouse';
     pendingDrag = { node, item, mouse, x: ev.clientX, y: ev.clientY, timer: mouse ? null : setTimeout(startDrag, DRAG_DELAY_MS) };
@@ -3978,7 +4089,8 @@
   });
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
-    if (!$('copy-modal').hidden) closePageCopy();
+    if (laterOpen && $('sidebar').contains(document.activeElement)) setLater(false);
+    else if (!$('copy-modal').hidden) closePageCopy();
     else if (unblock) closeUnblock();
     else if (confirmAction) closeConfirm();
     else if (findOpen) closeFind();
@@ -4050,6 +4162,7 @@
   T.core.invoke('get_state').then((s) => { state = s; render(); });
   loadBookmarks();
   loadPins();
+  loadLater();
   loadScripts();
   loadAi();
   T.core.invoke('get_view_mode').then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch(() => {});

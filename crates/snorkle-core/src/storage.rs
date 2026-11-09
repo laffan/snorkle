@@ -92,6 +92,8 @@ fn clean_title(t: &str) -> String {
 pub struct Store {
     dir: PathBuf,
     inner: Mutex<Data>,
+    /// Save for Later (`later/`).
+    later: crate::later::LaterStore,
 }
 
 #[derive(Default)]
@@ -466,7 +468,8 @@ impl Store {
         ai_usage.drain(..excess);
         let chats = load_chats(&dir.join(CHATS_DIR));
         let launch_modes = load_or_reset(&dir.join(LAUNCH_MODES_FILE));
-        let blocked = crate::blocklist::BlockList::from_settings(load_or_reset(&dir.join(BLOCKED_FILE))).settings().clone();
+        let blocked =
+            crate::blocklist::BlockList::from_settings(load_or_reset(&dir.join(BLOCKED_FILE))).settings().clone();
         let mut pin_emoji: BTreeMap<String, String> = load_or_reset(&dir.join(PIN_EMOJI_FILE));
         pin_emoji.retain(|url, e| pins.iter().any(|p| &p.url == url) && clean_emoji(e).as_deref() == Some(e.as_str()));
         let offline = load_offline(&dir.join(OFFLINE_DIR), |u| {
@@ -476,6 +479,7 @@ impl Store {
         let downloads = load_downloads(&dir);
         let next_download = downloads.iter().map(|d| d.id).max().unwrap_or(0) + 1;
         Ok(Store {
+            later: crate::later::LaterStore::open(dir.join("later"))?,
             dir,
             inner: Mutex::new(Data {
                 history,
@@ -704,6 +708,11 @@ impl Store {
             })
             .take(limit)
             .collect()
+    }
+
+    /// Save for Later.
+    pub fn later(&self) -> &crate::later::LaterStore {
+        &self.later
     }
 
     /// Adds a bookmark; returns false if the URL is not storable or already
@@ -1290,13 +1299,17 @@ pub fn png_summary(bytes: &[u8]) -> String {
 
 /// `data:image/png;base64,…` for a validated PNG, for the chrome UI.
 pub fn png_data_url(png: &[u8]) -> Option<String> {
-    if !is_png(png) {
-        return None;
-    }
+    is_png(png).then(|| data_url("image/png", png))
+}
+
+/// `data:<mime>;base64,…` (the caller validated the bytes).
+pub(crate) fn data_url(mime: &str, bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(22 + png.len().div_ceil(3) * 4);
-    out.push_str("data:image/png;base64,");
-    for chunk in png.chunks(3) {
+    let mut out = String::with_capacity(13 + mime.len() + bytes.len().div_ceil(3) * 4);
+    out.push_str("data:");
+    out.push_str(mime);
+    out.push_str(";base64,");
+    for chunk in bytes.chunks(3) {
         let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         for i in 0..4 {
@@ -1307,7 +1320,7 @@ pub fn png_data_url(png: &[u8]) -> Option<String> {
             }
         }
     }
-    Some(out)
+    out
 }
 
 /// Reads the offline index, keeping entries with a valid file name, an
@@ -1420,7 +1433,7 @@ fn snippet(text: &str, q: &str) -> Option<String> {
     Some(out)
 }
 
-fn load_or_reset<T: DeserializeOwned + Default>(path: &Path) -> T {
+pub(crate) fn load_or_reset<T: DeserializeOwned + Default>(path: &Path) -> T {
     let Ok(meta) = fs::metadata(path) else { return T::default() };
     let parsed = if meta.len() > MAX_FILE_BYTES {
         None
@@ -1465,7 +1478,7 @@ fn load_chats(dir: &Path) -> Vec<ChatRecord> {
     chats
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     {
         let mut f = fs::File::create(&tmp)?;

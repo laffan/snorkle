@@ -327,6 +327,14 @@ pub fn set_open_app_links(on: bool) {
 /// Called with whether an app opened (⋯ → Open in App).
 pub type OpenedDone = Box<dyn FnOnce(bool) + Send>;
 
+/// Called with a JPEG thumbnail, or `None` (Save for Later).
+pub type ThumbDone = Box<dyn FnOnce(Option<Vec<u8>>) + Send>;
+/// Width of a Save for Later thumbnail, in points (the snapshot is drawn
+/// at the screen's scale).
+pub const THUMB_WIDTH: f64 = 320.0;
+/// JPEG quality of a thumbnail.
+pub const THUMB_QUALITY: f64 = 0.6;
+
 /// Settings → General → Pull to refresh (iPadOS): whether content views get
 /// a `UIRefreshControl` (OPEN_QUESTIONS 109: suspected of turning trackpad
 /// scrolls into back swipes).

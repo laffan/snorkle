@@ -92,6 +92,8 @@ fn args(cmd: &str) -> serde_json::Value {
         "get_view_mode" | "get_console" | "clear_console" | "ai_status" | "ai_usage" | "ai_reset_usage"
         | "list_user_scripts" | "list_pins" => json!({}),
         "pin_tab" => json!({ "tab": 1, "index": 0 }),
+        "restore_later" | "bookmark_later" | "delete_later" => json!({ "id": "l1-0" }),
+        "list_later" => json!({}),
         "pin_bookmark" | "move_pin" => json!({ "url": "https://example.com/", "index": 0 }),
         "unpin" => json!({ "url": "https://example.com/", "bookmarkIndex": null }),
         "set_pin_emoji" => json!({ "url": "https://example.com/", "emoji": null }),

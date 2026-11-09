@@ -215,7 +215,7 @@ fn notices_hide_content_view() {
     let out = b.navigate_input(t, "javascript:x", 0).unwrap();
     assert!(out.contains(&Effect::HideView(t)));
     assert!(!b.view().content_visible);
-    let out = b.go_back(t);
+    let out = b.go_back(t, 0);
     assert!(out.contains(&Effect::ShowView { tab: t, pane: Pane::Full }));
 }
 
@@ -536,6 +536,34 @@ fn command_click_opens_a_background_tab() {
     assert!(b.on_background_tab_request(p, &u("javascript:alert(1)"), 6).0.is_none());
     assert!(b.on_background_tab_request(p, &u("tel:123"), 6).0.is_none());
     assert!(b.on_background_tab_request(TabId(999), &u("https://c.example/"), 6).0.is_none());
+}
+
+#[test]
+fn back_from_a_command_clicked_tab_returns_to_the_page_it_came_from() {
+    let mut b = browser(4);
+    let (p, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(p, "https://a.example/list", 0).unwrap();
+    webkit_load(&mut b, p, "https://a.example/list");
+    let (t, _) = b.on_background_tab_request(p, &u("https://b.example/story"), 5);
+    let t = t.unwrap();
+    webkit_load(&mut b, t, "https://b.example/story");
+    let view = |b: &Browser| b.view().tabs.into_iter().find(|v| v.id == t).unwrap();
+    assert!(view(&b).can_go_back, "Back is offered at once");
+    b.activate(t, 6);
+    let out = b.go_back(t, 7);
+    assert!(
+        out.iter().any(|e| matches!(e, Effect::Load { url, .. } if url.as_str() == "https://a.example/list")),
+        "loads the opener's page: {out:?}"
+    );
+    webkit_load(&mut b, t, "https://a.example/list");
+    b.on_history_state(t, true, false);
+    let out = b.go_back(t, 8);
+    assert!(out.contains(&Effect::GoBack(t)), "then WebKit's own history");
+    b.on_history_state(t, false, true);
+    assert!(!view(&b).can_go_back, "the opener is offered once");
+    // Tabs opened otherwise have no such Back.
+    let (n, _) = b.new_tab(Profile::Default, 9);
+    assert!(!b.view().tabs.into_iter().find(|v| v.id == n).unwrap().can_go_back);
 }
 
 #[test]
@@ -1108,7 +1136,7 @@ fn blocked_addresses_never_reach_webkit_from_any_source() {
         assert!(!out.iter().any(|e| matches!(e, Effect::Load { .. } | Effect::CreateView { .. })), "{typed}");
         assert!(user_blocked(&b, t), "{typed}");
         assert!(out.contains(&Effect::HideView(t)) || !b.view().content_visible);
-        b.go_back(t);
+        b.go_back(t, 0);
     }
     // Back returns to the page underneath.
     assert_eq!(notice(&b, t), None);
@@ -1150,7 +1178,7 @@ fn single_page_app_moving_to_a_blocked_address_is_hidden() {
 
     // Back really goes back in the page (the blocked page is underneath),
     // and dismissing cannot reveal it.
-    let out = b.go_back(t);
+    let out = b.go_back(t, 0);
     assert!(out.contains(&Effect::GoBack(t)));
     assert!(user_blocked(&b, t));
     let out = b.dismiss_notice(t);

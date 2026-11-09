@@ -120,6 +120,11 @@ impl ContentHost {
 
     pub fn define(&mut self, _term: &str, _from: (f64, f64, f64, f64)) {}
 
+    /// No pages render off iOS and macOS.
+    pub fn thumbnail(&mut self, _tab: snorkle_core::tabs::TabId, done: crate::ThumbDone) {
+        done(None);
+    }
+
     /// No apps to open off iOS.
     pub fn open_in_app(&mut self, _url: &url::Url, done: crate::OpenedDone) {
         done(false);

@@ -105,6 +105,11 @@
     "allow-set-swipe-navigation",
     "allow-set-open-app-links",
     "allow-open-in-app",
+    "allow-save-for-later",
+    "allow-list-later",
+    "allow-restore-later",
+    "allow-bookmark-later",
+    "allow-delete-later",
     "allow-set-pull-to-refresh"
   ]
 }

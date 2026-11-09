@@ -173,6 +173,10 @@ pub struct Tab {
     /// item's URL (its offline copy is saved under it, also when the site
     /// redirects). Cleared when that load finishes or fails.
     pub landing: Option<String>,
+    /// A tab opened with ⌘-click: the page it was opened from. While the
+    /// tab has no back history of its own, Back loads that page (WebKit
+    /// cannot give a new web view another view's history). Memory only.
+    pub back_to: Option<Url>,
 }
 
 /// An offline copy in a tab: when it was saved, and whether its load has
@@ -242,6 +246,7 @@ impl Tab {
             offline: None,
             offline_tried: false,
             landing: None,
+            back_to: None,
             launcher: None,
         }
     }
