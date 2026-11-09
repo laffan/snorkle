@@ -72,7 +72,7 @@ pub struct Injections {
 }
 
 /// View-mode sources for one set of modes.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ViewInjections {
     pub sources: Vec<Injection>,
     /// Brings an already-loaded page in line with these modes.

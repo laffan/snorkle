@@ -538,6 +538,17 @@ pub fn apply_js(modes: ViewModes, rules: &HeadingRules) -> String {
         + &headers
 }
 
+/// Save for Later's thumbnail (2026-11-09): takes black and white, hidden
+/// media and dark pages off an already-loaded page, without changing what
+/// is installed for its later loads (the tab's `apply_js` puts them back).
+/// Constant code.
+pub fn plain_js() -> String {
+    style_js("__snorkle_grayscale", GRAYSCALE_CSS, false, false)
+        + &style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true)
+        + &style_js("__snorkle_dark", DARK_CSS, false, false)
+        + DARK_STOP_JS
+}
+
 /// Scrolls the page to the heading at `index` among the elements matching
 /// the extractor's heading selector, then highlights it briefly (an
 /// outline and a gray wash that fade out; Web Animations, so the page's own
@@ -846,4 +857,15 @@ mod tests {
         assert_eq!(v["candidates"][0]["up"], true);
         assert!(headings_sample_js().contains("function sec(e)"));
     }
+
+    #[test]
+    fn plain_view_only_takes_modes_off_the_loaded_page() {
+        let js = plain_js();
+        for id in ["__snorkle_grayscale_state", "__snorkle_no_images_state", "__snorkle_dark_state"] {
+            assert!(js.contains(&format!("var s=window[\"{id}\"];if(!s)return;")), "{id} removed");
+        }
+        assert!(js.contains(DARK_STOP_JS));
+        assert!(!js.contains("createElement('style')"), "adds no style");
+    }
+
 }

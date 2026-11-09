@@ -246,6 +246,14 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   placeholders kept at `opacity: 0` still show their gray box; an image pointed at before it has
   loaded is marked `data-snorkle-loading` (a lazy one is switched to eager loading) and stays a
   pulsing gray box until its load or error event, then fades in.
+- **Shared content controllers** (fixed 2026-11-09): a popup's web view (a `target=_blank` link,
+  `window.open`) is built from WebKit's configuration and so shares its opener's
+  `WKUserContentController`; one install of the view-mode scripts serves all of them. The host
+  installs a tab's own scripts (modes disabled for it) only when every tab on that controller has
+  the same modes, else the app-wide ones (`scripts_on`); before, the tab installed last won in hash
+  order, so a page's next load (a site refreshing itself) could lose hidden media. Per-tab modes
+  still reach each loaded page through its `apply_js`; a tab whose modes differ from a sibling's
+  gets the app-wide modes on its next load.
 - **Split view:** the core keeps `splits: Vec<SplitView>`, pairs of tabs of the same profile; a
   tab is in at most one pair. The pair holding the active tab is on screen. Visibility effects
   carry a `Pane` (`Full`, `Left`/`Right` for a pair side by side, `Top`/`Bottom` for one in rows;
@@ -579,9 +587,10 @@ tabs) and the × of bookmarks and domain headings appear only while the row is p
 touch-only devices: on the active tab or bookmark, and always on domain headings).
 **Save for Later** (2026-11-09; `snorkle_core::later`, `later/`): a tab's tray button snapshots what
 its view shows (`takeSnapshotWithConfiguration`, visible bounds, 320 pt wide, JPEG 0.6, drawn by the
-app from its own web view) in light mode, with images and in full colour: the tab's view modes are
-turned off for it and its view drawn light (`force_light`) 1.5 s before the snapshot, so the page
-briefly shows that way before the tab closes (`saved::save`; restored if saving fails). It saves the page as an **archive** that works offline (below), stores the
+app from its own web view) in light mode, with images and in full colour: 1.5 s before the snapshot
+the view modes are taken off the loaded page only (`viewmodes::plain_js`) and its view drawn light
+(`force_plain`), so the page briefly shows that way before the tab closes (`saved::save`; put back if
+saving fails). The tab's mode settings and the scripts installed for later loads are not touched. It saves the page as an **archive** that works offline (below), stores the
 committed page, title and thumbnail (≤ 200 pages, ≤ 400 KB each, JPEG magic checked), and closes
 the tab; private tabs and empty tabs have no such button. The chrome shows how far it is in a toast
 with a percentage and a bar (`later_progress` events; also while adding pages). A tab without a live view is saved without

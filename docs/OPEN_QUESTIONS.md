@@ -812,8 +812,10 @@ and backgrounds that change after load. Live NASA verification is pending.
   normally"): unlisted, shown as their card in Save for Later, not restored at launch; links that
   leave the archive open in a new ordinary tab. Script navigations out of an archive are cancelled,
   so a page that redirects itself on load stays on the saved copy.
-- **[verify]** Thumbnails in light mode with images and colour: the tab's view modes are turned off
-  and its view drawn light 1.5 s before the snapshot. Check that 1.5 s is enough for images to
+- **[verify]** Thumbnails in light mode with images and colour: view modes are taken off the loaded
+  page only (its settings and installed scripts untouched; before 2026-11-09 they were turned off
+  for the tab, which could leave a popup sharing its content controller without hidden media) and
+  its view drawn light 1.5 s before the snapshot. Check that 1.5 s is enough for images to
   fade in and background images to load, and that dark mode's inversion is fully removed by then;
   the page visibly changes for that moment before the tab closes.
 - **[decide]** Clicking a saved page's thumbnail opens its saved copy (it stays in the list);
@@ -836,3 +838,16 @@ and backgrounds that change after load. Live NASA verification is pending.
   drag but a group does not split.
 - **[verify]** The Copy button sits beside Share inside the address field; with a narrow address
   field (narrow windows), check the address is not hidden by the two buttons.
+
+## Hidden media lost on reload (reported 2026-11-09, nytimes.com)
+
+- **[verify]** Cause found in code, not reproduced on a device: tabs opened by a page share their
+  opener's content controller, and per-tab scripts were installed on it in hash order, so a page
+  that reloads itself could come back without hidden media (most easily after saving the opener
+  for later, which turned its modes off). Fixed by installing one deterministic set per shared
+  controller (`scripts_on`) and by no longer changing a tab's modes for Save for Later's thumbnail.
+  If images still show on nytimes.com with hide images on, note whether the tab was opened from
+  another tab, and the console (Browser entries) around the reload.
+- **[decide]** With different modes on tabs that share a controller ("Disable for this tab" on one
+  of them), later loads in all of them follow the app-wide modes; the change still applies at once
+  to the page loaded in that tab.

@@ -19,13 +19,11 @@
 //! open from the archive (`Browser::show_saved_copy`,
 //! `Effect::OpenSavedPage`).
 
-use std::collections::BTreeSet;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use snorkle_core::later::{self, PageCapture};
 use snorkle_core::tabs::{Profile, SavedCopy, TabId};
-use snorkle_core::viewmodes::Kind;
 use snorkle_core::webarchive;
 use snorkle_core::Url;
 
@@ -141,17 +139,20 @@ pub fn capture(tab: TabId, page_url: &str, fallback_title: &str, progress: &dyn 
 }
 
 /// Save for Later (blocking): a thumbnail of the tab's page in light mode,
-/// with images and in full colour (owner request 2026-11-09: the tab's view
-/// modes are turned off for it and its view drawn light first), the
+/// with images and in full colour (owner request 2026-11-09: view modes are
+/// taken off its loaded page and its view drawn light first; its settings
+/// and installed scripts are left alone), the
 /// archive when the tab has a live page (`live`), then the item is stored
 /// and the tab closed. The chrome is told how far it is
-/// (`ChromeEvent::LaterProgress`). If storing fails, the tab gets its view
+/// (`ChromeEvent::LaterProgress`). If storing fails, the page gets its view
 /// modes back.
 pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool) -> Result<(), String> {
     let store = shared.store.clone().ok_or("Saving is not available.")?;
     let report = |p: u8| (shared.emit)(ChromeEvent::LaterProgress(tab, "save", p.min(100)));
     report(1);
-    let modes = live.then(|| plain_view(shared, tab));
+    if live {
+        plain_view(tab);
+    }
     report(8);
     let thumb = thumbnail(tab);
     report(12);
@@ -161,8 +162,8 @@ pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool
     match added {
         Ok(Some(_)) => {}
         failed => {
-            if let Some(before) = modes {
-                restore_view(shared, tab, before);
+            if live {
+                restore_view(tab);
             }
             return Err(match failed {
                 Err(e) => e.to_string(),
@@ -180,36 +181,20 @@ fn wall_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-/// Turns the tab's view modes off (black and white, hidden media, dark)
-/// and draws its view in light mode, then waits for the page to show its
-/// images. Returns the tab's exemptions before.
-fn plain_view(shared: &Arc<Shared>, tab: TabId) -> BTreeSet<Kind> {
-    let before = shared.exempt().get(&tab).cloned().unwrap_or_default();
-    let mut all = before.clone();
-    all.extend([Kind::Desaturate, Kind::HideMedia, Kind::Dark]);
-    set_exempt(shared, tab, all);
-    snorkle_content::dispatch_main(move || with_host(|h| h.force_light(tab, true)));
+/// Shows the tab's loaded page without view modes (black and white,
+/// hidden media, dark) and in light mode, then waits for it to show its
+/// images. Only that page changes: the tab's view-mode settings and the
+/// scripts installed for its (and its popups') later loads stay as they
+/// are, so no other tab is affected.
+fn plain_view(tab: TabId) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.force_plain(tab, true)));
     // Hidden images fade in (0.3 s) and CSS background images start
     // loading only now.
     std::thread::sleep(Duration::from_millis(1500));
-    before
 }
 
-fn restore_view(shared: &Arc<Shared>, tab: TabId, before: BTreeSet<Kind>) {
-    set_exempt(shared, tab, before);
-    snorkle_content::dispatch_main(move || with_host(|h| h.force_light(tab, false)));
-}
-
-fn set_exempt(shared: &Arc<Shared>, tab: TabId, set: BTreeSet<Kind>) {
-    let kinds: Vec<Kind> = set.iter().copied().collect();
-    if set.is_empty() {
-        shared.exempt().remove(&tab);
-    } else {
-        shared.exempt().insert(tab, set);
-    }
-    let effects = shared.browser().set_view_exempt(tab, &kinds);
-    shared.run(effects);
-    crate::scripts::apply(shared, true);
+fn restore_view(tab: TabId) {
+    snorkle_content::dispatch_main(move || with_host(|h| h.force_plain(tab, false)));
 }
 
 fn thumbnail(tab: TabId) -> Option<Vec<u8>> {

@@ -371,7 +371,7 @@ impl ContentHost {
         self.injections = injections;
         self.compile_scripts();
         for (tab, v) in &self.views {
-            injection::install(self.mtm, &v.controller, self.scripts_for(*tab));
+            injection::install(self.mtm, &v.controller, self.scripts_on(*tab, &v.controller));
             set_dark(&v.web, self.injections.view_for(*tab).dark);
             if run_now {
                 injection::run_now(self.mtm, &v.web, &self.injections.view_for(*tab).apply_js);
@@ -384,7 +384,7 @@ impl ContentHost {
         self.console = on;
         self.compile_scripts();
         for (tab, v) in &self.views {
-            injection::install(self.mtm, &v.controller, self.scripts_for(*tab));
+            injection::install(self.mtm, &v.controller, self.scripts_on(*tab, &v.controller));
         }
     }
 
@@ -394,15 +394,20 @@ impl ContentHost {
         }
     }
 
-    /// Save for Later's thumbnail (2026-11-09): draws the tab's view in
-    /// light mode (`on`), whatever the app's appearance and dark pages
-    /// mode say, or as they say again.
-    pub fn force_light(&mut self, tab: TabId, on: bool) {
+    /// Save for Later's thumbnail (2026-11-09): shows the tab's loaded
+    /// page in light mode, in colour and with its images (`on`), or as its
+    /// view modes say again. Only that page changes: nothing installed for
+    /// later loads, and no other tab (a popup shares its opener's content
+    /// controller), is touched.
+    pub fn force_plain(&mut self, tab: TabId, on: bool) {
         let Some(v) = self.views.get(&tab) else { return };
         if on {
+            injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::plain_js());
             set_light(&v.web);
         } else {
-            set_dark(&v.web, self.injections.view_for(tab).dark);
+            let view = self.injections.view_for(tab);
+            injection::run_now(self.mtm, &v.web, &view.apply_js);
+            set_dark(&v.web, view.dark);
         }
     }
 
@@ -700,6 +705,22 @@ impl ContentHost {
         self.tab_scripts.get(&tab).unwrap_or(&self.scripts)
     }
 
+    /// The scripts to install on `controller` for `tab`. A popup's web view
+    /// shares its opener's content controller, so one install serves every
+    /// tab on it: a tab's own scripts (modes turned off for it) only when
+    /// every other tab on that controller has the same modes, otherwise the
+    /// app-wide ones. Before 2026-11-09 the last tab installed won, in hash
+    /// order, so a page's next load could lose hidden media (or keep it)
+    /// depending on its sibling. Per-tab modes still reach each loaded page
+    /// through its `apply_js`.
+    fn scripts_on(&self, tab: TabId, controller: &WKUserContentController) -> &injection::Scripts {
+        let own = self.injections.view_for(tab);
+        let shared_with_other = self.views.iter().any(|(t, v)| {
+            *t != tab && std::ptr::eq(&*v.controller, controller) && self.injections.view_for(*t) != own
+        });
+        if shared_with_other { &self.scripts } else { self.scripts_for(tab) }
+    }
+
     pub fn fetch_favicon(&mut self, host: String, done: crate::FaviconDone) {
         favicon::fetch(self.mtm, &self.root, host, done);
     }
@@ -853,7 +874,7 @@ impl ContentHost {
         );
         container.addSubview(&web);
         set_dark(&web, self.injections.view_for(tab).dark);
-        injection::install(mtm, &controller, self.scripts_for(tab));
+        injection::install(mtm, &controller, self.scripts_on(tab, &controller));
         rules::register(tab, controller.clone());
         WEB_VIEW_TABS.with(|m| m.borrow_mut().insert(Retained::as_ptr(&web) as usize, tab));
         View { container, web, controller, pane: Cell::new(Pane::Full), _nav: nav, _ui: ui, kvo }
