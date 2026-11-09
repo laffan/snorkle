@@ -21,6 +21,20 @@
         <string>https</string>
       </array>
     </dict>
+    <!-- Links sent to Snorkle specifically (2026-11-09): snorkle-https://…,
+         snorkle-http://…, snorkle://open-url?url=…, snorkle://host/path.
+         Turned into the web page they stand for by
+         snorkle_core::input::from_app_link; pages cannot use them. -->
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Snorkle link</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>snorkle</string>
+        <string>snorkle-http</string>
+        <string>snorkle-https</string>
+      </array>
+    </dict>
   </array>
   <!--
     ATS: allow plain-HTTP loads *inside web content only*, so the user can

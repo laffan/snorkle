@@ -97,7 +97,9 @@ impl HttpExceptions {
 /// Schemes registered by Tauri/the app for the trusted chrome. Content web
 /// views never register handlers for these, but navigation to them is
 /// rejected explicitly as defence in depth.
-pub const INTERNAL_SCHEMES: &[&str] = &["tauri", "ipc", "asset", "snorkle", "x-snorkle"];
+// The app's own link schemes (`input::APP_SCHEMES`) are listed too: a page
+// inside Snorkle cannot use them (they are for other apps to send links).
+pub const INTERNAL_SCHEMES: &[&str] = &["tauri", "ipc", "asset", "snorkle", "x-snorkle", "snorkle-http", "snorkle-https"];
 /// Hostnames Tauri uses for local content/IPC on some platforms.
 pub const INTERNAL_HOSTS: &[&str] = &["tauri.localhost", "ipc.localhost", "asset.localhost"];
 

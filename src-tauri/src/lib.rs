@@ -174,9 +174,22 @@ fn on_run_event<R: Runtime>(app: &tauri::AppHandle<R>, event: tauri::RunEvent) {
 }
 
 /// Opens links from other apps in new tabs (http/https only, policy-checked).
+/// Links in the app's own schemes (`snorkle-https://…`, `snorkle://open-url?url=…`,
+/// `input::APP_SCHEMES`) are first turned into the page they stand for.
 fn open_links(shared: &Arc<Shared>, urls: Vec<snorkle_core::Url>) {
     for url in urls {
         let shown = url.to_string();
+        let url = if snorkle_core::input::APP_SCHEMES.contains(&url.scheme()) {
+            match snorkle_core::input::from_app_link(&url) {
+                Some(page) => page,
+                None => {
+                    shared.log(snorkle_core::console::Level::Info, None, &format!("link from another app {shown}: refused"));
+                    continue;
+                }
+            }
+        } else {
+            url
+        };
         let (tab, effects) = shared.browser().open_from_other_app(url, state::now_ms());
         let result = if tab.is_some() { "opened" } else { "refused" };
         shared.log(snorkle_core::console::Level::Info, tab, &format!("link from another app {shown}: {result}"));

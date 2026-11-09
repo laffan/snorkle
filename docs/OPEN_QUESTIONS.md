@@ -772,3 +772,14 @@ and backgrounds that change after load. Live NASA verification is pending.
 - **[verify]** Hover-only row buttons with a Magic Keyboard trackpad on iPad (pointer hover) and on
   touch alone (active row only).
 
+## Links sent to Snorkle (2026-11-09)
+
+- **[verify]** On iPad and Mac (installed build): `snorkle-https://example.com`,
+  `snorkle://open-url?url=…` and `snorkle://example.com` from Safari, Notes and Shortcuts each open
+  one new tab, cold and warm launch. Tauri delivers custom-scheme URLs through the same
+  `RunEvent::Opened` as http(s) links (assumed from the macOS `application:openURLs:` and iOS
+  `openURLContexts` paths; not run here). On iPadOS the generated Xcode project must carry the
+  plist's `CFBundleURLTypes` (as for http/https).
+- **[decide]** Scheme names: `snorkle`, `snorkle-http`, `snorkle-https`. Another app could claim the
+  same names; iOS then picks one of the apps, undefined which.
+

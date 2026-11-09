@@ -442,6 +442,14 @@ accepts the copy once (`Browser::use_offline_copy`) and the host loads it with
 `loadData:MIMEType:…baseURL:` and JavaScript off for that navigation; the address bar shows an
 "Offline copy" pill, the copy is not written to history, and the next load replaces it.
 
+**Links sent to Snorkle** (2026-11-09): the app declares its own URL schemes besides http/https
+(`Info.plist`, `Info.ios.plist`; `input::APP_SCHEMES`): `snorkle-https://…` / `snorkle-http://…`
+(the scheme swapped, as Edge's `microsoft-edge-https://`), `snorkle://open-url?url=<encoded>` (as
+Firefox's) and `snorkle://host/path` (https). They arrive like links from other apps
+(`RunEvent::Opened`, `open_links`); `input::from_app_link` turns them into the page they stand for
+(http/https, a host, no credentials, ≤ 8 KB) or refuses them, and `open_from_other_app` applies the
+navigation policy. They are in `policy::INTERNAL_SCHEMES`, so pages inside Snorkle cannot use them.
+
 **Links to apps** (2026-11-09, iPadOS): WebKit hands a cross-site main-frame navigation to an
 installed app that claims the address (universal links) when the navigation delegate answers plain
 `Allow`, which is why Google Docs and Sheets jumped to their apps. By default every allowed

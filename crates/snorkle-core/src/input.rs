@@ -144,6 +144,47 @@ fn search_url(query: &str, engine: &SearchEngine) -> Url {
     Url::parse(&s).expect("search template must be a valid URL")
 }
 
+/// The app's own URL schemes (declared in `Info.plist` and
+/// `Info.ios.plist`), so other apps, Shortcuts and web pages in Safari can
+/// send a link to Snorkle specifically (owner request 2026-11-09). The same
+/// forms other browsers use:
+/// - `snorkle-https://example.com/a` and `snorkle-http://…`: the scheme
+///   swapped (as `microsoft-edge-https://`, Chrome's `googlechromes://`);
+/// - `snorkle://open-url?url=<percent-encoded http(s) URL>` (as Firefox's
+///   `firefox://open-url?url=`);
+/// - `snorkle://example.com/a`: shorthand for `https://example.com/a`.
+pub const APP_SCHEMES: &[&str] = &["snorkle", "snorkle-http", "snorkle-https"];
+
+/// The web page a link in one of [`APP_SCHEMES`] stands for: an http(s)
+/// URL with a host and no credentials, or `None`. The result still goes
+/// through the navigation policy like any link from another app.
+pub fn from_app_link(link: &Url) -> Option<Url> {
+    if link.as_str().len() > MAX_INPUT_LEN {
+        return None;
+    }
+    // What follows the scheme's colon, e.g. "//example.com/a?b#c".
+    let rest = &link.as_str()[link.scheme().len() + 1..];
+    if !rest.starts_with("//") {
+        return None;
+    }
+    let target = match link.scheme() {
+        "snorkle-https" => Url::parse(&format!("https:{rest}")).ok()?,
+        "snorkle-http" => Url::parse(&format!("http:{rest}")).ok()?,
+        "snorkle" if link.host_str() == Some("open-url") => {
+            let (_, url) = link.query_pairs().find(|(k, _)| k == "url")?;
+            Url::parse(url.trim()).ok()?
+        }
+        "snorkle" => Url::parse(&format!("https:{rest}")).ok()?,
+        _ => return None,
+    };
+    let plain = matches!(target.scheme(), "http" | "https")
+        && target.host_str().is_some_and(|h| !h.is_empty())
+        && target.username().is_empty()
+        && target.password().is_none()
+        && target.as_str().len() <= MAX_INPUT_LEN;
+    plain.then_some(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +245,32 @@ mod tests {
     fn errors() {
         assert_eq!(interpret("   ", &DEFAULT_SEARCH), Err(InputError::Empty));
         assert_eq!(interpret(&"a".repeat(MAX_INPUT_LEN + 1), &DEFAULT_SEARCH), Err(InputError::TooLong));
+    }
+
+    #[test]
+    fn app_links_stand_for_web_pages() {
+        let go = |s: &str| from_app_link(&Url::parse(s).unwrap()).map(|u| u.to_string());
+        assert_eq!(go("snorkle-https://Example.com/a?b=1#c").as_deref(), Some("https://example.com/a?b=1#c"));
+        assert_eq!(go("snorkle-http://example.com/").as_deref(), Some("http://example.com/"));
+        assert_eq!(
+            go("snorkle://open-url?url=https%3A%2F%2Fexample.com%2Fx%3Fq%3D1%26r%3D2").as_deref(),
+            Some("https://example.com/x?q=1&r=2")
+        );
+        assert_eq!(go("snorkle://example.com/path?x").as_deref(), Some("https://example.com/path?x"));
+        for bad in [
+            "snorkle://open-url?url=javascript%3Aalert(1)",
+            "snorkle://open-url?url=file%3A%2F%2F%2Fetc%2Fpasswd",
+            "snorkle://open-url",
+            "snorkle-https://user:pw@example.com/",
+            "snorkle-https:example",
+            "snorkle:example.com",
+            "mailto:a@example.com",
+            "https://example.com/",
+        ] {
+            assert_eq!(go(bad), None, "{bad}");
+        }
+        for s in APP_SCHEMES {
+            assert!(crate::policy::INTERNAL_SCHEMES.contains(s), "pages cannot navigate to {s}");
+        }
     }
 }

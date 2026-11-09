@@ -191,3 +191,13 @@ before they are written to `later/` and served to the chrome only as
 tab navigates to its opener's committed http(s) URL from the core through
 `navigate_trusted`. No new page-to-native channel. Human review pending.
 
+2026-11-09 Links sent to Snorkle: `Info.plist` and `Info.ios.plist` declare
+the URL schemes `snorkle`, `snorkle-http`, `snorkle-https` (any app or a page in
+Safari can open them, as with http/https for a default browser). Each link is
+turned into an http(s) page by `input::from_app_link` (host required, no
+credentials, ≤ 8 KB; anything else refused and logged) and opened by
+`open_from_other_app` through the navigation policy (a new tab, default
+profile). The schemes are added to `policy::INTERNAL_SCHEMES`, so pages inside
+Snorkle cannot navigate to them. No new command or page-to-native channel.
+Human review pending.
+

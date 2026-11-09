@@ -118,6 +118,19 @@ If signing fails with "provisioning profile doesn't include the
 com.apple.developer.web-browser entitlement", 1 or 2 is missing; `npm run ios:build --
 --without-web-browser` installs without it (no default-browser option, no Service Workers).
 
+### Sending a link to Snorkle (both platforms)
+
+Without being the default browser, other apps, Shortcuts and web pages in Safari can open a page in
+Snorkle with its own URL schemes (the same forms Edge, Chrome and Firefox use):
+
+- `snorkle-https://example.com/page` (or `snorkle-http://…`): replace the link's `https`.
+- `snorkle://open-url?url=https%3A%2F%2Fexample.com%2Fpage`: any http(s) link, percent-encoded.
+- `snorkle://example.com/page`: shorthand for `https://example.com/page`.
+
+Each opens a new tab through the same navigation policy as links from other apps; anything that
+is not a plain http(s) page (no credentials) is refused. Pages inside Snorkle cannot use these
+schemes.
+
 ### Passkeys (both platforms)
 
 Passkeys and security keys fail in Snorkle today (Google reports `passkey_first_auth_factor_error`).

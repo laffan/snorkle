@@ -132,6 +132,10 @@ fn macos_plist_keeps_ats_for_app() {
     for scheme in ["<string>http</string>", "<string>https</string>"] {
         assert!(plist.contains(scheme), "default browsers must declare {scheme}");
     }
+    // The app's own link schemes, exactly `input::APP_SCHEMES`.
+    for scheme in snorkle_core::input::APP_SCHEMES {
+        assert!(plist.contains(&format!("<string>{scheme}</string>")), "{scheme} is declared");
+    }
 }
 
 #[test]
@@ -184,6 +188,10 @@ fn ios_plist_keeps_ats_for_app_and_requests_no_restricted_data() {
     }
     for scheme in ["<string>http</string>", "<string>https</string>"] {
         assert!(plist.contains(scheme), "default browsers must declare {scheme}");
+    }
+    // The app's own link schemes, exactly `input::APP_SCHEMES`.
+    for scheme in snorkle_core::input::APP_SCHEMES {
+        assert!(plist.contains(&format!("<string>{scheme}</string>")), "{scheme} is declared");
     }
 }
 
