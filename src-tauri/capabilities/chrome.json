@@ -103,6 +103,8 @@
     "allow-set-blocked-message",
     "allow-tab-icons",
     "allow-set-swipe-navigation",
+    "allow-set-open-app-links",
+    "allow-open-in-app",
     "allow-set-pull-to-refresh"
   ]
 }

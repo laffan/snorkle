@@ -170,3 +170,13 @@ colours and sets or removes the `data-snorkle-flip` attribute on page elements;
 it reports nothing to native code. No new page-to-native channel. Human review
 pending.
 
+2026-11-09 Links to apps: `webkit/delegates.rs` answers allowed navigations
+with `_WKNavigationActionPolicyAllowWithoutTryingAppLink` (Allow + 2) unless
+Settings → Links to apps is Automatic, so WebKit no longer hands pages to
+installed apps by itself. Two new chrome commands (capability `chrome`):
+`set_open_app_links` (a boolean) and `open_in_app` (a tab id; the URL is the
+tab's committed http/https URL from the core, opened by UIKit with
+`UIApplicationOpenURLOptionUniversalLinksOnly`, so no browser and no other
+scheme can be launched; AppKit and the stub report false). No new
+page-to-native channel. Human review pending.
+

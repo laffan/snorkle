@@ -744,3 +744,16 @@ and backgrounds that change after load. Live NASA verification is pending.
   pure red image shows slightly desaturated, the same as images were already shown on inverted
   pages.
 
+## Links to apps (2026-11-09)
+
+- **[verify]** On iPad with the Google Docs and Sheets apps installed: following a link to a doc or
+  sheet loads it in Snorkle (default "Browser"); ⋯ → Open in App opens it in the app; with
+  "Automatic" it jumps as before. Also check a site without an app (toast, nothing opens).
+- **[decide]** `_WKNavigationActionPolicyAllowWithoutTryingAppLink` is undocumented. It is an enum
+  value passed to a public delegate method, not a private selector, and Chrome for iOS relies on it
+  (WebKit bug 216624), but App Review could object; without it the only public way to keep a page in
+  the browser is to cancel and reload it, which is not equivalent. Current WebKit handles it (it
+  skips the app and goes on to load); re-check on each iPadOS release in case it is removed.
+- **[decide]** No prompt before the jump: iOS cannot say whether an app claims an address without
+  opening it, so the app is offered from the ⋯ menu instead of asked about on each link.
+

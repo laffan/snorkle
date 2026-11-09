@@ -351,6 +351,7 @@
     $('bookmark').querySelector('.label').textContent = marked ? 'Remove Bookmark' : 'Bookmark';
     $('bookmark').querySelector('.state').textContent = marked ? '\u2605' : '\u2606';
     $('block-site').disabled = !(tab && tab.url && tab.adblock);
+    $('open-in-app').disabled = !(tab && tab.url);
     $('unsplit').hidden = !state.split;
     $('sheet-close').hidden = !state.sheet;
     $('sheet-pill').hidden = !state.sheet;
@@ -435,9 +436,9 @@
         title.textContent = 'Open another app?';
         body.textContent = `This page wants to open a “${n.scheme}:” link in another app.`;
         detail.textContent = n.url.slice(0, 200);
-        primary.textContent = 'Open';
+        primary.textContent = 'Open App';
         primary.onclick = () => invoke('confirm_external', { tab: tab.id });
-        secondary.textContent = 'Cancel';
+        secondary.textContent = 'Stay in Browser';
         secondary.onclick = () => invoke('dismiss_notice', { tab: tab.id });
         break;
       case 'user_blocked':
@@ -1340,6 +1341,31 @@
     const on = b.dataset.pullRefresh === 'on';
     setPref('pullRefresh', on ? '1' : '0');
     applyPullRefresh(on);
+  }));
+
+  // Settings → General → Links to apps (remembered here, sent at launch):
+  // off (default), WebKit never hands a page to an installed app by itself
+  // (Google Docs and Sheets jumped to their apps); ⋯ → Open in App does it
+  // on request (iPadOS).
+  function applyAppLinks(on) {
+    document.querySelectorAll('[data-app-links]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.appLinks === 'on') === on)));
+    T.core.invoke('set_open_app_links', { on }).catch(() => {});
+  }
+  applyAppLinks(pref('appLinks') === '1');
+  document.querySelectorAll('[data-app-links]').forEach((b) => b.addEventListener('click', () => {
+    const on = b.dataset.appLinks === 'on';
+    setPref('appLinks', on ? '1' : '0');
+    applyAppLinks(on);
+  }));
+  // AppKit has no "universal links only" open: iPadOS only.
+  $('open-in-app').hidden = macOS;
+  $('app-links-option').hidden = macOS;
+  $('open-in-app').addEventListener('click', withTab((t) => {
+    setActions(false);
+    if (!t.url) { toast('Open a page first.'); return; }
+    T.core.invoke('open_in_app', { tab: t.id })
+      .then((opened) => { if (!opened) toast(`No installed app opens ${t.url.registrable}.`); })
+      .catch((e) => toast(String(e)));
   }));
 
   $('appearance').addEventListener('change', () => {

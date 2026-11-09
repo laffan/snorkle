@@ -412,6 +412,34 @@ impl ContentHost {
 
     /// Reads `tab`'s page for the AI chat (title, visible text, selection;
     /// `snorkle_core::ai::PAGE_TEXT_JS`). `done` runs on the main thread.
+    /// ⋯ → Open in App: offers the page's address (http/https, from the
+    /// core) to the app that claims it, with UIKit's "universal links only"
+    /// option, so nothing opens if no installed app claims it (no browser,
+    /// no other scheme). `done` gets whether an app opened.
+    pub fn open_in_app(&mut self, url: &Url, done: crate::OpenedDone) {
+        if !matches!(url.scheme(), "http" | "https") {
+            done(false);
+            return;
+        }
+        let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(url.as_str())) else {
+            done(false);
+            return;
+        };
+        let done = RefCell::new(Some(done));
+        let block = RcBlock::new(move |ok: objc2::runtime::Bool| {
+            if let Some(f) = done.borrow_mut().take() {
+                f(ok.as_bool());
+            }
+        });
+        unsafe {
+            let key: &objc2_foundation::NSString = objc2_ui_kit::UIApplicationOpenURLOptionUniversalLinksOnly;
+            let yes = objc2_foundation::NSNumber::new_bool(true);
+            let options: Retained<NSDictionary<objc2_foundation::NSString, AnyObject>> =
+                NSDictionary::from_retained_objects(&[key], &[Retained::into_super(Retained::into_super(Retained::into_super(yes)))]);
+            UIApplication::sharedApplication(self.mtm).openURL_options_completionHandler(&nsurl, &options, Some(&block));
+        }
+    }
+
     pub fn read_page_text(&mut self, tab: TabId, done: crate::TextDone) {
         match self.views.get(&tab) {
             Some(v) => injection::read_now(self.mtm, &v.web, snorkle_core::ai::PAGE_TEXT_JS, done),

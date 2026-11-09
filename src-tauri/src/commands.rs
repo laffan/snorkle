@@ -671,6 +671,34 @@ pub fn set_swipe_navigation(on: bool) {
     snorkle_content::dispatch_main(move || with_host(|h| h.set_swipe_navigation(on)));
 }
 
+/// Settings → General → Open links in apps (default off): whether WebKit
+/// may hand a page to an installed app that claims its address. Sent by
+/// the chrome at launch.
+#[tauri::command]
+pub fn set_open_app_links(on: bool) {
+    snorkle_content::set_open_app_links(on);
+}
+
+/// ⋯ → Open in App (iPadOS): offers the tab's committed page (http/https,
+/// from the core, never from the chrome) to the app that claims its
+/// address. Universal links only, so nothing else can be opened this way.
+/// Whether an app opened.
+#[tauri::command]
+pub async fn open_in_app(s: S<'_>, tab: u64) -> Result<bool, String> {
+    let url = s
+        .browser()
+        .tab(TabId(tab))
+        .and_then(|t| t.committed_url.clone())
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or("Open a web page first.")?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || with_host(|h| h.open_in_app(&url, Box::new(move |ok| { let _ = tx.send(ok); }))));
+    let opened = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(10)))
+        .await
+        .map_err(|_| "Request failed.".to_string())?;
+    Ok(opened.unwrap_or(false))
+}
+
 /// Settings → General → Pull to refresh (iPadOS; no-op on macOS). Sent by
 /// the chrome at launch.
 #[tauri::command]

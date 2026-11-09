@@ -309,6 +309,24 @@ pub fn set_swipe_navigation(on: bool) {
     SWIPE_NAVIGATION.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Settings → General → Open links in apps (2026-11-09; default off):
+/// whether WebKit may hand a page to an installed app that claims its
+/// address (universal links: Google Docs, Sheets, …) when the user follows
+/// a link to another site. Off, every page loads in the browser and the
+/// app is one tap away (⋯ → Open in App, iPadOS).
+static OPEN_APP_LINKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn open_app_links() -> bool {
+    OPEN_APP_LINKS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_open_app_links(on: bool) {
+    OPEN_APP_LINKS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Called with whether an app opened (⋯ → Open in App).
+pub type OpenedDone = Box<dyn FnOnce(bool) + Send>;
+
 /// Settings → General → Pull to refresh (iPadOS): whether content views get
 /// a `UIRefreshControl` (OPEN_QUESTIONS 109: suspected of turning trackpad
 /// scrolls into back swipes).
@@ -620,6 +638,15 @@ mod tests {
             sanitize_holes(&[Hole { corners: 0, ..h(0.0, 0.0, 9.0, 9.0, 1.0) }], 99.0, 99.0)[0].corners,
             ALL_CORNERS
         );
+    }
+
+    #[test]
+    fn pages_stay_in_the_browser_by_default() {
+        // Settings → General → Links to apps: off until the chrome says so.
+        assert!(!open_app_links());
+        set_open_app_links(true);
+        assert!(open_app_links());
+        set_open_app_links(false);
     }
 
     #[test]

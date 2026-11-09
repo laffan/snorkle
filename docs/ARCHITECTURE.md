@@ -439,6 +439,19 @@ accepts the copy once (`Browser::use_offline_copy`) and the host loads it with
 `loadData:MIMEType:…baseURL:` and JavaScript off for that navigation; the address bar shows an
 "Offline copy" pill, the copy is not written to history, and the next load replaces it.
 
+**Links to apps** (2026-11-09, iPadOS): WebKit hands a cross-site main-frame navigation to an
+installed app that claims the address (universal links) when the navigation delegate answers plain
+`Allow`, which is why Google Docs and Sheets jumped to their apps. By default every allowed
+navigation is now answered with WebKit's `_WKNavigationActionPolicyAllowWithoutTryingAppLink`
+(`Allow + 2`, an undocumented value of the public enum, not a private selector; Chrome for iOS uses
+it), so pages stay in the browser. iOS offers no way to ask whether an app claims an address without
+opening it, so the choice is offered the other way round: ⋯ → Open in App (`open_in_app`) asks UIKit
+to open the tab's committed URL (from the core; http/https only) with
+`UIApplicationOpenURLOptionUniversalLinksOnly`, which opens nothing if no app claims it (a toast
+says so). Settings → General → Links to apps → Automatic restores WebKit's behaviour
+(`set_open_app_links`, remembered by the chrome and sent at launch). Links with an app's own scheme
+(`googledocs:`) still ask first ("Open App" / "Stay in Browser"), and are blocked without a tap.
+
 **Image menu:** right-click, ⌘-click (not on a linked image) or a 0.5 s press on an image in a
 page offers Copy Image, Share…, Download… and Copy Address (C21). Copy, Share and Download fetch
 the image natively (ephemeral session, no cookies, `image/*` only, ≤ 25 MB): Copy puts it on the

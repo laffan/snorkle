@@ -151,6 +151,9 @@
           <!-- Adds the site to Settings → Blocked (after a confirmation:
                unblocking means typing out a passage). -->
           <button id="block-site" role="menuitem"><span class="label">Block This Site</span><span class="state">&#x2298;</span></button>
+          <!-- iPadOS: offers this page to the app that claims its address
+               (Google Docs, Sheets, …); pages stay in the browser otherwise. -->
+          <button id="open-in-app" role="menuitem"><span class="label">Open in App</span><span class="state">&#x2197;</span></button>
           <div class="menu-sep" role="separator"></div>
           <button id="scripts-btn" role="menuitem" aria-haspopup="dialog"><span class="label">Site Scripts</span><span class="state">{ }</span></button>
           <div class="menu-sep" role="separator"></div>
@@ -340,6 +343,16 @@
             <div class="seg" role="group" aria-label="Pull to refresh">
               <button data-pull-refresh="on" aria-pressed="true">On</button>
               <button data-pull-refresh="off" aria-pressed="false">Off</button>
+            </div>
+          </div>
+          <div class="option" id="app-links-option">
+            <div>
+              <div class="option-title">Links to apps</div>
+              <div class="muted small">Pages that an installed app claims (Google Docs, Sheets, …) open in the browser; ⋯ → Open in App opens one in its app. Automatic hands them to the app as soon as you follow the link.</div>
+            </div>
+            <div class="seg" role="group" aria-label="Links to apps">
+              <button data-app-links="off" aria-pressed="true">Browser</button>
+              <button data-app-links="on" aria-pressed="false">Automatic</button>
             </div>
           </div>
           <p class="muted small credits">Ad and tracker blocking uses EasyList and EasyPrivacy by The EasyList authors (easylist.to), licensed CC BY-SA 3.0.</p>

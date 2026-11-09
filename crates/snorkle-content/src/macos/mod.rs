@@ -394,6 +394,12 @@ impl ContentHost {
         }
     }
 
+    /// ⋯ → Open in App is an iPadOS feature (AppKit has no "universal
+    /// links only" open); the chrome does not offer it here.
+    pub fn open_in_app(&mut self, _url: &Url, done: crate::OpenedDone) {
+        done(false);
+    }
+
     pub fn read_page_text(&mut self, tab: TabId, done: crate::TextDone) {
         match self.views.get(&tab) {
             Some(v) => injection::read_now(self.mtm, &v.web, snorkle_core::ai::PAGE_TEXT_JS, done),

@@ -340,15 +340,34 @@ impl NavDelegate {
             // No target frame: a new-window request. WebKit follows up with
             // `createWebViewWithConfiguration`, which runs the policy itself
             // and never creates a web view, so nothing can load here.
-            None => return Ok(WKNavigationActionPolicy::Allow),
+            None => return Ok(allow()),
             Some(f) if f.isMainFrame() => Frame::Main,
             Some(_) => Frame::Sub,
         };
         let i = self.ivars();
         Ok(match i.events.decide_navigation(i.tab, &url, frame, nav_kind(action.navigationType())) {
-            Verdict::Allow => WKNavigationActionPolicy::Allow,
+            Verdict::Allow => allow(),
             Verdict::Cancel => WKNavigationActionPolicy::Cancel,
         })
+    }
+}
+
+/// WebKit's `_WKNavigationActionPolicyAllowWithoutTryingAppLink`
+/// (`WKNavigationDelegatePrivate.h`: `WKNavigationActionPolicyAllow + 2`,
+/// iOS 9 / macOS 10.11 and later): load in the web view without first
+/// offering the URL to an app that claims it. An undocumented value, not a
+/// private selector; Chrome for iOS relies on it (WebKit bug 216624).
+const ALLOW_WITHOUT_APP_LINK: WKNavigationActionPolicy = WKNavigationActionPolicy(WKNavigationActionPolicy::Allow.0 + 2);
+
+/// "Allow", as Settings → General → Open links in apps says: with plain
+/// `Allow`, WebKit itself opens an installed app for a cross-site main-frame
+/// navigation to an address the app claims (Google Docs and Sheets jumped
+/// to their apps), so by default pages stay in the browser.
+fn allow() -> WKNavigationActionPolicy {
+    if crate::open_app_links() {
+        WKNavigationActionPolicy::Allow
+    } else {
+        ALLOW_WITHOUT_APP_LINK
     }
 }
 
