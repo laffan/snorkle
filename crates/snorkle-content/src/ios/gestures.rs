@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
-use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{define_class, msg_send, sel, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::NSObjectProtocol;
 use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState};
 
@@ -36,8 +36,24 @@ define_class!(
     }
 
     impl TapFocus {
+        /// Also gives the page keyboard focus (2026-11-10). A touch tap
+        /// makes WebKit's content view first responder, but a trackpad or
+        /// mouse click goes through WebKit's mouse handling, which does
+        /// not; while the chrome kept first responder, a page that moves
+        /// focus to its editor from its own click handler (Google Docs'
+        /// hidden text target) got no input session, and typing went
+        /// nowhere until the page was touched. On becoming first responder
+        /// WebKit focuses the page again and, with a hardware keyboard,
+        /// starts the input session for the element the page focused.
         #[unsafe(method(tapped:))]
-        fn tapped(&self, _g: &UIGestureRecognizer) {
+        fn tapped(&self, g: &UIGestureRecognizer) {
+            if let Some(container) = g.view() {
+                for sub in container.subviews().iter() {
+                    if sub.isKindOfClass(WKWebView::class()) && !sub.isFirstResponder() {
+                        sub.becomeFirstResponder();
+                    }
+                }
+            }
             self.ivars().events.focus_requested(self.ivars().tab);
         }
     }

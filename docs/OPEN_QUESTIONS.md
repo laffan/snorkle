@@ -871,3 +871,26 @@ and backgrounds that change after load. Live NASA verification is pending.
   paused, pointed at and not; in Web Inspector the frame should carry the attribute.
 - **[decide]** A gray frame covers the player's own controls and captions too (they sit inside
   the frame); pointing at the video shows them.
+
+## Google Docs: no typing after a trackpad click (reported 2026-11-10, iPad)
+
+- **[verify]** Owner's finding: touching the document connects the keyboard, clicking with the
+  trackpad does not; after one touch the trackpad works. Fix: the pane's tap recognizer
+  (`gestures::TapFocus`, which also sees trackpad clicks) now makes the page's web view first
+  responder when it is not. It runs when the click ends, after Docs has focused its hidden text
+  target, so it relies on WebKit focusing the page again on becoming first responder and, with a
+  hardware keyboard attached, starting the input session then (assumed from WebKit's
+  `_elementDidFocus` rules; WebKit sources were not reachable from the session). Check on the
+  iPad: open a document from the start page or a pin, click into it with the trackpad, type.
+  Also check that clicking a page while the find bar or chat input has focus moves typing to
+  the page (intended, as in Safari).
+- **[decide]** Hide media grays `<canvas>`, and Docs draws its text on canvases (since 2021), so
+  with hide media on, a document's text shows only under the pointer (never with touch alone).
+  Sheets' grid is also a canvas. Options: exempt canvases on docs.google.com, or turn hide media
+  off for that site. Not changed.
+- **[decide]** EasyList exempts docs.google.com, drive.google.com, gmail.com, github.com, figma.com
+  and others (169 `$generichide` lines) from generic element hiding; Brave's `adblock` 0.13.5
+  rejects those rules in content-blocking conversion (`NetworkGenerichideUnsupported`), so all
+  13,977 generic hiding selectors apply on those sites. Not found to break Docs; emulating the
+  exemption would mean an `unless-domain` list on the generic `css-display-none` rules. Not
+  changed.

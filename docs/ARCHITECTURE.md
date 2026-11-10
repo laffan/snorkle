@@ -280,6 +280,12 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   alone and keeps the pairs. Closing a tab, pairing one of its tabs elsewhere, or unsplitting
   ends a pair. The sidebar shows each pair as one row with a half per tab; dragging a half out
   of the row unsplits it. Pairs are not saved in the session. A tap in a pane focuses it.
+  On iPadOS a tap or click in a page also makes its web view first responder if it is not
+  (2026-11-10, `gestures::TapFocus`): WebKit does this itself for a touch tap but not for a
+  trackpad or mouse click, so after the chrome had keyboard focus (start page, find, chat) a page
+  that focuses its editor from its own click handler (Google Docs' hidden text target) got no
+  input session and typing went nowhere until the page was touched. (macOS: AppKit makes the
+  clicked web view first responder.)
 
 ## 5f. URL bar
 
