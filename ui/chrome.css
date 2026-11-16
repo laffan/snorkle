@@ -351,7 +351,7 @@ body.resizing-right, body.resizing { cursor: col-resize; }
   content: ""; position: absolute; left: -7px; top: calc(var(--notch, 50%) - 6px); width: 12px; height: 12px;
   background: var(--bar); border: solid var(--line); border-width: 0 0 1px 1px; transform: rotate(45deg);
 }
-.pick-bar #pick-text { flex: 1 1 220px; }
+.pick-bar #pick-text, .pick-bar #capture-text { flex: 1 1 220px; }
 .pillbtn.primary { background: var(--fg); color: var(--bar); }
 
 /* Page actions: opens above the pill's ⋯ button, over the page. */
@@ -420,11 +420,11 @@ body.narrow #omnibox { flex: 1 1 auto; width: auto; }
 }
 /* Room for the copy and share buttons on the right, and as much on the
    left so the address stays centred in the field. */
-#url-display { display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; padding: 0 68px; }
+#url-display { display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; padding: 0 38px; }
 body.narrow #url-display { padding-left: 12px; }
 #toolbar .omni-share { position: absolute; right: 3px; top: 3px; min-width: 32px; width: 32px; height: 32px; border-radius: 16px; color: var(--muted); }
 #toolbar .omni-share:hover { color: var(--fg); }
-#toolbar .omni-copy { right: 35px; }
+#toolbar .omni-copy { right: 3px; }
 #url-input { border: 2px solid var(--accent); outline: none; }
 .security { font-size: 13px; margin-right: 6px; white-space: nowrap; }
 .security:empty { display: none; }

@@ -120,6 +120,7 @@
     if (confirmAction && confirmAction.tab !== null && confirmAction.tab !== state.active && confirmAction.tab !== state.sheet) closeConfirm();
     if (confirmAction && confirmAction.anchor) placeConfirm(); // its row may have been drawn again
     notebookTrack();
+    if (capture) renderCapture();
     reportLayout();
   }
 
@@ -534,15 +535,72 @@
   // Saving reads the page into an archive first (Rust: `saved::capture`),
   // which can take a few seconds on a large page; the tab closes after.
   const savingTabs = new Set();
+  // An AI conversation (chatgpt.com, claude.ai, gemini.google.com) is
+  // saved through a capture mode (2026-11-16): the sites load and keep only
+  // part of a long thread, so the reader scrolls through it (up for earlier
+  // messages) while each message is captured, and then saves. Other pages
+  // are saved at once.
+  let capture = null; // { tab, count, timer }
   function saveForLater(tab) {
+    if (savingTabs.has(tab) || (capture && capture.tab === tab)) return;
+    T.core.invoke('begin_conversation_capture', { tab })
+      .then((n) => { if (typeof n === 'number') startCapture(tab, n); else saveNow(tab, false); })
+      .catch(() => saveNow(tab, false));
+  }
+  function saveNow(tab, captured) {
     if (savingTabs.has(tab)) return;
     savingTabs.add(tab);
     progressToast('Saving for later…', 0);
-    T.core.invoke('save_for_later', { tab })
+    T.core.invoke('save_for_later', { tab, captured })
       .then(() => { toast('Saved for later.'); return loadLater(); })
       .catch((e) => toast(String(e)))
       .finally(() => savingTabs.delete(tab));
   }
+  function startCapture(tab, count) {
+    if (capture) endCapture(true);
+    if (state && state.active !== tab) invoke('activate_tab', { tab });
+    capture = { tab, count, timer: setInterval(pollCapture, 700) };
+    renderCapture();
+  }
+  function renderCapture() {
+    const bar = $('capture-bar');
+    const shown = !!capture && !!state && (state.active === capture.tab || shownPanes().some((p) => p.tab === capture.tab));
+    if (capture) {
+      const n = capture.count;
+      $('capture-text').textContent = `Scroll through the conversation to capture it (up for earlier messages). ${n} message${n === 1 ? '' : 's'} captured.`;
+      $('capture-save').textContent = 'Save';
+      $('capture-save').disabled = !n;
+    }
+    if (bar.hidden === !shown) return;
+    bar.hidden = !shown;
+    reportLayout();
+  }
+  function pollCapture() {
+    const c = capture;
+    if (!c) return;
+    if (state && !state.tabs.some((t) => t.id === c.tab)) { endCapture(false); return; }
+    T.core.invoke('conversation_capture_count', { tab: c.tab }).then((n) => {
+      if (capture !== c) return;
+      if (typeof n !== 'number') { endCapture(false); toast('The page changed, so the capture stopped.'); return; }
+      c.count = n;
+      renderCapture();
+    }).catch(() => {});
+  }
+  function endCapture(cancelInPage) {
+    const c = capture;
+    if (!c) return;
+    capture = null;
+    clearInterval(c.timer);
+    renderCapture();
+    if (cancelInPage) T.core.invoke('cancel_conversation_capture', { tab: c.tab }).catch(() => {});
+  }
+  $('capture-save').addEventListener('click', () => {
+    const c = capture;
+    if (!c) return;
+    endCapture(false);
+    saveNow(c.tab, true);
+  });
+  $('capture-cancel').addEventListener('click', () => endCapture(true));
 
   function setLater(open) {
     laterOpen = open && laterItems.length > 0;
@@ -2431,7 +2489,6 @@
     editing = true;
     const input = $('url-input');
     $('url-display').hidden = true;
-    $('share').hidden = true;
     $('copy-url').hidden = true;
     input.hidden = false;
     input.value = tab && tab.url ? tab.url.full : '';
@@ -2443,7 +2500,6 @@
     editing = false;
     $('url-input').hidden = true;
     $('url-display').hidden = false;
-    $('share').hidden = false;
     $('copy-url').hidden = false;
   }
 
@@ -2565,14 +2621,27 @@
       if (f && pill) f.h = Math.max(1, pill.y - f.y);
       if (f) out.push(f);
     }
-    for (const id of ['actions-pop', 'confirm-pop', 'pick-bar', 'sel-pop', 'img-pop', 'nb-pop', 'toast', 'os-banner']) {
+    for (const id of ['actions-pop', 'confirm-pop', 'pick-bar', 'capture-bar', 'sel-pop', 'img-pop', 'nb-pop', 'toast', 'os-banner']) {
       const e = $(id);
       if (e.hidden) continue;
       const h = hole(e, 15);
       if (h) out.push(h);
     }
-    out.push(...sidebarHoles());
-    return out;
+    const side = sidebarHoles();
+    // The flyout sidebar is drawn over the pill and the popups, so their
+    // holes stop at its edge (2026-11-16). The host merges overlapping holes
+    // into their bounding rectangle: with a right panel open the pill moves
+    // left under the flyout, and the merged hole blanked most of the page.
+    const fly = !narrow && flyoutMode() && sidebarShown ? side[0] : null;
+    const kept = fly ? out.map((h) => {
+      const edge = fly.x + fly.w + 1;
+      const overlapsY = h.y < fly.y + fly.h && h.y + h.h > fly.y;
+      if (!overlapsY || h.x >= edge) return h;
+      if (h.x + h.w <= edge + 8) return null;
+      return { ...h, w: h.x + h.w - edge, x: edge };
+    }).filter(Boolean) : out;
+    kept.push(...side);
+    return kept;
   }
 
   // The sidebar's two cut-outs, always reported (so the host can slide
@@ -3465,7 +3534,10 @@
   // The quote button dragged out of the notebook: the page under the
   // pointer marks the sentence it would link (and draws the line on from
   // its right edge); let go, that sentence is quoted.
-  const linkDrag = { tab: null, next: null, busy: false };
+  // One hover call at a time; a call still under way when the drag ends
+  // is followed by one that takes its mark away (2026-11-16: a late
+  // hover could leave a sentence marked after the drop).
+  const linkDrag = { tab: null, next: null, busy: false, ended: false };
   function sendLinkHover() {
     if (linkDrag.busy || !linkDrag.next) return;
     const n = linkDrag.next;
@@ -3473,10 +3545,12 @@
     linkDrag.busy = true;
     T.core.invoke('notebook_link_hover', n).catch(() => {}).finally(() => {
       linkDrag.busy = false;
+      if (linkDrag.ended && n.fx >= 0) T.core.invoke('notebook_link_hover', { tab: n.tab, fx: -1, fy: 0, fromY: 0 }).catch(() => {});
       requestAnimationFrame(sendLinkHover);
     });
   }
   function dragLink(phase, x, y, fromY) {
+    linkDrag.ended = phase !== 'move';
     const pane = phase === 'cancel' ? null : paneAt(x, y);
     const usable = pane && state.tabs.some((t) => t.id === pane.tab && !t.private && t.url);
     if (linkDrag.tab !== null && (!usable || linkDrag.tab !== pane.tab)) {
@@ -3516,7 +3590,7 @@
     if (t.private) { toast('Private tabs don’t send anything to the notebook.'); return Promise.resolve(false); }
     return T.core.invoke('notebook_clip_mode', { tab: t.id, on: true }).then(() => {
       clipTab = t.id;
-      toast('Drag over the page to clip part of it (Esc stops).');
+      toast('Drag over the page, adjust the box, then Clip (Esc stops).');
       return true;
     }).catch((e) => { toast(String(e)); return false; });
   }
@@ -3530,8 +3604,12 @@
   // and puts it in the notebook.
   function clipToNotebook(t, r) {
     T.core.invoke('notebook_clip', { tab: t.id, x: r.x, y: r.y, w: r.w, h: r.h, vw: r.vw })
-      .then((image) => {
-        notebook.addClip(image, { kind: 'clip', url: t.url.full, title: t.title || '' });
+      .then((clip) => {
+        // The clip's text (the page's, and what recognition read in the
+        // picture) goes with it for search; it is not shown.
+        const target = { kind: 'clip', url: t.url.full, title: t.title || '' };
+        if (clip.text) target.text = clip.text;
+        notebook.addClip(clip.image, target);
         if (!notebookShown()) toast('Clipped to the notebook.');
       })
       .catch((e) => toast(String(e)));
@@ -3563,7 +3641,7 @@
     if (!t) return;
     hideSelection();
     hideImageMenu();
-    nbPick = { tab, kind, rect };
+    nbPick = { tab, kind, rect, url: kind === 'link' ? String(e.payload.url || '') : '' };
     placeOverPage($('nb-pop'), tab, rect);
   });
   $('nb-send').addEventListener('click', () => {
@@ -3572,6 +3650,21 @@
     const t = pick && captureTab(pick.tab);
     if (!t) return;
     if (pick.kind === 'img') { clipToNotebook(t, pick.rect); return; }
+    if (pick.kind === 'link') {
+      // The linked page's own title, read from the start of that page.
+      const url = pick.url;
+      if (!/^https?:/i.test(url)) return;
+      toast('Adding the link…');
+      T.core.invoke('notebook_link_title', { tab: t.id, url })
+        .catch(() => null)
+        .then((title) => {
+          let host = '';
+          try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (err) { host = url; }
+          notebook.addQuote({ kind: 'page', url, title: title || host });
+          toast(notebookShown() ? 'Link added.' : 'Link sent to the notebook.');
+        });
+      return;
+    }
     T.core.invoke('read_selection', { tab: t.id }).then((text) => {
       if (!text) { toast('Nothing selected to send.'); return; }
       notebook.addQuote({ kind: 'quote', url: textFragmentUrl(t.url.full, text), title: t.title || '', text });
@@ -3599,7 +3692,7 @@
       const source = { url: t.url.full, title: t.title || '' };
       if (d.kind === 'dimg') {
         return T.core.invoke('notebook_clip', { tab: t.id, x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h, vw: d.rect.vw })
-          .then((image) => ({ kind: 'clip', image, target: { kind: 'clip', ...source } }))
+          .then((clip) => ({ kind: 'clip', image: clip.image, target: { kind: 'clip', ...source, ...(clip.text ? { text: clip.text } : {}) } }))
           .catch((err) => { toast(String(err)); return null; });
       }
       return T.core.invoke('read_selection', { tab: t.id }).then((sel) => {
@@ -4781,6 +4874,7 @@
     else if (!$('copy-modal').hidden) closePageCopy();
     else if (unblock) closeUnblock();
     else if (confirmAction) closeConfirm();
+    else if (capture) endCapture(true);
     else if (findOpen) closeFind();
     else if (flyoutMode() && sidebarShown) setSidebar(false);
     else if (!$('actions-pop').hidden) setActions(false);

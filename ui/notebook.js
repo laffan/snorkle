@@ -227,6 +227,11 @@
     else if (step.kind === 'recolor') for (const [st, c] of step.was) st.color = c;
     else if (step.kind === 'text') step.link.text = step.was;
     else if (step.kind === 'size') { step.link.w = step.was.w; step.link.h = step.was.h; }
+    else if (step.kind === 'paste') {
+      pad.strokes = pad.strokes.filter((s) => !step.strokes.includes(s.id));
+      pad.links = pad.links.filter((l) => !step.links.includes(l.id));
+      pad.notes = pad.notes.filter((n) => !step.notes.includes(n.id));
+    }
     else if (step.kind === 'stroke') {
       pad.strokes = pad.strokes.filter((s) => s.id !== step.id);
       dropEmpty(pad);
@@ -860,8 +865,19 @@
       showFrame();
     }
 
+    // Items selected by other means (a paste): framed as a lasso's are.
+    function selectItems(s, l) {
+      clear();
+      strokes = s;
+      links = l;
+      if (!strokes.length && !links.length) return;
+      showFrame();
+      window.addEventListener('keydown', onKey);
+    }
+
     return {
-      begin, extend, finish, drag, drop, clear, prune, remove,
+      begin, extend, finish, drag, drop, clear, prune, remove, selectItems,
+      selected: () => ({ strokes, links }),
       drawing: () => pts !== null,
       strokes: () => strokes,
       has: () => box !== null,
@@ -1121,6 +1137,19 @@
         document.removeEventListener('visibilitychange', hidden);
       },
     };
+  }
+
+  // Copied links as plain text, top to bottom: a note's words, a quote
+  // with its page, a link or a clip as its page.
+  function itemsText(links) {
+    return [...links].sort((a, b) => a.y - b.y || a.x - b.x).map((l) => {
+      const t = l.target || {};
+      const where = [t.title, t.url].filter(Boolean).join(' — ');
+      if (l.text !== undefined) return l.text;
+      if (t.kind === 'quote') return `“${t.text || ''}”${where ? `\n${where}` : ''}`;
+      if (l.image) return `[Clip]${where ? ` ${where}` : ''}`;
+      return where;
+    }).filter(Boolean).join('\n\n');
   }
 
   // ---- the canvas (surface.ts) ------------------------------------------------------------
@@ -1740,13 +1769,13 @@
       },
       // A typed note with `text` (dropped text from outside a page), its
       // top left where it was let go.
-      addText(text, target, at) {
+      addText(text, target, at, avoid = false) {
         const [x, y] = toCanvas(at.x, at.y);
         const link = { id: newId('text'), x: Math.round(x), y: Math.round(y), target, text };
         env.pad().links.push(link);
         history.push({ kind: 'link', id: link.id });
         drawLabels();
-        settle(link, host.clientWidth || seen.w, false);
+        settle(link, host.clientWidth || seen.w, avoid);
         env.changed();
         return link;
       },
@@ -1781,6 +1810,62 @@
         env.changed();
       },
       commitText: () => texts.commit(),
+      // Copy (2026-11-16): the selected strokes (with their notes) and
+      // links, as data to paste back in, and as plain text for other apps.
+      copyItems() {
+        const sel = lasso.selected();
+        if (!sel.strokes.length && !sel.links.length) return null;
+        const noteIds = new Set(sel.strokes.map((st) => st.note));
+        const items = JSON.parse(JSON.stringify({
+          strokes: sel.strokes,
+          notes: env.pad().notes.filter((n) => noteIds.has(n.id)),
+          links: sel.links,
+        }));
+        return { items, text: itemsText(sel.links) || 'Handwriting from the Snorkle notebook' };
+      },
+      cutItems() {
+        const c = this.copyItems();
+        if (c) lasso.remove();
+        return c;
+      },
+      // Items copied before: placed `step` × 24 px down and right of where
+      // they were while that is in view, else at the view's top left; new
+      // ids; selected, to be moved at once. One undo takes them away.
+      pasteItems(items, step) {
+        const pad = env.pad();
+        let box = [Infinity, Infinity, -Infinity, -Infinity];
+        const grow = (b) => { box = [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])]; };
+        for (const st of items.strokes) grow(bounds(st.points));
+        for (const l of items.links) grow([l.x, l.y, l.x + (l.w || 120), l.y + (l.h || 40)]);
+        if (!Number.isFinite(box[0])) return;
+        const v = { x: -pan.x, y: -pan.y, w: host.clientWidth || seen.w, h: host.clientHeight || seen.h };
+        const inView = box[0] >= v.x && box[1] >= v.y && box[0] < v.x + v.w - 40 && box[1] < v.y + v.h - 40;
+        const dx = inView ? 24 * step : Math.round(v.x + 30 - box[0]);
+        const dy = inView ? 24 * step : Math.round(v.y + 40 - box[1]);
+        const ids = new Map();
+        const notes = items.notes.map((n) => { const id = newId('note'); ids.set(n.id, id); return { ...n, id, createdMs: Date.now() }; });
+        const strokes = items.strokes.map((st) => {
+          if (!ids.has(st.note)) { const id = newId('note'); ids.set(st.note, id); notes.push({ id, createdMs: Date.now() }); }
+          return { ...st, id: newId('s'), note: ids.get(st.note), points: st.points.map((p, i) => Math.round((p + (i % 2 ? dy : dx)) * 10) / 10) };
+        });
+        const links = items.links.map((l) => ({ ...l, id: newId(l.text !== undefined ? 'text' : 'link'), x: Math.round(l.x + dx), y: Math.round(l.y + dy), fixed: undefined }));
+        pad.notes.push(...notes);
+        pad.strokes.push(...strokes);
+        pad.links.push(...links);
+        history.push({ kind: 'paste', strokes: strokes.map((x) => x.id), links: links.map((x) => x.id), notes: notes.map((x) => x.id) });
+        ink.redraw();
+        drawLabels();
+        lasso.selectItems(strokes, links);
+        env.changed();
+      },
+      // Text from elsewhere: a web address becomes a link, other text a
+      // typed note, near the view's top left.
+      pasteText(text) {
+        const r = host.getBoundingClientRect();
+        const at = { x: r.left + 30, y: r.top + 40 };
+        if (/^https?:\/\/\S+$/i.test(text)) this.addLink({ kind: 'page', url: text, title: text });
+        else this.addText(text, { kind: 'page' }, at, true);
+      },
       view: () => ({ x: -pan.x, y: -pan.y, w: host.clientWidth, h: host.clientHeight }),
       linkBoxes: () => env.pad().links.map((l) => {
         const c = chips.get(l.id);
@@ -2381,6 +2466,51 @@
       if (e.target.closest && e.target.closest('input, textarea, button')) return;
       if (!root.contains(document.activeElement)) root.focus({ preventScroll: true });
     }, true);
+
+    // ⌘C / ⌘X / ⌘V in the notebook (2026-11-16; not while typing a note):
+    // the lasso's selection is copied as items (kept here, to paste back
+    // in) and as text (the system clipboard, for other apps). A paste is
+    // caught in a hidden field, so the system's own paste brings its text
+    // without a permission prompt; if it is the text copied here, the
+    // items are pasted, else the text, as a typed note or a link.
+    let copied = null; // { items, text, n }
+    let catcher = null;
+    let catchTimer = 0;
+    const pasted = (text) => {
+      clearTimeout(catchTimer);
+      if (catcher) catcher.remove();
+      catcher = null;
+      root.focus({ preventScroll: true });
+      if (!surface) return;
+      const t = String(text || '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, 4000);
+      if (copied && (!t || t === copied.text.trim())) surface.pasteItems(copied.items, ++copied.n);
+      else if (t) surface.pasteText(t);
+    };
+    root.addEventListener('keydown', (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !surface) return;
+      if (e.target.closest && e.target.closest('textarea, input')) return;
+      const k = e.key.toLowerCase();
+      if (k === 'c' || k === 'x') {
+        const c = k === 'x' ? surface.cutItems() : surface.copyItems();
+        if (!c) return;
+        e.preventDefault();
+        copied = { ...c, n: 0 };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(c.text).catch(() => {});
+      } else if (k === 'v') {
+        catcher = el('textarea', 'notepad-paste-catcher');
+        catcher.setAttribute('aria-hidden', 'true');
+        catcher.tabIndex = -1;
+        catcher.addEventListener('paste', (pe) => {
+          pe.preventDefault();
+          pasted(pe.clipboardData ? pe.clipboardData.getData('text/plain') : '');
+        });
+        root.appendChild(catcher);
+        catcher.focus({ preventScroll: true });
+        // No paste event (nothing on the clipboard the system lets us
+        // have): what was copied here, if anything.
+        catchTimer = setTimeout(() => { if (catcher) pasted(''); }, 400);
+      }
+    });
 
     // ⌘Z in the notebook (not while typing a note).
     root.addEventListener('keydown', (e) => {

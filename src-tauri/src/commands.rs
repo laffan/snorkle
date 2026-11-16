@@ -731,8 +731,9 @@ pub struct LaterView {
 /// pages are never written, or a saved copy's own tab. A tab without a live
 /// page is saved without an archive.
 #[tauri::command]
-pub async fn save_for_later(s: S<'_>, tab: u64) -> Result<(), String> {
+pub async fn save_for_later(s: S<'_>, tab: u64, captured: Option<bool>) -> Result<(), String> {
     let id = TabId(tab);
+    let captured = captured.unwrap_or(false);
     let (url, title, live) = {
         let b = s.browser();
         let t = b.tab(id).ok_or("That tab is gone.")?;
@@ -744,9 +745,47 @@ pub async fn save_for_later(s: S<'_>, tab: u64) -> Result<(), String> {
         (url, t.title.clone(), live)
     };
     let shared = s.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || crate::saved::save(&shared, id, &url, &title, live))
+    tauri::async_runtime::spawn_blocking(move || crate::saved::save(&shared, id, &url, &title, live, captured))
         .await
         .map_err(|_| "Request failed.".to_string())?
+}
+
+/// Save for Later on an AI conversation (chatgpt.com, claude.ai,
+/// gemini.google.com; owner request 2026-11-16) begins a capture mode: the
+/// reader scrolls through the thread (earlier turns load as they scroll up)
+/// while every turn is noted, then saves (`save_for_later` with
+/// `captured`). `None`: not such a page (or private, or not loaded); the
+/// chrome saves it at once instead.
+#[tauri::command]
+pub async fn begin_conversation_capture(s: S<'_>, tab: u64) -> Result<Option<u32>, String> {
+    let id = TabId(tab);
+    {
+        let b = s.browser();
+        let Some(t) = b.tab(id) else { return Ok(None) };
+        let site = t.committed_url.as_ref().and_then(snorkle_core::conversation::site_of);
+        if t.is_private() || t.saved.is_some() || site.is_none() || t.life != snorkle_core::tabs::Life::Live || t.notice.is_some() {
+            return Ok(None);
+        }
+    }
+    tauri::async_runtime::spawn_blocking(move || crate::saved::begin_capture(id))
+        .await
+        .map_err(|_| "Request failed.".to_string())
+}
+
+/// How many turns the capture holds (`None`: none running).
+#[tauri::command]
+pub async fn conversation_capture_count(tab: u64) -> Result<Option<u32>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::saved::capture_count(TabId(tab)))
+        .await
+        .map_err(|_| "Request failed.".to_string())
+}
+
+/// Ends the capture without saving.
+#[tauri::command]
+pub async fn cancel_conversation_capture(tab: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::saved::cancel_capture(TabId(tab)))
+        .await
+        .map_err(|_| "Request failed.".to_string())
 }
 
 #[tauri::command]

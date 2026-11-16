@@ -115,4 +115,8 @@ pub const COMMANDS: &[&str] = &[
     "notebook_clip_mode",
     "notebook_link_hover",
     "notebook_link_drop",
+    "notebook_link_title",
+    "begin_conversation_capture",
+    "conversation_capture_count",
+    "cancel_conversation_capture",
 ];

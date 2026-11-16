@@ -174,27 +174,53 @@ function turns() {
   }
   return out;
 }
+// The turns in the document now, in reading order: by where they are on
+// screen (a list that keeps only some turns may add them to the document
+// in any order), the document's order breaking ties.
 function snap() {
   budget = 0;
-  return turns().map((t) => {
+  return turns().map((t, i) => {
     const text = (t.el.textContent || '').replace(/\s+/g, ' ').trim();
-    return { role: t.role, key: t.role + ':' + (t.key || text.slice(0, 200)), text, tree: tree(t.el, 0) };
-  }).filter((t) => t.tree && (t.text || JSON.stringify(t.tree).indexOf('"img"') >= 0));
+    return { role: t.role, key: t.role + ':' + (t.key || text.slice(0, 200)), text, tree: tree(t.el, 0), top: t.el.getBoundingClientRect().top, i };
+  }).filter((t) => t.tree && (t.text || JSON.stringify(t.tree).indexOf('"img"') >= 0))
+    .sort((a, b) => a.top - b.top || a.i - b.i);
 }
-function merge(all, S) {
+// Merges what is in the document now (S, in reading order) into the
+// thread so far: anchored where the longest run of S's turns matches the
+// thread (so a message repeated word for word, "yes", does not mislead
+// it), turns before the anchor go in before it and turns after it after
+// it, so the reader may scroll either way. With no turn in common, S goes
+// before the thread when the view moved up (`up`), else after it.
+function merge(all, S, up) {
   if (!S.length) return;
-  let p = -1;
-  for (let i = all.length - 1; i >= Math.max(0, all.length - 80); i--) if (all[i].key === S[0].key) { p = i; break; }
-  if (p < 0) { for (const t of S) all.push(t); return; }
-  for (let j = 0; j < S.length; j++) {
-    const i = p + j;
+  if (!all.length) { for (const t of S) all.push(t); return; }
+  let k = -1, p = -1, best = 0;
+  for (let i = 0; i < S.length; i++) for (let j = 0; j < all.length; j++) {
+    if (all[j].key !== S[i].key || (i > 0 && j > 0 && all[j - 1].key === S[i - 1].key)) continue;
+    let run = 1;
+    while (i + run < S.length && j + run < all.length && all[j + run].key === S[i + run].key) run++;
+    if (run > best) { best = run; k = i; p = j; }
+  }
+  if (k < 0) { if (up) all.unshift(...S); else for (const t of S) all.push(t); return; }
+  let q = p - 1, m = k - 1;
+  while (m >= 0 && q >= 0 && all[q].key === S[m].key) { if (S[m].text.length > all[q].text.length) all[q] = S[m]; q--; m--; }
+  if (m >= 0) { all.splice(q + 1, 0, ...S.slice(0, m + 1)); p += m + 1; }
+  for (let j = k; j < S.length; j++) {
+    const i = p + (j - k);
     if (i >= all.length) { all.push(S[j]); continue; }
     if (all[i].key === S[j].key) { if (S[j].text.length > all[i].text.length) all[i] = S[j]; continue; }
-    let k = -1;
-    for (let q = i + 1; q < Math.min(all.length, i + 6); q++) if (all[q].key === S[j].key) { k = q; break; }
-    if (k >= 0) { p += k - i; j--; continue; }
+    let f = -1;
+    for (let q2 = i + 1; q2 < Math.min(all.length, i + 6); q2++) if (all[q2].key === S[j].key) { f = q2; break; }
+    if (f >= 0) { p += f - i; j--; continue; }
     all.splice(i, 0, S[j]);
   }
+}
+function scrollerOf(el) {
+  for (let e = el && el.parentElement; e && e !== document.documentElement; e = e.parentElement) {
+    const s = getComputedStyle(e);
+    if (/(auto|scroll|overlay)/.test(s.overflowY) && e.scrollHeight > e.clientHeight + 20) return e;
+  }
+  return document.scrollingElement || document.documentElement;
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 "#;
@@ -271,7 +297,8 @@ pub const END_JS: &str = r#"
 const st = window.__snorkleConv;
 delete window.__snorkleConv;
 if (!st) return JSON.stringify({ turns: [] });
-if (!st.all.length) st.merge(st.all, st.snap());
+if (st.stop) st.stop();
+if (st.live || !st.all.length) st.merge(st.all, st.snap(), st.up);
 st.back();
 let left = 5 * 1024 * 1024;
 const read = (blob) => new Promise((res) => { const f = new FileReader(); f.onload = () => res(String(f.result || '')); f.onerror = () => res(''); f.readAsDataURL(blob); });
@@ -293,6 +320,63 @@ async function inline(node) {
 for (const t of st.all) await inline(t.tree);
 return JSON.stringify({ turns: st.all.map((t) => ({ r: t.role, c: t.tree })) });
 "#;
+
+/// Capture mode (owner request 2026-11-16): the reader scrolls through
+/// the thread while every turn the site puts in the document is noted (on
+/// DOM changes and scrolling, at most every 0.3 s), in order, whichever way
+/// the reader scrolls; nothing is scrolled for them. Answers
+/// `{"count": n}` (−1: not a conversation). [`END_JS`] then hands over
+/// what was captured; [`CAPTURE_CANCEL_JS`] stops it.
+pub fn capture_begin_js() -> String {
+    format!(
+        "{COMMON_JS}{}",
+        r#"
+if (window.__snorkleConv && window.__snorkleConv.stop) { try { window.__snorkleConv.stop(); } catch (e) {} }
+const st = { all: [], live: true, up: false, lastTop: null, box: null, timer: 0, snap, merge: (a, S, up) => merge(a, S, up), back: () => {} };
+window.__snorkleConv = st;
+if (!site) return JSON.stringify({ count: -1 });
+const take = () => {
+  st.timer = 0;
+  const S = snap();
+  if (!S.length) return;
+  if (!st.box || !st.box.isConnected) { const first = turns()[0]; st.box = first ? scrollerOf(first.el) : null; }
+  if (st.box) { const top = st.box.scrollTop; if (st.lastTop !== null && top !== st.lastTop) st.up = top < st.lastTop; st.lastTop = top; }
+  merge(st.all, S, st.up);
+};
+const soon = () => { if (!st.timer) st.timer = setTimeout(take, 300); };
+document.addEventListener('scroll', soon, { capture: true, passive: true });
+const obs = new MutationObserver(soon);
+obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+st.stop = () => { clearTimeout(st.timer); st.timer = 0; document.removeEventListener('scroll', soon, { capture: true }); obs.disconnect(); };
+take();
+return JSON.stringify({ count: st.all.length });
+"#
+    )
+}
+
+/// How many turns capture mode holds: `{"count": n}` (−1: none running).
+pub const CAPTURE_COUNT_JS: &str = r#"
+const st = window.__snorkleConv;
+return JSON.stringify({ count: st && st.live ? st.all.length : -1 });
+"#;
+
+/// Stops capture mode and forgets what it held.
+pub const CAPTURE_CANCEL_JS: &str = r#"
+const st = window.__snorkleConv;
+if (st && st.stop) st.stop();
+delete window.__snorkleConv;
+return '{}';
+"#;
+
+/// A capture-mode count; `None` when none is running or malformed.
+pub fn parse_count(text: &str) -> Option<u32> {
+    if text.len() > MAX_STEP_BYTES {
+        return None;
+    }
+    let v: Value = serde_json::from_str(text).ok()?;
+    let n = v.get("count")?.as_i64()?;
+    (0..=1_000_000).contains(&n).then_some(n as u32)
+}
 
 /// One turn of the thread, rebuilt.
 #[derive(Clone, Debug, PartialEq)]
@@ -816,6 +900,17 @@ mod tests {
         assert_eq!(html.matches("<section").count(), 2, "consecutive turns of one side share a section");
         assert!(!html.contains("<script"));
         assert_eq!(day(1_763_164_800_000), "2025-11-15");
+    }
+
+    #[test]
+    fn capture_mode() {
+        let begin = capture_begin_js();
+        assert!(begin.contains("st.live") || begin.contains("live: true"));
+        assert!(begin.contains("new MutationObserver(soon)") && begin.contains("setTimeout(take, 300)"));
+        assert!(CAPTURE_CANCEL_JS.contains("st.stop()") && END_JS.contains("if (st.stop) st.stop();"));
+        assert_eq!(parse_count(r#"{"count":12}"#), Some(12));
+        assert_eq!(parse_count(r#"{"count":-1}"#), None);
+        assert_eq!(parse_count("nope"), None);
     }
 
     #[test]

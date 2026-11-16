@@ -46,12 +46,14 @@ pub use platform::{dispatch_main, os_version, physical_memory, webkit_version, C
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 pub use webkit::exclude_from_backup;
 #[cfg(any(target_os = "ios", target_os = "macos"))]
-pub use webkit::{http, keychain};
+pub use webkit::{http, keychain, ocr};
 
 #[cfg(not(any(target_os = "ios", target_os = "macos")))]
 mod stub;
 #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-pub use stub::{dispatch_main, exclude_from_backup, http, keychain, os_version, physical_memory, webkit_version, ContentHost};
+pub use stub::{
+    dispatch_main, exclude_from_backup, http, keychain, ocr, os_version, physical_memory, webkit_version, ContentHost,
+};
 
 /// Width of the strip along the window's left edge where the pointer is
 /// reported (the edge tab is 14 pt wide and shows within 100 pt of it).

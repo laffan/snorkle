@@ -154,12 +154,19 @@ fn capture_conversation(
     url: &Url,
     title: &str,
     saved_ms: u64,
+    captured: bool,
     progress: &dyn Fn(u8),
 ) -> Option<PageCapture> {
     let started = Instant::now();
-    let steps = run_js(tab, conversation::start_js(), conversation::MAX_STEP_BYTES, Duration::from_secs(30))
-        .and_then(|t| conversation::parse_steps(&t))
-        .unwrap_or(0);
+    // In capture mode (2026-11-16) the reader has scrolled through the
+    // thread already: what was captured is saved as it is.
+    let steps = if captured {
+        0
+    } else {
+        run_js(tab, conversation::start_js(), conversation::MAX_STEP_BYTES, Duration::from_secs(30))
+            .and_then(|t| conversation::parse_steps(&t))
+            .unwrap_or(0)
+    };
     progress(10);
     while steps > 0 && started.elapsed() < Duration::from_secs(85) {
         let Some((done, pct)) =
@@ -198,6 +205,25 @@ fn capture_conversation(
     }
 }
 
+/// Capture mode for an AI conversation (owner request 2026-11-16): begins
+/// noting the thread's turns as the reader scrolls (`conversation::
+/// capture_begin_js`). `Some(count)` when it began.
+pub fn begin_capture(tab: TabId) -> Option<u32> {
+    run_js(tab, conversation::capture_begin_js(), conversation::MAX_STEP_BYTES, Duration::from_secs(10))
+        .and_then(|t| conversation::parse_count(&t))
+}
+
+/// How many turns capture mode holds, or `None` when none is running.
+pub fn capture_count(tab: TabId) -> Option<u32> {
+    run_js(tab, conversation::CAPTURE_COUNT_JS.to_string(), conversation::MAX_STEP_BYTES, Duration::from_secs(5))
+        .and_then(|t| conversation::parse_count(&t))
+}
+
+/// Ends capture mode without saving.
+pub fn cancel_capture(tab: TabId) {
+    run_js(tab, conversation::CAPTURE_CANCEL_JS.to_string(), conversation::MAX_STEP_BYTES, Duration::from_secs(5));
+}
+
 /// Save for Later (blocking): a thumbnail of the tab's page in light mode,
 /// with images and in full colour (owner request 2026-11-09: view modes are
 /// taken off its loaded page and its view drawn light first; its settings
@@ -206,7 +232,7 @@ fn capture_conversation(
 /// and the tab closed. The chrome is told how far it is
 /// (`ChromeEvent::LaterProgress`). If storing fails, the page gets its view
 /// modes back.
-pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool) -> Result<(), String> {
+pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool, captured: bool) -> Result<(), String> {
     let store = shared.store.clone().ok_or("Saving is not available.")?;
     let report = |p: u8| (shared.emit)(ChromeEvent::LaterProgress(tab, "save", p.min(100)));
     report(1);
@@ -219,7 +245,7 @@ pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool
     let progress = |p: u8| report(12 + (p as u32 * 84 / 100) as u8);
     let capture = match conversation::site_of(url) {
         _ if !live => None,
-        Some(site) => capture_conversation(tab, site, url, title, wall_ms(), &progress),
+        Some(site) => capture_conversation(tab, site, url, title, wall_ms(), captured, &progress),
         None => capture(tab, url.as_str(), title, &progress),
     };
     let added = store.later().add(url.as_str(), title, thumb.as_deref(), capture, wall_ms());

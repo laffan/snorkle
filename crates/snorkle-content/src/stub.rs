@@ -210,6 +210,17 @@ pub mod http {
     pub fn fetch_image(_url: &url::Url, done: crate::ImageDone) {
         done(Err("Images can be saved on iPadOS only (this is the desktop preview).".into()));
     }
+
+    pub fn fetch_page_head(_url: &url::Url, done: Box<dyn FnOnce(Option<Vec<u8>>) + Send>) {
+        done(None);
+    }
+}
+
+/// No text recognition off iOS and macOS.
+pub mod ocr {
+    pub fn recognize_text(_jpeg: &[u8], _max_chars: usize) -> Option<String> {
+        None
+    }
 }
 
 /// In-memory stand-in for the Keychain (desktop preview and tests).

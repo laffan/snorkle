@@ -9,6 +9,7 @@ pub mod downloads;
 pub mod http;
 pub mod injection;
 pub mod keychain;
+pub mod ocr;
 pub mod rules;
 pub mod stores;
 

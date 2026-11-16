@@ -636,11 +636,17 @@ end of the bookmarks) and Delete; Recover, Bookmark and Delete remove the page f
 
 *AI conversations* (2026-11-15; `snorkle_core::conversation`, C22b): on chatgpt.com (and
 chat.openai.com), claude.ai and gemini.google.com the archive's page is the conversation itself,
-built by the app, instead of the site's app shell. Constant code in the client world finds the
-turns (each site's markers), scrolls the thread to the top until no earlier turns load (≤ 20 s),
-then down through it a screen at a time, noting each turn as the site puts it in the document
-(ChatGPT and Claude keep only the turns in view), merges what it saw in order, scrolls back to
-where the reader was, and hands the turns over as node trees (text, or tag, attributes and
+built by the app, instead of the site's app shell. Since 2026-11-16 Save for Later there starts a
+**capture mode** (the automatic sweep did not load whole threads on the real sites): a bar above
+the pill (a hole) says how many messages are captured; the reader scrolls through the thread
+(up for earlier messages, which the sites load as they are reached) while constant code in the
+client world notes every turn the site puts in the document (on DOM changes and scrolling, at most
+every 0.3 s), each snapshot sorted by position on screen and merged into the thread at the
+longest run of turns they share, so either scrolling direction works; Save saves exactly what was
+captured, Cancel (or Escape) drops it, and the bar hides while another tab is shown. Saving
+without capture mode still sweeps automatically (constant code finds the turns, scrolls the thread
+to the top until no earlier turns load, ≤ 20 s, then down a screen at a time, then back to where
+the reader was). Either way the turns are handed over as node trees (text, or tag, attributes and
 children; `blob:` images as `data:` URLs). Rust rebuilds a page from them with a fixed set of tags
 and checked attributes (no scripts, styles, frames or handlers can come out), labels each turn
 (You / ChatGPT / Claude / Gemini) and adds the title, the date and the address; it is shown with
@@ -712,13 +718,31 @@ Handwriting itself is not read. Matches are outlined (handwritten notes framed),
 faded; ↩ / ⇧↩ go through them top to bottom and glide the pad to each. Chrome only: no command,
 nothing stored.
 
+Since 2026-11-16 the notebook's button sits in the URL bar beside the chat button (with the other
+right-panel modes), and the URL bar's share button is its last button, right of the address field.
+**Copy and paste**: ⌘C / ⌘X copy or cut the lasso's selection (strokes with their notes, and
+links), kept in the chrome to paste back in and put on the system clipboard as plain text; ⌘V
+pastes them (moved 24 pt each time, selected), or text from another app as a typed note (a web
+address as a link). The paste is caught in a hidden field so the system's own paste supplies the
+text; no clipboard permission is asked.
+
 Bringing things in (C23): a constant watcher in every page's client world reports
 - ⌥-click on a selection, or on text (it selects that sentence, `Intl.Segmenter`), or on an image:
   "Send to Notebook" appears above it (a hole); pressed, text is read as the selection menu reads
   it (C20) and becomes a quote linking back with a text fragment (`#:~:text=`), an image becomes
   a clip of its box;
-- ⌥-drag, or a drag while the scissors are on (clip mode, which then ends): a dashed box, and the
-  region becomes a clip at once.
+- ⌥-drag, or a drag while the scissors are on (clip mode, which then ends): while ⌥ is held over
+  a page (key events, or the modifier state of pointer moves), and in clip mode, a cover lies over
+  the page: a crosshair, a slight grey fade, and every press goes to it, so no text is selected and
+  nothing is followed (2026-11-16). A drag draws a dashed box that stays as a stage, as
+  zotero-helper's clip mode: its corners size it, a press inside moves it, a press outside draws
+  another; Clip (or ↩) makes the clip, × (or Escape) drops it. Every handler takes only real input
+  (`isTrusted`). A clip carries the text it shows, for search, not shown: the page's text laid out
+  in the region (and images' `alt`), read before the picture, and the lines Apple's on-device text
+  recognition (Vision, `webkit/ocr.rs`) reads in the picture that the page's text lacks;
+- ⌥-click on a link (2026-11-16): "Send to Notebook" adds a link titled with the linked page's own
+  `<title>` (or `og:title`), read from the start of that page fetched without cookies (≤ 512 KB of
+  an HTML reply, 10 s; `http::fetch_page_head`, `notebook::page_title`); its host if it has none;
 
 - dragging selected text or an image out of a page (2026-11-16): the watcher reports where the
   drag began (the selection, or the image's box) and when it ends; let go on the notebook's
@@ -734,7 +758,9 @@ region; the page is shown without its view modes for 0.32 s first, so black and 
 and the dark inversion are not in it); the chrome makes its white-on-black copy (zotero-helper's
 `darkPagesCopy`). The quote button dragged onto a page: the page marks the sentence under the
 pointer and draws the line on from its edge (constant code with two numbers); let go, that sentence
-is read back and quoted (or the page linked when there is none). Links open the page shown in an
+is read back and quoted (or the page linked when there is none). Only the sentence under the
+pointer is marked (one highlight, cleared on drop and when the pointer leaves the page; a mark
+call still under way when the drag ends is followed by one that clears it). Links open the page shown in an
 open tab or in a new one, through the navigation policy. Nothing comes from private tabs (every
 command refuses them) and notes written while one is shown keep no address. The notebook is one
 file, `notebook.json` (≤ 64 MB), written a moment after each change once the pen pauses, and

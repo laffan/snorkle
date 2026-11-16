@@ -15,6 +15,9 @@
 //!   `{"nb":"clip", ...}` with the box drawn;
 //! - Escape in clip mode: `{"nb":"end"}`; a press or a scroll after a
 //!   pick: `{"nb":"hide"}` (its "Send to Notebook" goes);
+//! - ⌥-click on a link (2026-11-16): `{"nb":"link","url":...,"r":...}`;
+//!   the notebook fetches the start of that page (cookie-free) for its
+//!   title ([`page_title`]);
 //! - a drag beginning in the page (2026-11-16): `{"nb":"dtext", ...}` with
 //!   where the selection is, or `{"nb":"dimg", ...}` with the image's box;
 //!   and `{"nb":"dend"}` when it ends. Dropped on the notebook, the drag
@@ -43,8 +46,11 @@ use url::Url;
 use crate::selection::{SelectionRect, HANDLER_NAME};
 use crate::text::sanitize_page_text;
 
-/// Largest report accepted, in bytes.
-pub const MAX_REPORT: usize = 256;
+/// Largest report accepted, in bytes (a link report carries its address).
+pub const MAX_REPORT: usize = 5000;
+/// Largest region text read back ([`region_text_js`]), and kept.
+pub const MAX_REGION_BYTES: usize = 32 * 1024;
+pub const MAX_REGION_CHARS: usize = 4000;
 /// Largest notebook accepted (it holds its clips' images).
 pub const MAX_NOTEBOOK_BYTES: usize = 64 * 1024 * 1024;
 /// Largest clip image (a data URL), and the most kept.
@@ -61,7 +67,7 @@ pub const MAX_TITLE_CHARS: usize = 300;
 pub const MAX_DROP_BYTES: usize = 16 * 1024;
 
 /// What the watcher reports.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Report {
     /// ⌥-click on text: the selection (made or found) is here.
     Text(SelectionRect),
@@ -81,80 +87,140 @@ pub enum Report {
     DragImage(SelectionRect),
     /// A drag that began in the page ended (dropped anywhere, or not).
     DragEnd,
+    /// ⌥-click on a link (2026-11-16): its address (http(s), checked) and
+    /// its box. The notebook titles it with the linked page's own title
+    /// ([`page_title`]).
+    Link(String, SelectionRect),
 }
 
 /// Watches for ⌥-click, ⌥-drag and clip mode (see the module docs).
 /// Constant code, main frame, document end. `window.__snorkleNb` (client
 /// world only) also holds the functions [`clip_mode_js`], [`hover_js`],
-/// [`drop_js`] and [`LEAVE_JS`] call.
+/// [`drop_js`], [`LEAVE_JS`] and [`region_text_js`] call.
+///
+/// While ⌥ is held over the page (seen on key events and on the modifier
+/// state of pointer moves), and in clip mode, a cover lies over the page:
+/// a crosshair, a slight fade, and every press goes to it, so nothing on
+/// the page is selected or followed. A drag on it draws a box; let go, the
+/// box stays as a stage (zotero-helper's clip mode): its corners size it,
+/// a press inside moves it, a press outside draws another, and Clip (or
+/// ↩) clips it, × (or Escape) drops it. A click without a drag is ⌥-click.
+/// Every handler takes only real input (`isTrusted`), so a page cannot
+/// drive the cover or the stage with synthetic events.
 pub fn watch_js() -> String {
-    format!(
-        r#"(function(){{var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.{HANDLER_NAME};
-if(!h||window.__snorkleNb)return;var nb=window.__snorkleNb={{clip:false}};
-var st=document.createElement('style');st.textContent="html[data-snorkle-nb-clip],html[data-snorkle-nb-clip] *{{cursor:crosshair!important;-webkit-user-select:none!important;user-select:none!important;touch-action:none!important}}::highlight(snorkle-nb){{background-color:rgba(255,95,87,.3)}}";
-(document.head||document.documentElement).appendChild(st);
-function vp(){{var v=window.visualViewport;return [v?v.offsetLeft:0,v?v.offsetTop:0,Math.round(v?v.width:innerWidth),Math.round(v?v.height:innerHeight)];}}
-var picked=0;function unpick(){{if(picked){{picked=0;h.postMessage('{{"nb":"hide"}}');}}}}
-function post(kind,r){{if(kind==='text'||kind==='img')picked=1;var o=vp(),x0=Math.max(0,r.left-o[0]),y0=Math.max(0,r.top-o[1]),x1=Math.min(o[2],r.right-o[0]),y1=Math.min(o[3],r.bottom-o[1]);
-if(x1-x0<1||y1-y0<1)return;h.postMessage(JSON.stringify({{nb:kind,r:[Math.round(x0),Math.round(y0),Math.round(x1-x0),Math.round(y1-y0)],vw:o[2]}}));}}
-function el(css){{var e=document.createElement('div');for(var k in css)e.style.setProperty(k,css[k],'important');document.documentElement.appendChild(e);return e;}}
-var MEDIA=/^(IMG|VIDEO|CANVAS|PICTURE)$/;
-function mediaAt(x,y){{var l=document.elementsFromPoint?document.elementsFromPoint(x,y):[];for(var i=0;i<l.length&&i<12;i++){{var e=l[i];if(MEDIA.test(e.tagName)||e.hasAttribute('data-snorkle-video-box'))return e;if(e.tagName==='svg'&&e.getBoundingClientRect().width>40)return e;}}return null;}}
-function blockOf(n){{var e=n.nodeType===1?n:n.parentElement;while(e&&e!==document.body&&e!==document.documentElement){{var d=getComputedStyle(e).display;if(d!=='inline'&&d!=='contents'&&d.indexOf('inline-')!==0)return e;e=e.parentElement;}}return document.body||document.documentElement;}}
-function sentenceAt(x,y){{var c=document.caretRangeFromPoint?document.caretRangeFromPoint(x,y):null;if(!c||!c.startContainer||c.startContainer.nodeType!==3)return null;
-var node=c.startContainer,off=c.startOffset,hit=document.elementFromPoint(x,y);if(!hit||!hit.contains(node))return null;
-var b=blockOf(node),tw=document.createTreeWalker(b,NodeFilter.SHOW_TEXT),nodes=[],pos=0,at=-1,t;
-while((t=tw.nextNode())&&nodes.length<5000&&pos<40000){{if(t===node)at=pos+off;nodes.push([t,pos]);pos+=t.nodeValue.length;}}
-if(at<0)return null;var text=nodes.map(function(n){{return n[0].nodeValue;}}).join(''),s=0,e=text.length;
-if(window.Intl&&Intl.Segmenter){{var it=new Intl.Segmenter(undefined,{{granularity:'sentence'}}).segment(text);var g=it.containing(Math.min(at,text.length-1));if(g){{s=g.index;e=g.index+g.segment.length;}}}}
-else{{var re=/[.!?。！？]+["'”’)\]]*\s+/g,m;while((m=re.exec(text))){{if(m.index+m[0].length<=at)s=m.index+m[0].length;else{{e=m.index+m[0].length;break;}}}}}}
-while(e>s&&/\s/.test(text[e-1]))e--;while(s<e&&/\s/.test(text[s]))s++;if(e<=s)return null;
-function loc(p,end){{for(var i=0;i<nodes.length;i++){{var n=nodes[i],len=n[0].nodeValue.length;if(p<n[1]+len||(end&&p===n[1]+len))return [n[0],p-n[1]];}}var z=nodes[nodes.length-1];return [z[0],z[0].nodeValue.length];}}
-var r=document.createRange(),a=loc(s,false),z=loc(e,true);r.setStart(a[0],a[1]);r.setEnd(z[0],z[1]);return r;}}
-function inSelection(x,y){{var s=window.getSelection();if(!s||!s.rangeCount||s.isCollapsed||!String(s).trim())return null;var r=s.getRangeAt(0),l=r.getClientRects();
-for(var i=0;i<l.length;i++){{var q=l[i];if(x>=q.left-4&&x<=q.right+4&&y>=q.top-4&&y<=q.bottom+4)return r;}}return null;}}
-function optionClick(x,y){{var r=inSelection(x,y);if(r){{post('text',r.getBoundingClientRect());return true;}}
-var m=mediaAt(x,y);if(m){{post('img',m.getBoundingClientRect());return true;}}
-r=sentenceAt(x,y);if(!r)return false;var s=window.getSelection();s.removeAllRanges();s.addRange(r);post('text',r.getBoundingClientRect());return true;}}
-var box=null,drag=null,swallow=0;
-function band(x0,y0,x1,y1){{if(!box)box=el({{position:'fixed','z-index':'2147483647','pointer-events':'none',border:'2px dashed #ff3b30','box-shadow':'0 0 0 100vmax rgba(0,0,0,.14)',margin:'0',padding:'0',background:'transparent','box-sizing':'border-box'}});
-box.style.setProperty('left',Math.min(x0,x1)+'px','important');box.style.setProperty('top',Math.min(y0,y1)+'px','important');
-box.style.setProperty('width',Math.abs(x1-x0)+'px','important');box.style.setProperty('height',Math.abs(y1-y0)+'px','important');}}
-function unband(){{if(box){{box.remove();box=null;}}}}
-nb.setClip=function(on){{nb.clip=!!on;if(on)document.documentElement.setAttribute('data-snorkle-nb-clip','');else document.documentElement.removeAttribute('data-snorkle-nb-clip');if(!on){{unband();drag=null;}}}};
-window.addEventListener('scroll',unpick,{{passive:true,capture:true}});
-document.addEventListener('pointerdown',function(e){{if(!(e.altKey&&!e.metaKey&&!e.ctrlKey)&&!nb.clip){{unpick();return;}}if(e.pointerType==='mouse'&&e.button!==0)return;
-e.preventDefault();e.stopPropagation();drag={{id:e.pointerId,x:e.clientX,y:e.clientY,moved:false,alt:e.altKey&&!nb.clip}};}},true);
-document.addEventListener('pointermove',function(e){{if(!drag||e.pointerId!==drag.id)return;e.preventDefault();
-if(!drag.moved&&Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)<6)return;drag.moved=true;band(drag.x,drag.y,e.clientX,e.clientY);}},true);
-function up(e){{if(!drag||e.pointerId!==drag.id)return;var d=drag;drag=null;e.preventDefault();e.stopPropagation();swallow=Date.now();
-if(e.type!=='pointerup'){{unband();return;}}
-if(d.moved){{var x0=Math.min(d.x,e.clientX),y0=Math.min(d.y,e.clientY),wd=Math.abs(e.clientX-d.x),ht=Math.abs(e.clientY-d.y);unband();
-if(wd>=12&&ht>=12){{if(nb.clip)nb.setClip(false);post('clip',{{left:x0,top:y0,right:x0+wd,bottom:y0+ht}});}}return;}}
-unband();if(d.alt)optionClick(e.clientX,e.clientY);}}
-document.addEventListener('pointerup',up,true);document.addEventListener('pointercancel',up,true);
-['click','mousedown','mouseup','dblclick','auxclick'].forEach(function(t){{document.addEventListener(t,function(e){{var own=swallow&&Date.now()-swallow<400;
-if((e.altKey&&!e.metaKey&&!e.ctrlKey)||nb.clip||own){{e.preventDefault();e.stopPropagation();if(t==='click')swallow=0;}}}},true);}});
-document.addEventListener('selectstart',function(e){{if(drag||nb.clip)e.preventDefault();}},true);
-document.addEventListener('keydown',function(e){{if(nb.clip&&e.key==='Escape'){{e.preventDefault();e.stopPropagation();nb.setClip(false);h.postMessage('{{"nb":"end"}}');}}}},true);
-var dot=null,line=null,hl=null;
-function clearHover(){{if(dot){{dot.remove();dot=null;}}if(line){{line.remove();line=null;}}if(window.CSS&&CSS.highlights)CSS.highlights.delete('snorkle-nb');hl=null;}}
-function point(fx,fy){{var o=vp();return [o[0]+fx*o[2],o[1]+fy*o[3]];}}
-nb.hover=function(fx,fy,fy0){{var p=point(fx,fy),o=vp();if(!dot)dot=el({{position:'fixed','z-index':'2147483647','pointer-events':'none',width:'10px',height:'10px','border-radius':'5px',background:'#ff5f57',margin:'0',padding:'0'}});
-dot.style.setProperty('left',(p[0]-o[0]-5)+'px','important');dot.style.setProperty('top',(p[1]-o[1]-5)+'px','important');
-if(!line)line=el({{position:'fixed','z-index':'2147483646','pointer-events':'none',height:'0',margin:'0',padding:'0','border-top':'2px dashed #ff5f57','transform-origin':'0 0'}});
-var x0=o[2],y0=fy0*o[3],dx=p[0]-o[0]-x0,dy=p[1]-o[1]-y0;line.style.setProperty('left',x0+'px','important');line.style.setProperty('top',y0+'px','important');
-line.style.setProperty('width',Math.hypot(dx,dy)+'px','important');line.style.setProperty('transform','rotate('+Math.atan2(dy,dx)+'rad)','important');
-var r=sentenceAt(p[0]-o[0],p[1]-o[1]);if(window.CSS&&CSS.highlights&&window.Highlight){{if(r)CSS.highlights.set('snorkle-nb',new Highlight(r));else CSS.highlights.delete('snorkle-nb');}}hl=r;}};
-nb.drop=function(fx,fy){{var p=point(fx,fy),o=vp(),r=sentenceAt(p[0]-o[0],p[1]-o[1]);clearHover();return JSON.stringify({{t:r?String(r).slice(0,2000):''}});}};
-nb.leave=clearHover;
-document.addEventListener('dragstart',function(e){{var t=e.target&&e.target.nodeType===1?e.target:(e.target&&e.target.parentElement),s=window.getSelection(),
-txt=s&&s.rangeCount&&!s.isCollapsed&&String(s).trim(),img=t&&t.closest?t.closest('img,picture,video,canvas'):null;
-if(img&&!(txt&&s.containsNode(img,true)))post('dimg',img.getBoundingClientRect());else if(txt)post('dtext',s.getRangeAt(0).getBoundingClientRect());}},true);
-document.addEventListener('dragend',function(){{h.postMessage('{{"nb":"dend"}}');}},true);
-window.addEventListener('pagehide',function(){{nb.setClip(false);clearHover();}});}})();"#
-    )
+    WATCH_JS.replace("__HANDLER__", HANDLER_NAME)
 }
+
+const WATCH_JS: &str = r#"(function(){var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.__HANDLER__;
+if(!h||window.__snorkleNb)return;var nb=window.__snorkleNb={clip:false},Z='2147483647';
+var css=document.createElement('style');css.textContent='::highlight(snorkle-nb){background-color:rgba(255,95,87,.3)}';(document.head||document.documentElement).appendChild(css);
+function ok(e){return !!(e&&e.isTrusted);}
+function vp(){var v=window.visualViewport;return [v?v.offsetLeft:0,v?v.offsetTop:0,Math.round(v?v.width:innerWidth),Math.round(v?v.height:innerHeight)];}
+function report(o){h.postMessage(JSON.stringify(o));}
+function rectOf(kind,r){var o=vp(),x0=Math.max(0,r.left-o[0]),y0=Math.max(0,r.top-o[1]),x1=Math.min(o[2],r.right-o[0]),y1=Math.min(o[3],r.bottom-o[1]);
+if(x1-x0<1||y1-y0<1)return null;return {nb:kind,r:[Math.round(x0),Math.round(y0),Math.round(x1-x0),Math.round(y1-y0)],vw:o[2]};}
+var picked=0;function unpick(){if(picked){picked=0;report({nb:'hide'});}}
+function post(kind,r){var m=rectOf(kind,r);if(!m)return;if(kind==='text'||kind==='img')picked=1;report(m);}
+function el(styles,tag){var e=document.createElement(tag||'div');for(var k in styles)e.style.setProperty(k,styles[k],'important');document.documentElement.appendChild(e);return e;}
+function at(e,k,v){e.style.setProperty(k,v,'important');}
+var ov=null;
+function under(fn){if(ov)at(ov,'pointer-events','none');try{return fn();}finally{if(ov)at(ov,'pointer-events','auto');}}
+var MEDIA=/^(IMG|VIDEO|CANVAS|PICTURE)$/;
+function mediaAt(x,y){var l=document.elementsFromPoint?document.elementsFromPoint(x,y):[];for(var i=0;i<l.length&&i<12;i++){var e=l[i];if(MEDIA.test(e.tagName)||e.hasAttribute('data-snorkle-video-box'))return e;if(e.tagName==='svg'&&e.getBoundingClientRect().width>40)return e;}return null;}
+function linkAt(x,y){var l=document.elementsFromPoint?document.elementsFromPoint(x,y):[];for(var i=0;i<l.length&&i<12;i++){var a=l[i].closest?l[i].closest('a[href]'):null;if(a)return /^https?:/i.test(a.href||'')?a:null;}return null;}
+function blockOf(n){var e=n.nodeType===1?n:n.parentElement;while(e&&e!==document.body&&e!==document.documentElement){var d=getComputedStyle(e).display;if(d!=='inline'&&d!=='contents'&&d.indexOf('inline-')!==0)return e;e=e.parentElement;}return document.body||document.documentElement;}
+function sentenceAt(x,y){var c=document.caretRangeFromPoint?document.caretRangeFromPoint(x,y):null;if(!c||!c.startContainer||c.startContainer.nodeType!==3)return null;
+var node=c.startContainer,off=c.startOffset,hit=document.elementFromPoint(x,y);if(!hit||!hit.contains(node))return null;
+var b=blockOf(node),tw=document.createTreeWalker(b,NodeFilter.SHOW_TEXT),nodes=[],pos=0,here=-1,t;
+while((t=tw.nextNode())&&nodes.length<5000&&pos<40000){if(t===node)here=pos+off;nodes.push([t,pos]);pos+=t.nodeValue.length;}
+if(here<0)return null;var text=nodes.map(function(n){return n[0].nodeValue;}).join(''),s=0,e=text.length;
+if(window.Intl&&Intl.Segmenter){var g=new Intl.Segmenter(undefined,{granularity:'sentence'}).segment(text).containing(Math.min(here,text.length-1));if(g){s=g.index;e=g.index+g.segment.length;}}
+else{var re=/[.!?。！？]+["'”’)\]]*\s+/g,m;while((m=re.exec(text))){if(m.index+m[0].length<=here)s=m.index+m[0].length;else{e=m.index+m[0].length;break;}}}
+while(e>s&&/\s/.test(text[e-1]))e--;while(s<e&&/\s/.test(text[s]))s++;if(e<=s)return null;
+function loc(p,end){for(var i=0;i<nodes.length;i++){var n=nodes[i],len=n[0].nodeValue.length;if(p<n[1]+len||(end&&p===n[1]+len))return [n[0],p-n[1]];}var z=nodes[nodes.length-1];return [z[0],z[0].nodeValue.length];}
+var r=document.createRange(),a=loc(s,false),z=loc(e,true);r.setStart(a[0],a[1]);r.setEnd(z[0],z[1]);return r;}
+function inSelection(x,y){var s=window.getSelection();if(!s||!s.rangeCount||s.isCollapsed||!String(s).trim())return null;var r=s.getRangeAt(0),l=r.getClientRects();
+for(var i=0;i<l.length;i++){var q=l[i];if(x>=q.left-4&&x<=q.right+4&&y>=q.top-4&&y<=q.bottom+4)return r;}return null;}
+function optionClick(x,y){return under(function(){var r=inSelection(x,y);if(r){post('text',r.getBoundingClientRect());return true;}
+var m=mediaAt(x,y);if(m){post('img',m.getBoundingClientRect());return true;}
+var a=linkAt(x,y);if(a){var b=a.getBoundingClientRect(),q=rectOf('link',b.width&&b.height?b:{left:x,top:y,right:x+1,bottom:y+1});if(q){q.url=String(a.href).slice(0,4096);picked=1;report(q);}return true;}
+r=sentenceAt(x,y);if(!r)return false;var s=window.getSelection();s.removeAllRanges();s.addRange(r);post('text',r.getBoundingClientRect());return true;});}
+var alt=false,spent=false,stage=null,drag=null,swallow=0,MIN=12;
+function cover(on){if(on&&!ov){ov=el({position:'fixed',left:'0',top:'0',width:'100vw',height:'100vh',margin:'0',padding:'0',border:'0','z-index':Z,background:'rgba(128,128,128,.14)',cursor:'crosshair','touch-action':'none','-webkit-user-select':'none','user-select':'none'});ov.addEventListener('pointerdown',down,true);}
+else if(!on&&ov){ov.remove();ov=null;}}
+function sync(){cover((alt&&!spent)||nb.clip||!!stage||!!drag);}
+function setAlt(v){if(v===alt)return;alt=v;if(!v)spent=false;sync();}
+function norm(b){return [Math.min(b[0],b[2]),Math.min(b[1],b[3]),Math.max(b[0],b[2]),Math.max(b[1],b[3])];}
+function place(){var b=stage.b;at(stage.box,'left',b[0]+'px');at(stage.box,'top',b[1]+'px');at(stage.box,'width',(b[2]-b[0])+'px');at(stage.box,'height',(b[3]-b[1])+'px');
+stage.handles.forEach(function(p){at(p[1],'left',((p[0].indexOf('w')>=0?b[0]:b[2])-7)+'px');at(p[1],'top',((p[0].indexOf('n')>=0?b[1]:b[3])-7)+'px');});
+if(stage.bar){at(stage.bar,'left',Math.max(4,Math.min(b[0],innerWidth-140))+'px');at(stage.bar,'top',Math.max(4,Math.min(b[3]+8,innerHeight-44))+'px');}}
+function grab(e,kind){if(!ok(e)||!stage||(e.pointerType==='mouse'&&e.button!==0))return;e.preventDefault();e.stopPropagation();
+drag={id:e.pointerId,kind:kind,x:e.clientX,y:e.clientY,b0:stage.b.slice(),moved:false};try{e.target.setPointerCapture(e.pointerId);}catch(x){}}
+function show(b){if(!stage){stage={b:b,handles:[],bar:null};
+stage.box=el({position:'fixed','z-index':Z,margin:'0',padding:'0',border:'2px dashed #ff3b30','box-sizing':'border-box',background:'transparent','box-shadow':'0 0 0 100vmax rgba(0,0,0,.16)',cursor:'move','touch-action':'none'});
+stage.box.addEventListener('pointerdown',function(e){grab(e,'move');},true);
+['nw','ne','sw','se'].forEach(function(c){var k=el({position:'fixed','z-index':Z,margin:'0',padding:'0',width:'14px',height:'14px','border-radius':'7px',border:'2px solid #ff3b30',background:'#fff','box-sizing':'border-box',cursor:(c==='nw'||c==='se')?'nwse-resize':'nesw-resize','touch-action':'none'});
+k.addEventListener('pointerdown',function(e){grab(e,c);},true);stage.handles.push([c,k]);});}
+stage.b=b;place();}
+function button(text,act,primary){var b=document.createElement('div');b.textContent=text;var st={display:'inline-block',padding:'6px 12px',margin:'0','border-radius':'7px',cursor:'pointer',font:'600 13px -apple-system,BlinkMacSystemFont,sans-serif','line-height':'18px',color:primary?'#fff':'#111',background:primary?'#ff3b30':'#eee','user-select':'none','-webkit-user-select':'none'};
+for(var k in st)b.style.setProperty(k,st[k],'important');b.setAttribute('role','button');
+b.addEventListener('pointerdown',function(e){if(!ok(e))return;e.preventDefault();e.stopPropagation();},true);
+b.addEventListener('pointerup',function(e){if(!ok(e))return;e.preventDefault();e.stopPropagation();swallow=Date.now();act();},true);return b;}
+function bar(){if(stage.bar)return;var b=el({position:'fixed','z-index':Z,display:'flex',gap:'6px',padding:'4px',margin:'0',background:'#fff','border-radius':'10px','box-shadow':'0 4px 16px rgba(0,0,0,.28)'});
+b.appendChild(button('Clip',confirm,true));b.appendChild(button('×',function(){cancel(true);},false));stage.bar=b;place();}
+function clearStage(){if(!stage)return;stage.box.remove();stage.handles.forEach(function(p){p[1].remove();});if(stage.bar)stage.bar.remove();stage=null;}
+function confirm(){if(!stage)return;var b=stage.b;clearStage();drag=null;spent=alt;nb.clip=false;sync();
+requestAnimationFrame(function(){post('clip',{left:b[0],top:b[1],right:b[2],bottom:b[3]});});}
+function cancel(all){clearStage();drag=null;if(all){if(nb.clip){nb.clip=false;report({nb:'end'});}spent=alt;}sync();}
+function down(e){if(!ok(e)||(e.pointerType==='mouse'&&e.button!==0))return;e.preventDefault();e.stopPropagation();
+drag={id:e.pointerId,kind:'new',x:e.clientX,y:e.clientY,moved:false,alt:alt&&!nb.clip,b0:null};try{ov.setPointerCapture(e.pointerId);}catch(x){}}
+document.addEventListener('pointermove',function(e){if(!ok(e))return;
+if(e.pointerType!=='touch'&&!drag){var a=e.altKey&&!e.metaKey&&!e.ctrlKey;if(a!==alt)setAlt(a);}
+if(!drag||e.pointerId!==drag.id)return;e.preventDefault();var dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+if(drag.kind==='new'){if(!drag.moved&&Math.abs(dx)+Math.abs(dy)<6)return;drag.moved=true;show(norm([drag.x,drag.y,e.clientX,e.clientY]));return;}
+var b=drag.b0.slice();if(drag.kind==='move')b=[b[0]+dx,b[1]+dy,b[2]+dx,b[3]+dy];
+else{if(drag.kind.indexOf('w')>=0)b[0]+=dx;if(drag.kind.indexOf('e')>=0)b[2]+=dx;if(drag.kind.indexOf('n')>=0)b[1]+=dy;if(drag.kind.indexOf('s')>=0)b[3]+=dy;b=norm(b);}
+drag.moved=true;stage.b=b;place();},true);
+function up(e){if(!ok(e)||!drag||e.pointerId!==drag.id)return;var d=drag;drag=null;e.preventDefault();e.stopPropagation();swallow=Date.now();
+if(d.kind==='new'){var b=stage&&stage.b;if(e.type!=='pointerup'||!d.moved){if(d.moved||!b||!stage.bar)cancel(false);else sync();if(e.type==='pointerup'&&!d.moved&&d.alt)optionClick(e.clientX,e.clientY);sync();return;}
+if(b&&b[2]-b[0]>=MIN&&b[3]-b[1]>=MIN)bar();else cancel(false);}
+sync();}
+document.addEventListener('pointerup',up,true);document.addEventListener('pointercancel',up,true);
+document.addEventListener('pointerdown',function(e){if(!ok(e)||e.altKey||nb.clip)return;var t=e.target;if(ov&&(t===ov||(stage&&(t===stage.box||(stage.bar&&stage.bar.contains(t))))))return;unpick();},true);
+window.addEventListener('scroll',function(){unpick();},{passive:true,capture:true});
+['click','mousedown','mouseup','dblclick','auxclick','contextmenu'].forEach(function(t){document.addEventListener(t,function(e){if(!ok(e))return;
+var own=swallow&&Date.now()-swallow<400;if((e.altKey&&!e.metaKey&&!e.ctrlKey&&t!=='contextmenu')||(ov&&e.target===ov)||own){e.preventDefault();e.stopPropagation();if(t==='click')swallow=0;}},true);});
+document.addEventListener('selectstart',function(e){if(ov||drag)e.preventDefault();},true);
+document.addEventListener('keydown',function(e){if(!ok(e))return;if(e.key==='Alt'&&!e.metaKey&&!e.ctrlKey){setAlt(true);return;}
+if(stage&&stage.bar&&e.key==='Enter'){e.preventDefault();e.stopPropagation();confirm();}else if((stage||nb.clip)&&e.key==='Escape'){e.preventDefault();e.stopPropagation();cancel(true);}},true);
+document.addEventListener('keyup',function(e){if(ok(e)&&e.key==='Alt')setAlt(false);},true);
+window.addEventListener('blur',function(){setAlt(false);});
+nb.setClip=function(on){nb.clip=!!on;if(!on){clearStage();drag=null;}sync();};
+nb.regionText=function(x,y,wd,ht){var o=vp();x+=o[0];y+=o[1];var x1=x+wd,y1=y+ht,out=[],n=0,len=0,last=null,rg=document.createRange();
+function hit(q){return q.width>0&&q.height>0&&q.right>x&&q.left<x1&&q.bottom>y&&q.top<y1;}
+var tw=document.createTreeWalker(document.body||document.documentElement,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{acceptNode:function(e){return e.nodeType===1&&/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(e.tagName)?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;}}),t;
+while((t=tw.nextNode())&&n<40000&&len<4000){n++;
+if(t.nodeType===1){if(t.tagName==='IMG'&&t.alt&&hit(t.getBoundingClientRect())){out.push('\n'+t.alt);len+=t.alt.length;}continue;}
+var v=t.nodeValue;if(!v||!v.trim())continue;rg.selectNodeContents(t);var rs=rg.getClientRects(),on=false;for(var i=0;i<rs.length;i++)if(hit(rs[i])){on=true;break;}
+if(!on)continue;var bk=blockOf(t);out.push((last&&bk!==last?'\n':'')+v);last=bk;len+=v.length;}
+return JSON.stringify({t:out.join(' ').replace(/[ \t]+/g,' ').replace(/ *\n */g,'\n').slice(0,4000)});};
+document.addEventListener('dragstart',function(e){if(!ok(e))return;var t=e.target&&e.target.nodeType===1?e.target:(e.target&&e.target.parentElement),s=window.getSelection(),
+txt=s&&s.rangeCount&&!s.isCollapsed&&String(s).trim(),img=t&&t.closest?t.closest('img,picture,video,canvas'):null;
+if(img&&!(txt&&s.containsNode(img,true)))post('dimg',img.getBoundingClientRect());else if(txt)post('dtext',s.getRangeAt(0).getBoundingClientRect());},true);
+document.addEventListener('dragend',function(e){if(ok(e))report({nb:'dend'});},true);
+var dot=null,line=null,mark=null,doneAt=0;
+function clearHover(){doneAt=Date.now();if(dot){dot.remove();dot=null;}if(line){line.remove();line=null;}if(mark){mark.clear();mark=null;}if(window.CSS&&CSS.highlights)CSS.highlights.delete('snorkle-nb');}
+function point(fx,fy){var o=vp();return [o[0]+fx*o[2],o[1]+fy*o[3]];}
+nb.hover=function(fx,fy,fy0){if(Date.now()-doneAt<300)return;var p=point(fx,fy),o=vp();
+if(!dot)dot=el({position:'fixed','z-index':Z,'pointer-events':'none',width:'10px',height:'10px','border-radius':'5px',background:'#ff5f57',margin:'0',padding:'0'});
+at(dot,'left',(p[0]-5)+'px');at(dot,'top',(p[1]-5)+'px');
+if(!line)line=el({position:'fixed','z-index':Z,'pointer-events':'none',height:'0',margin:'0',padding:'0','border-top':'2px dashed #ff5f57','transform-origin':'0 0'});
+var x0=o[0]+o[2],y0=o[1]+fy0*o[3],dx=p[0]-x0,dy=p[1]-y0;at(line,'left',x0+'px');at(line,'top',y0+'px');at(line,'width',Math.hypot(dx,dy)+'px');at(line,'transform','rotate('+Math.atan2(dy,dx)+'rad)');
+var r=under(function(){return sentenceAt(p[0],p[1]);});
+if(window.CSS&&CSS.highlights&&window.Highlight){if(!mark){mark=new Highlight();CSS.highlights.set('snorkle-nb',mark);}mark.clear();if(r)mark.add(r);}};
+nb.drop=function(fx,fy){var p=point(fx,fy),r=under(function(){return sentenceAt(p[0],p[1]);});clearHover();return JSON.stringify({t:r?String(r).slice(0,2000):''});};
+nb.leave=clearHover;
+window.addEventListener('pagehide',function(){nb.setClip(false);clearHover();setAlt(false);});})();"#;
 
 /// Turns clip mode on or off in a page (the notebook's scissors).
 pub fn clip_mode_js(on: bool) -> String {
@@ -180,6 +246,102 @@ pub fn hover_js(fx: f64, fy: f64, from_y: f64) -> String {
 /// `{"t": text}` (read back, [`parse_drop`]).
 pub fn drop_js(fx: f64, fy: f64) -> String {
     format!("(function(){{var n=window.__snorkleNb;return n?n.drop({:.5},{:.5}):'';}})()", frac(fx), frac(fy))
+}
+
+/// The text shown in a region of the page (visual-viewport CSS pixels,
+/// as the clip's report gave it), for the notebook's search: text nodes
+/// laid out in the region and images' `alt`, as `{"t": text}` (read back,
+/// [`parse_region_text`]).
+pub fn region_text_js(x: f64, y: f64, w: f64, h: f64) -> String {
+    let n = |v: f64| if v.is_finite() { v.clamp(-100_000.0, 100_000.0) } else { 0.0 };
+    format!(
+        "(function(){{var n=window.__snorkleNb;return n&&n.regionText?n.regionText({:.1},{:.1},{:.1},{:.1}):'';}})()",
+        n(x),
+        n(y),
+        n(w).max(0.0),
+        n(h).max(0.0)
+    )
+}
+
+/// [`region_text_js`]'s answer: cleaned and capped; `None` if empty or
+/// malformed.
+pub fn parse_region_text(text: &str) -> Option<String> {
+    if text.len() > MAX_REGION_BYTES {
+        return None;
+    }
+    let v: Value = serde_json::from_str(text).ok()?;
+    let t = crate::ai::clean_multiline(v.get("t")?.as_str()?, MAX_REGION_CHARS);
+    (!t.is_empty()).then_some(t)
+}
+
+/// A page's title from the start of its HTML (the first `<title>`, else
+/// `og:title`), entities decoded, cleaned and capped; `None` when it has
+/// none. Only reads text: nothing is rendered or run.
+pub fn page_title(html: &[u8]) -> Option<String> {
+    let head = &html[..html.len().min(512 * 1024)];
+    let text = String::from_utf8_lossy(head);
+    let lower = text.to_ascii_lowercase();
+    let from_title = || -> Option<String> {
+        let open = lower.find("<title")?;
+        let start = open + lower[open..].find('>')? + 1;
+        let end = start + lower[start..].find("</title")?;
+        Some(text[start..end].to_string())
+    };
+    let from_og = || -> Option<String> {
+        let at = lower.find("og:title")?;
+        let tag_start = lower[..at].rfind('<')?;
+        let tag_end = at + lower[at..].find('>')?;
+        let tag = &text[tag_start..tag_end];
+        let c = tag.to_ascii_lowercase().find("content=")? + "content=".len();
+        let rest = &tag[c..];
+        let quote = rest.chars().next().filter(|q| *q == '"' || *q == '\'')?;
+        let body = &rest[1..];
+        Some(body[..body.find(quote)?].to_string())
+    };
+    [from_title(), from_og()]
+        .into_iter()
+        .flatten()
+        .map(|raw| sanitize_page_text(&decode_entities(&raw), MAX_TITLE_CHARS))
+        .find(|t| !t.is_empty())
+}
+
+/// The few HTML entities titles use: the five named ones, `&nbsp;` and
+/// numeric references (control and invalid code points dropped).
+fn decode_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let end = rest.find(';').filter(|e| *e <= 12);
+        let Some(end) = end else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        let name = &rest[1..end];
+        let ch = match name {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" | "#39" => Some('\''),
+            "nbsp" => Some(' '),
+            n if n.starts_with("#x") || n.starts_with("#X") => {
+                u32::from_str_radix(&n[2..], 16).ok().and_then(char::from_u32)
+            }
+            n if n.starts_with('#') => n[1..].parse::<u32>().ok().and_then(char::from_u32),
+            _ => None,
+        };
+        match ch {
+            Some(c) if !c.is_control() => out.push(c),
+            Some(_) => {}
+            None => out.push_str(&rest[..=end]),
+        }
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The quote button left the page (or the drag ended elsewhere).
@@ -233,6 +395,7 @@ pub fn parse_report(body: &str) -> Option<Report> {
         "img" => Some(Report::Image(rect)),
         "dtext" => Some(Report::DragText(rect)),
         "dimg" => Some(Report::DragImage(rect)),
+        "link" => web_url(v.get("url")?.as_str()?).map(|u| Report::Link(u, rect)),
         "clip" => Some(Report::Clip(rect)),
         _ => None,
     }
@@ -407,6 +570,17 @@ mod tests {
         assert_eq!(parse_report(r#"{"nb":"end"}"#), Some(Report::End));
         assert_eq!(parse_report(r#"{"nb":"hide"}"#), Some(Report::Hide));
         assert_eq!(parse_report(r#"{"nb":"dend"}"#), Some(Report::DragEnd));
+        assert_eq!(
+            parse_report(r#"{"nb":"link","url":"https://e.com/a b","r":[10,20,300,18],"vw":1024}"#),
+            Some(Report::Link("https://e.com/a%20b".into(), r))
+        );
+        for bad in [
+            r#"{"nb":"link","url":"javascript:alert(1)","r":[10,20,300,18],"vw":1024}"#,
+            r#"{"nb":"link","url":"https://u:p@e.com/","r":[10,20,300,18],"vw":1024}"#,
+            r#"{"nb":"link","r":[10,20,300,18],"vw":1024}"#,
+        ] {
+            assert!(parse_report(bad).is_none(), "{bad}");
+        }
         assert_eq!(parse_report(r#"{"nb":"dtext","r":[10,20,300,18],"vw":1024}"#), Some(Report::DragText(r)));
         assert_eq!(parse_report(r#"{"nb":"dimg","r":[10,20,300,18],"vw":1024}"#), Some(Report::DragImage(r)));
         for bad in [
@@ -420,7 +594,8 @@ mod tests {
         ] {
             assert!(parse_report(bad).is_none(), "{bad}");
         }
-        assert!(parse_report(&format!(r#"{{"nb":"clip","r":[1,2,3,4],"vw":9,"x":"{}"}}"#, "a".repeat(300))).is_none());
+        assert!(parse_report(&format!(r#"{{"nb":"clip","r":[1,2,3,4],"vw":9,"x":"{}"}}"#, "a".repeat(MAX_REPORT)))
+            .is_none());
         assert!(is_report(r#"{"nb":"end"}"#) && !is_report(r#"{"img":null}"#) && !is_report(r#"{"edit":1}"#));
     }
 
@@ -437,6 +612,26 @@ mod tests {
         assert_eq!(parse_drop("{\"t\":\"  A sentence.\\u202e \"}").as_deref(), Some("A sentence."));
         assert_eq!(parse_drop(r#"{"t":""}"#), None);
         assert_eq!(parse_drop("[]"), None);
+    }
+
+    #[test]
+    fn titles_and_region_text() {
+        assert_eq!(
+            page_title(b"<html><head><TITLE data-x=1>Caf&eacute; &amp; Tea &#8212; Home\n</title>").as_deref(),
+            Some("Caf&eacute; & Tea \u{2014} Home")
+        );
+        assert_eq!(
+            page_title(b"<head><meta property='og:title' content='Only &quot;OG&quot;'></head>").as_deref(),
+            Some("Only \"OG\"")
+        );
+        assert_eq!(page_title(b"<title>  </title>"), None);
+        assert_eq!(page_title(b"no title here"), None);
+        assert_eq!(page_title("<title>\x07bell &#7; \u{202e}rtl</title>".as_bytes()).as_deref(), Some("bell rtl"));
+        assert_eq!(decode_entities("a &bogus; b &#x41; &"), "a &bogus; b A &");
+        assert!(region_text_js(1.0, 2.0, f64::NAN, -5.0).contains("regionText(1.0,2.0,0.0,0.0)"));
+        assert_eq!(parse_region_text(r#"{"t":" Line one\n\n\n\nLine two "}"#).as_deref(), Some("Line one\n\nLine two"));
+        assert_eq!(parse_region_text(r#"{"t":""}"#), None);
+        assert!(parse_region_text(&format!(r#"{{"t":"{}"}}"#, "a".repeat(MAX_REGION_BYTES))).is_none());
     }
 
     #[test]

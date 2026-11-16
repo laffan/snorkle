@@ -137,6 +137,10 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::add_later_pages,
         commands::finish_adding_pages,
         commands::cancel_adding_pages,
+        notebook::notebook_link_title,
+        commands::begin_conversation_capture,
+        commands::conversation_capture_count,
+        commands::cancel_conversation_capture,
         notebook::load_notebook,
         notebook::save_notebook,
         notebook::notebook_clip,
@@ -260,7 +264,12 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             }
             ChromeEvent::NotebookPick(tab, report) => {
                 use snorkle_core::notebook::Report;
+                let mut url = None;
                 let (kind, rect) = match report {
+                    Report::Link(u, r) => {
+                        url = Some(u.clone());
+                        ("link", Some(r))
+                    }
                     Report::Text(r) => ("text", Some(r)),
                     Report::Image(r) => ("img", Some(r)),
                     Report::Clip(r) => ("clip", Some(r)),
@@ -270,7 +279,11 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
                     Report::DragImage(r) => ("dimg", Some(r)),
                     Report::DragEnd => ("dend", None),
                 };
-                handle.emit_to(CHROME_LABEL, "notebook_pick", serde_json::json!({ "tab": tab, "kind": kind, "rect": rect }))
+                handle.emit_to(
+                    CHROME_LABEL,
+                    "notebook_pick",
+                    serde_json::json!({ "tab": tab, "kind": kind, "rect": rect, "url": url }),
+                )
             }
             ChromeEvent::PageEditing(tab, on) => {
                 handle.emit_to(CHROME_LABEL, "page_editing", serde_json::json!({ "tab": tab, "on": on }))

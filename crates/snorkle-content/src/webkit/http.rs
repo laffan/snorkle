@@ -1,7 +1,8 @@
 //! SECURITY-REVIEW: the app's own HTTPS requests to AI providers (owner
 //! request 2026-10-30), and image fetches for the image menu's Copy, Share
 //! and Download (owner request 2026-11-03, [`fetch_image`]), plus cookie-free
-//! favicon link discovery ([`discover_favicon`]).
+//! favicon link discovery ([`discover_favicon`]) and the Notebook's title of a
+//! linked page ([`fetch_page_head`], 2026-11-16).
 //!
 //! Security assumptions:
 //! - For AI requests, only URLs accepted by `snorkle_core::ai::is_allowed_url` (the two API
@@ -155,3 +156,54 @@ pub fn discover_favicon(host: String, done: Box<dyn FnOnce(String) + Send>) {
     task.resume();
     session.finishTasksAndInvalidate();
 }
+
+/// The Notebook (2026-11-16): the start of a linked page the user sends to
+/// the notebook with ⌥-click, for its title. http(s) only, an ephemeral
+/// session (no cookies, cache or credentials), 10 s, a 2xx HTML reply of
+/// at most 4 MB, of which the first 512 KB are handed back (the title is
+/// read in `snorkle_core::notebook::page_title`); nothing is rendered or
+/// run. `done` runs on a background queue.
+pub fn fetch_page_head(url: &url::Url, done: Box<dyn FnOnce(Option<Vec<u8>>) + Send>) {
+    if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() || url.password().is_some() {
+        done(None);
+        return;
+    }
+    let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(url.as_str())) else {
+        done(None);
+        return;
+    };
+    let request = NSMutableURLRequest::requestWithURL(&nsurl);
+    request.setValue_forHTTPHeaderField(
+        Some(&NSString::from_str("text/html,application/xhtml+xml")),
+        &NSString::from_str("Accept"),
+    );
+    request.setTimeoutInterval(10.0);
+    let session = NSURLSession::sessionWithConfiguration(&NSURLSessionConfiguration::ephemeralSessionConfiguration());
+    let done = Mutex::new(Some(done));
+    let block = RcBlock::new(move |data: *mut NSData, response: *mut NSURLResponse, error: *mut NSError| {
+        let Some(done) = done.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+        // SAFETY: Foundation passes valid (or null) object pointers that
+        // live for the duration of the callback.
+        let (data, response, error) = unsafe { (data.as_ref(), response.as_ref(), error.as_ref()) };
+        if error.is_some() {
+            done(None);
+            return;
+        }
+        let status = response.and_then(|r| r.downcast_ref::<NSHTTPURLResponse>()).map(|r| r.statusCode()).unwrap_or(0);
+        let mime = response.and_then(|r| r.MIMEType()).map(|m| m.to_string().to_ascii_lowercase()).unwrap_or_default();
+        let len = data.map(|d| d.length()).unwrap_or(0);
+        let html = mime == "text/html" || mime == "application/xhtml+xml";
+        if !(200..300).contains(&status) || !html || len == 0 || len > 4 * 1024 * 1024 {
+            done(None);
+            return;
+        }
+        let mut bytes = data.map(|d| d.to_vec()).unwrap_or_default();
+        bytes.truncate(512 * 1024);
+        done(Some(bytes));
+    });
+    // SAFETY: the block only touches a Mutex and a Send callback.
+    let task = unsafe { session.dataTaskWithRequest_completionHandler(&request, &block) };
+    task.resume();
+    session.finishTasksAndInvalidate();
+}
+

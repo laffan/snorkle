@@ -271,6 +271,9 @@
 }
 .nb-note-hit.nb-current { border-color: #f19837; background: color-mix(in srgb, #f19837 8%, transparent); }
 
+/* A paste is caught here (notebook.js): never seen. */
+.notepad-paste-catcher { position: fixed; left: -1000px; top: 0; width: 10px; height: 10px; opacity: 0; pointer-events: none; }
+
 /* ---- around the notebook: its toggle and the page's "Send to Notebook" ---- */
 /* ⌥-click on a page: one button above what was picked (a hole, like the
    selection menu). */

@@ -980,3 +980,39 @@ The live sites were not reachable or not signed in from this environment.
   reach the notebook's search only while its panel holds the keyboard focus (a press in it gives
   it); on iPadOS the shortcut arrives as a native key command and the chrome checks its own focus.
 
+## Round 3: capture mode, ⌥ stage, clip text, link titles, copy/paste (2026-11-16)
+
+- **[verify] Capture mode on the real sites.** The owner found the automatic sweep missed earlier
+  messages on all three sites. Capture mode leaves the scrolling to the reader and notes every
+  turn the site adds to the document (DOM changes and scroll events, every 0.3 s at most). Checked
+  in Chromium against simulated threads (virtualised, rows added out of order; lazily loaded
+  older turns; repeated identical messages), not on the live sites. Assumed: the turn selectors
+  from round 1 still match; WebKit delivers scroll events from the sites' inner scrollers to a
+  capture-phase document listener in the client world.
+- **[verify] The ⌥ cover.** Held ⌥ is seen from `keydown`/`keyup` while the page has focus and
+  from `altKey` on pointer moves otherwise; if ⌥ is released without moving the pointer while
+  another view has focus, the cover stays until the pointer moves. While ⌥ is held, the wheel
+  scrolls the page's main scroller only (the cover is over inner scrollers). Pages whose own
+  shortcuts use ⌥ lose them to the cover while it shows.
+- **[verify] Vision through `msg_send!`.** `webkit/ocr.rs` calls `VNRecognizeTextRequest` and
+  `VNImageRequestHandler` by name (no binding crate in the graph); selectors and argument types
+  were written from Apple's headers and type-check, but were never run. An Objective-C exception
+  is caught; a wrong signature that does not throw would be undefined behaviour. Recognition runs
+  synchronously off the main thread, after the clip is drawn (adding its time to each clip).
+- **[decide] Link titles fetch the linked page** (cookie-free) when the user sends a link to the
+  notebook: the linked site sees a request from the user's address. Pages that need sign-in give
+  their sign-in page's title; then the link shows that title (or the host when there is none).
+- **[verify] Paste.** ⌘V in the notebook focuses a hidden text field so the system's paste lands
+  there and its `paste` event carries the text (no clipboard permission prompt). Assumed: moving
+  the focus in the `keydown` handler makes WebKit paste into the new field on both platforms.
+  Pictures on the clipboard are not pasted (the chrome decodes no images it did not make).
+- **[verify] Quote linker marks.** The owner saw sentences stay marked while dragging; not
+  reproduced in Chromium. Fixes: one `Highlight` object is reused and cleared, a mark call still
+  under way when the drag ends is followed by one that clears it, and the page ignores mark calls
+  for 0.3 s after a drop or leave. The hover point now includes the visual viewport's offset
+  (pinch zoom).
+- **[verify] Flyout sidebar over a page with a right panel open** (owner's bug: a blank area over
+  the page). The host merges overlapping holes into their bounding rectangle; the pill, moved left
+  by the right panel, overlapped the flyout's hole. The chrome now cuts its floating holes at the
+  flyout's edge. Other overlaps between floating holes (a popup over the pill) still merge.
+

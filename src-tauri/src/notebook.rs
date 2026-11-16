@@ -65,17 +65,64 @@ pub async fn save_notebook(s: S<'_>, notebook: String) -> Result<(), String> {
     .map_err(|_| "The notebook could not be saved.".to_string())?
 }
 
+/// A clip: the picture, and the text it shows (for the notebook's search;
+/// stored with the clip, not shown).
+#[derive(serde::Serialize)]
+pub struct Clip {
+    image: String,
+    text: String,
+}
+
+/// The text shown in a region of `tab`'s page (C23 read-back), or "".
+fn region_text(tab: TabId, rect: (f64, f64, f64, f64)) -> String {
+    let js = notebook::region_text_js(rect.0, rect.1, rect.2, rect.3);
+    let (tx, rx) = mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        let tx2 = tx.clone();
+        let mut ran = false;
+        with_host(|h| {
+            ran = true;
+            h.notebook_read(tab, &js, Box::new(move |t| drop(tx.send(t))));
+        });
+        if !ran {
+            let _ = tx2.send(None);
+        }
+    });
+    wait(rx, Duration::from_secs(4)).flatten().and_then(|t| notebook::parse_region_text(&t)).unwrap_or_default()
+}
+
+/// The page's text in the region, then the lines on-device recognition
+/// reads in the picture that the page's text does not already have (text
+/// drawn in images, canvases, video), cleaned and capped.
+fn clip_text(page: String, jpeg: &[u8]) -> String {
+    let seen = page.to_lowercase();
+    let read = snorkle_content::ocr::recognize_text(jpeg, notebook::MAX_REGION_CHARS).unwrap_or_default();
+    let extra: Vec<&str> =
+        read.lines().map(str::trim).filter(|l| !l.is_empty() && !seen.contains(&l.to_lowercase())).collect();
+    let all = if extra.is_empty() {
+        page
+    } else if page.is_empty() {
+        extra.join("\n")
+    } else {
+        format!("{page}\n{}", extra.join("\n"))
+    };
+    snorkle_core::ai::clean_multiline(&all, notebook::MAX_REGION_CHARS)
+}
+
 /// A clip of a region of `tab`'s page (a C23 report's rectangle: visual
-/// viewport CSS pixels, `vw` wide), as a `data:image/jpeg` URL. The page
-/// is shown without its view modes for a moment (black and white, hidden
-/// media, dark), so the clip has its colours and images; its appearance
-/// is left as it is.
+/// viewport CSS pixels, `vw` wide): a `data:image/jpeg` URL and the text it
+/// shows. The page's text in the region is read first; then the page is
+/// shown without its view modes for a moment (black and white, hidden
+/// media, dark), so the clip has its colours and images (its appearance is
+/// left as it is); then the picture is read by on-device text recognition
+/// (2026-11-16).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn notebook_clip(s: S<'_>, tab: u64, x: f64, y: f64, w: f64, h: f64, vw: f64) -> Result<String, String> {
+pub async fn notebook_clip(s: S<'_>, tab: u64, x: f64, y: f64, w: f64, h: f64, vw: f64) -> Result<Clip, String> {
     let tab = TabId(tab);
     capturable(&s, tab)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let page = region_text(tab, (x, y, w, h));
         snorkle_content::dispatch_main(move || with_host(|h| h.plain_page(tab, true)));
         std::thread::sleep(Duration::from_millis(PLAIN_MS));
         let (tx, rx) = mpsc::channel();
@@ -92,12 +139,31 @@ pub async fn notebook_clip(s: S<'_>, tab: u64, x: f64, y: f64, w: f64, h: f64, v
         });
         let jpeg = wait(rx, Duration::from_secs(5)).flatten();
         snorkle_content::dispatch_main(move || with_host(|h| h.plain_page(tab, false)));
-        jpeg.filter(|j| j.starts_with(&[0xFF, 0xD8, 0xFF]) && j.len() <= snorkle_content::CLIP_MAX_BYTES)
-            .map(|j| snorkle_core::storage::data_url("image/jpeg", &j))
-            .ok_or_else(|| "This part of the page can't be clipped.".to_string())
+        let jpeg = jpeg
+            .filter(|j| j.starts_with(&[0xFF, 0xD8, 0xFF]) && j.len() <= snorkle_content::CLIP_MAX_BYTES)
+            .ok_or_else(|| "This part of the page can't be clipped.".to_string())?;
+        let text = clip_text(page, &jpeg);
+        Ok(Clip { image: snorkle_core::storage::data_url("image/jpeg", &jpeg), text })
     })
     .await
     .map_err(|_| "This part of the page can't be clipped.".to_string())?
+}
+
+/// ⌥-click on a link (C23 `link` report): the linked page's title, from
+/// the start of that page fetched without cookies (`http::fetch_page_head`,
+/// `notebook::page_title`); `None` when it has none or cannot be loaded.
+/// From a non-private tab only; the address is checked again here.
+#[tauri::command]
+pub async fn notebook_link_title(s: S<'_>, tab: u64, url: String) -> Result<Option<String>, String> {
+    let tab = TabId(tab);
+    capturable(&s, tab)?;
+    let url = notebook::web_url(&url).and_then(|u| snorkle_core::Url::parse(&u).ok()).ok_or("Not a web address.")?;
+    let (tx, rx) = mpsc::channel();
+    snorkle_content::http::fetch_page_head(&url, Box::new(move |head| drop(tx.send(head))));
+    let head = tauri::async_runtime::spawn_blocking(move || wait(rx, Duration::from_secs(12)))
+        .await
+        .map_err(|_| "Couldn't load the page.".to_string())?;
+    Ok(head.flatten().and_then(|h| notebook::page_title(&h)))
 }
 
 /// The notebook's scissors: clip mode on or off in `tab`'s page (a drag
