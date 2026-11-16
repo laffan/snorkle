@@ -424,6 +424,10 @@ body.narrow #omnibox { flex: 1 1 auto; width: auto; }
 #toolbar .omni-share { position: absolute; right: 3px; top: 3px; min-width: 32px; width: 32px; height: 32px; border-radius: 16px; color: var(--muted); }
 #toolbar .omni-share:hover { color: var(--fg); }
 #toolbar .omni-share-left { right: auto; left: 3px; }
+/* With ⌥ held the copy button sends the page to the notebook: an arrow in it. */
+#copy-url .nb-arrow { display: none; }
+#copy-url.to-notebook .nb-arrow { display: inline; }
+#copy-url.to-notebook { color: var(--fg); }
 /* A field too narrow for both buttons beside the address keeps the
    address (Safari 26: container queries). */
 #omnibox { container-type: inline-size; }

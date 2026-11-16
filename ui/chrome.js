@@ -233,7 +233,7 @@
   function renderTabs() {
     refreshTabIcons(false);
     const key = JSON.stringify([
-      state.tabs.map((t) => [t.id, !!t.saved, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
+      state.tabs.map((t) => [t.id, !!t.saved, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, !!t.url && conversationSite(t), t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
       state.active,
       state.splits,
       tabIcons.version,
@@ -346,9 +346,10 @@
     // written).
     if (t.url && !t.private) {
       const later = el('button', 'later');
-      later.appendChild(svgIcon(TRAY_IN));
-      later.setAttribute('aria-label', 'Save for later');
-      later.title = 'Save for later';
+      const chat = conversationSite(t);
+      later.appendChild(svgIcon(chat ? TRAY_CHAT : TRAY_IN));
+      later.setAttribute('aria-label', chat ? 'Save this conversation for later' : 'Save for later');
+      later.title = chat ? 'Save this conversation for later (scroll through it to capture it)' : 'Save for later';
       later.addEventListener('click', (ev) => { ev.stopPropagation(); saveForLater(t.id); });
       acts.appendChild(later);
     }
@@ -508,6 +509,16 @@
   // and a bookmark ribbon.
   const TRAY_IN = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11M8 10l4 4 4-4';
   const TRAY_OUT = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3M8 7l4-4 4 4';
+  // A speech bubble above the tray: Save for Later on an AI conversation,
+  // which captures the thread as the reader scrolls (2026-11-16).
+  const TRAY_CHAT = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M9 3h6a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2l-1 2-1-2H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z';
+  // The AI conversation sites Save for Later captures (as Rust's
+  // `conversation::site_of`, which decides; this only picks the icon).
+  function conversationSite(t) {
+    let host = '';
+    try { host = new URL(t.url.full).hostname.toLowerCase(); } catch (e) { return false; }
+    return /(^|\.)(chatgpt\.com|chat\.openai\.com|claude\.ai)$/.test(host) || host === 'gemini.google.com';
+  }
   const RIBBON = 'M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z';
   const PLUS = 'M12 5v14M5 12h14';
   function svgIcon(d) {
@@ -660,7 +671,13 @@
       // "+": add pages to the saved copy by tapping links in it.
       if (it.pages) btn(PLUS, 'Add pages', () => invoke('add_later_pages', { id: it.id }).then(() => { if (narrow) setSidebar(false); }));
       btn(RIBBON, 'Bookmark', () => laterAction('bookmark_later', it.id, () => { loadBookmarks(); toast('Bookmarked.'); }));
-      btn(null, 'Delete', () => laterAction('delete_later', it.id));
+      // Deleting drops the saved copy for good: asked first, beside the card.
+      btn(null, 'Delete', () => {
+        const name = it.title || it.host || 'this page';
+        askConfirm(`Delete “${name}” from Saved for Later? Its saved copy is removed.`, 'Delete', null,
+          () => laterAction('delete_later', it.id), null,
+          { shortcut: false, anchor: () => document.querySelector(`.later-card[data-item="${CSS.escape(it.id)}"]`) });
+      });
       card.appendChild(acts);
       list.appendChild(card);
     }
@@ -4777,11 +4794,39 @@
     navigator.clipboard.writeText(url).then(() => toast('Image address copied.'), () => toast('Could not copy (clipboard unavailable).'));
   });
 
-  // Copy: the page's committed address (from Rust's DisplayUrl).
-  $('copy-url').addEventListener('click', withTab((t) => {
+  // Copy: the page's committed address (from Rust's DisplayUrl). With ⌥
+  // (2026-11-16): the page goes to the notebook as a link instead, and
+  // while ⌥ is held the button shows an arrow (⌥ as macOS reports it
+  // whatever has focus, `option_key`, or as the chrome's own events see it).
+  let optionHeld = false;
+  function setOptionHeld(on) {
+    if (optionHeld === on) return;
+    optionHeld = on;
+    const b = $('copy-url');
+    b.classList.toggle('to-notebook', on);
+    b.setAttribute('aria-label', on ? 'Send this page to the notebook' : 'Copy this page’s address');
+    b.title = on ? 'Send this page to the notebook' : 'Copy address (⌥: send to the notebook)';
+  }
+  T.event.listen('option_key', (e) => setOptionHeld(!!e.payload));
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Alt') setOptionHeld(true); }, true);
+  document.addEventListener('keyup', (ev) => { if (ev.key === 'Alt') setOptionHeld(false); }, true);
+  for (const type of ['pointerenter', 'pointermove']) {
+    $('copy-url').addEventListener(type, (ev) => setOptionHeld(ev.altKey && !ev.metaKey && !ev.ctrlKey));
+  }
+  window.addEventListener('blur', () => setOptionHeld(false));
+  $('copy-url').addEventListener('click', (ev) => {
+    const t = activeTab();
+    if (!t) return;
     if (!t.url) { toast('Open a page to copy its address.'); return; }
+    if (ev.altKey || optionHeld) {
+      if (t.private) { toast('Private tabs don’t send anything to the notebook.'); return; }
+      if (!notebook) return;
+      notebook.addQuote({ kind: 'page', url: t.url.full, title: t.title || t.url.registrable });
+      toast(notebookShown() ? 'Page added to the notebook.' : 'Page sent to the notebook.');
+      return;
+    }
     navigator.clipboard.writeText(t.url.full).then(() => toast('Address copied.'), () => toast('Could not copy (clipboard unavailable).'));
-  }));
+  });
 
   // Share: the system share sheet for this page, pointing at the button.
   $('share').addEventListener('click', withTab((t) => {

@@ -104,7 +104,7 @@ pub fn go_forward(s: S<'_>, tab: u64) {
 
 #[tauri::command]
 pub fn reload(s: S<'_>, tab: u64) {
-    with_browser(&s, |b| b.reload(TabId(tab)));
+    with_browser(&s, |b| b.reload_by_user(TabId(tab), now_ms()));
 }
 
 #[tauri::command]
@@ -941,6 +941,22 @@ pub fn set_pull_to_refresh(on: bool) {
 #[tauri::command]
 pub fn focus_chrome() {
     snorkle_content::dispatch_main(|| with_host(|h| h.focus_chrome()));
+}
+
+/// The pointer entered (`on`) or left the notebook: keyboard focus follows
+/// it there and back (`Host::hover_focus`; macOS). Whether the chrome has
+/// focus now.
+#[tauri::command]
+pub async fn hover_focus(on: bool) -> Result<bool, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        let mut got = false;
+        with_host(|h| got = h.hover_focus(on));
+        let _ = tx.send(got);
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or(false))
+        .await
+        .map_err(|_| "Request failed.".to_string())
 }
 
 /// Page zoom from the ⋯ menu (`step`: in, out or reset). The core picks

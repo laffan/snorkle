@@ -1054,3 +1054,22 @@ The live sites were not reachable or not signed in from this environment.
   console (Record on): the clip report arriving in the chrome, the region, the page text length,
   the picture's size or its failure, and recognition's result or time-out.
 
+## Round 6: small changes before the end of the session (2026-11-16)
+
+- **[decide] Drawing without a pencil.** Only a pencil draws now; a mouse or trackpad drag pans
+  (holding still first selects, as a finger does). On a Mac nothing draws ink any more; the eraser
+  and lasso tools still work with a mouse when chosen. A modifier (for example ⇧-drag to draw)
+  could bring drawing back to the Mac if wanted.
+- **[verify] Focus follows the pointer over the notebook** (macOS only). Entering takes keyboard
+  focus from a page (remembered) unless a text field elsewhere in the chrome (the address bar,
+  find, chat) is being typed in; leaving gives it back unless something else was clicked
+  meanwhile, or a typed note is still open (it keeps the focus until done). A printable key over
+  the canvas begins a note at the pointer; on iPadOS (no way to find the first responder to give
+  back) focus does not follow the pointer. Assumed: WebKit gives the chrome pointer events with
+  the right `pointerType` (`mouse`) for a trackpad on macOS.
+- **[verify] ⌥ on the copy button.** macOS reports ⌥ from a flags-changed monitor, so the arrow
+  shows while ⌥ is held whatever has focus; on iPadOS only the chrome's own key and pointer events
+  show it (⌥ held while the pointer moves over the button, or with the chrome focused).
+- **[verify] Try Again.** The failed address is loaded as if typed (it goes through the policy
+  again); a certificate failure still reloads the way it did. Only checked in the core's tests.
+

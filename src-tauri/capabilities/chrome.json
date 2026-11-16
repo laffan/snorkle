@@ -57,6 +57,7 @@
     "allow-find-in-page",
     "allow-end-find",
     "allow-focus-chrome",
+    "allow-hover-focus",
     "allow-set-appearance",
     "allow-share-page",
     "allow-image-action",

@@ -1151,6 +1151,26 @@ impl Browser {
         }
         self.simple(id, Effect::Reload(id), false)
     }
+    /// Reload as the user asks for it (the reload button, ⌘R, the error
+    /// notice's Try Again; owner report 2026-11-16): a page that failed to
+    /// load (no connection, a name that did not resolve, a time-out) was
+    /// never committed by the web view, whose own reload repeats the page
+    /// before it, or nothing in a new tab. Its address (http or https, as
+    /// the notice shows it) is loaded again instead, through policy like
+    /// a typed address. Certificate failures and everything else reload as
+    /// [`Browser::reload`] does.
+    pub fn reload_by_user(&mut self, id: TabId, now: u64) -> Vec<Effect> {
+        let failed = match self.tab(id).and_then(|t| t.notice.as_ref()) {
+            Some(Notice::LoadError { url, certificate: false, .. }) => {
+                Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https"))
+            }
+            _ => None,
+        };
+        match failed {
+            Some(url) => self.navigate_trusted(id, url, now),
+            None => self.reload(id),
+        }
+    }
     pub fn stop(&mut self, id: TabId) -> Vec<Effect> {
         if let Some(t) = self.tab_mut(id) {
             t.https = HttpsUpgrade::default();

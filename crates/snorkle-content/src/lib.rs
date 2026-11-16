@@ -463,6 +463,9 @@ pub trait ContentEvents: 'static {
     /// (throttled), and `None` once it leaves that strip or stops hovering.
     /// For the sidebar's edge tab, which shows only near the pointer.
     fn edge_pointer(&self, _at: Option<(f64, f64)>) {}
+    /// ⌥ was pressed or let go, whatever has keyboard focus (macOS; the
+    /// chrome marks what ⌥ changes, as the copy button's "to notebook").
+    fn option_key(&self, _down: bool) {}
     /// Whether a main-frame download of `url` may start in `tab`
     /// (`policy::may_download`, and not too many at once). Downloads are
     /// refused unless the app implements this.

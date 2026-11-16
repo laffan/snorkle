@@ -16,9 +16,13 @@
 //! the sidebar's edge tab (pages are native views, so the chrome does not
 //! see the pointer over them).
 //!
-//! Neither can be triggered by a page: both come from the hardware via
-//! AppKit and carry only which shortcut was pressed, a tab id, or a pointer
-//! position.
+//! A local flags-changed monitor reports ⌥ being pressed or let go
+//! (2026-11-16), for the chrome's copy button, which sends the page to the
+//! notebook with ⌥.
+//!
+//! None can be triggered by a page: all come from the hardware via AppKit
+//! and carry only which shortcut was pressed, a tab id, a pointer position,
+//! or whether ⌥ is down.
 
 use std::cell::{Cell, RefCell};
 use std::ptr::NonNull;
@@ -185,6 +189,25 @@ pub fn install(
         }
     });
     if let Some(m) = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown, &keys) } {
+        monitors.push(m);
+    }
+
+    // ⌥ pressed or let go (only its changes are reported; the hardware's
+    // modifier state, nothing a page can set).
+    let ev = events.clone();
+    let option = Cell::new(false);
+    let flags = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        let e = unsafe { event.as_ref() };
+        if in_window(e) {
+            let down = e.modifierFlags().contains(NSEventModifierFlags::Option);
+            if option.replace(down) != down {
+                ev.option_key(down);
+            }
+        }
+        event.as_ptr()
+    });
+    if let Some(m) = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &flags) }
+    {
         monitors.push(m);
     }
 

@@ -76,6 +76,9 @@ impl ContentHost {
     pub unsafe fn set_chrome_view(&mut self, _view: *mut std::ffi::c_void) {}
 
     pub fn focus_chrome(&mut self) {}
+    pub fn hover_focus(&mut self, _on: bool) -> bool {
+        false
+    }
 
     pub fn set_appearance(&mut self, _appearance: crate::Appearance) {}
 

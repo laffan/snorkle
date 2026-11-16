@@ -49,6 +49,7 @@ pub const COMMANDS: &[&str] = &[
     "find_in_page",
     "end_find",
     "focus_chrome",
+    "hover_focus",
     "set_appearance",
     "share_page",
     "image_action",

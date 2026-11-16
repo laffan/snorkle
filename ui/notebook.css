@@ -11,6 +11,8 @@
   --nb-border: var(--line);
   --nb-select: var(--field);
   --nb-accent: #2f6fdb;
+  /* The red pen's ink (notebook.js RED_INK); typed notes' headings too. */
+  --nb-red: #ff5f57;
   --nb-bad: #d0342c;
   --nb-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   display: flex;
@@ -77,9 +79,10 @@
 /* Under the bar: the minimap (when shown) and the canvas, side by side;
    the trash can at the canvas's lower left. */
 .notepad-main { position: relative; flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--nb-border); }
-/* A very faint dot grid, moving with the canvas as it pans. */
+/* A very faint dot grid, moving with the canvas as it pans. A hand: a
+   mouse or trackpad pans it (only a pencil draws). */
 .notepad-canvas {
-  position: relative; flex: 1; overflow: hidden; overflow: clip; cursor: crosshair; touch-action: none;
+  position: relative; flex: 1; overflow: hidden; overflow: clip; cursor: grab; touch-action: none;
   background-image: radial-gradient(circle, color-mix(in srgb, var(--nb-dim) 30%, transparent) 1px, transparent 1.3px);
   background-size: 20px 20px;
 }
@@ -216,7 +219,7 @@
 .notepad-text:hover .notepad-link-size::after { opacity: 0.8; }
 .notepad-text-body { white-space: pre-wrap; overflow-wrap: break-word; }
 .notepad-text-line { position: relative; }
-.notepad-text-line.h1 .notepad-text-words, .notepad-text-line.h2 .notepad-text-words, .notepad-text-line.h3 .notepad-text-words { color: var(--nb-accent); }
+.notepad-text-line.h1 .notepad-text-words, .notepad-text-line.h2 .notepad-text-words, .notepad-text-line.h3 .notepad-text-words { color: var(--nb-red); }
 .notepad-text-line.h1 .notepad-text-words { font-size: 1.8em; }
 .notepad-text-line.h2 .notepad-text-words { font-size: 1.4em; }
 .notepad-text-line.h3 .notepad-text-words { font-size: 1.15em; }

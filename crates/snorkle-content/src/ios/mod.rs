@@ -569,6 +569,13 @@ impl ContentHost {
         }
     }
 
+    /// Keyboard focus following the pointer over the notebook is a macOS
+    /// feature (UIKit gives no way to find the first responder to give
+    /// focus back to): nothing changes here.
+    pub fn hover_focus(&mut self, _on: bool) -> bool {
+        false
+    }
+
     /// Saves the tab's page as a web archive (an offline copy of a pinned
     /// or bookmarked page); `done` gets its bytes, or `None` (failed, or
     /// larger than `storage::MAX_OFFLINE_COPY_BYTES`).

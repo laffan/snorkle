@@ -78,6 +78,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::find_in_page,
         commands::end_find,
         commands::focus_chrome,
+        commands::hover_focus,
         commands::set_appearance,
         commands::share_page,
         commands::image_action,
@@ -292,6 +293,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::Selection(tab, rect) => {
                 handle.emit_to(CHROME_LABEL, "selection", serde_json::json!({ "tab": tab, "rect": rect }))
             }
+            ChromeEvent::OptionKey(down) => handle.emit_to(CHROME_LABEL, "option_key", down),
             ChromeEvent::EdgePointer(at) => handle.emit_to(
                 CHROME_LABEL,
                 "edge_pointer",

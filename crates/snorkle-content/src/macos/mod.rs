@@ -133,6 +133,9 @@ pub struct ContentHost {
     holes: Holes,
     /// The chrome's own web view (Tauri's), to give it keyboard focus.
     chrome: Option<Retained<NSView>>,
+    /// What had keyboard focus before the pointer moved over the notebook
+    /// (`hover_focus`), given it back when the pointer leaves.
+    before_hover: Option<Retained<objc2_app_kit::NSResponder>>,
     /// The share sheet while it is open (AppKit does not retain it).
     sharing: Option<Retained<NSSharingServicePicker>>,
     /// Stacking order of the containers (a higher value is in front).
@@ -230,6 +233,7 @@ impl ContentHost {
             backdrop,
             holes,
             chrome: None,
+            before_hover: None,
             sharing: None,
             z: Cell::new(0),
             _monitors: monitors,
@@ -517,6 +521,34 @@ impl ContentHost {
         if let Some(v) = self.chrome.as_ref() {
             self.window.makeFirstResponder(Some(v));
         }
+    }
+
+    /// Keyboard focus follows the pointer over the notebook (owner request
+    /// 2026-11-16): `on`, the chrome's web view becomes first responder and
+    /// what had focus (a page) is remembered; off, that is given focus
+    /// again if the chrome still has it (no click elsewhere meanwhile) and
+    /// it is still in the window. Returns whether the chrome has focus.
+    pub fn hover_focus(&mut self, on: bool) -> bool {
+        let Some(chrome) = self.chrome.clone() else { return false };
+        let chrome_has = |w: &NSWindow| {
+            w.firstResponder().is_some_and(|r| r.downcast_ref::<NSView>().is_some_and(|v| v.isDescendantOf(&chrome)))
+        };
+        if on {
+            if !chrome_has(&self.window) {
+                self.before_hover = self.window.firstResponder();
+                self.window.makeFirstResponder(Some(&chrome));
+            }
+            return chrome_has(&self.window);
+        }
+        if let Some(prev) = self.before_hover.take() {
+            let in_window = prev
+                .downcast_ref::<NSView>()
+                .is_some_and(|v| v.window().is_some_and(|w| Retained::as_ptr(&w) == Retained::as_ptr(&self.window)));
+            if in_window && chrome_has(&self.window) {
+                self.window.makeFirstResponder(Some(&prev));
+            }
+        }
+        chrome_has(&self.window)
     }
 
     /// Saves the tab's page as a web archive (offline copy).

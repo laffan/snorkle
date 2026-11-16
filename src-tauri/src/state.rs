@@ -84,6 +84,8 @@ pub enum ChromeEvent<'a> {
     /// The image menu for an image in a tab's page (its URL, and where).
     /// The pointer near the window's left edge (`None`: away).
     EdgePointer(Option<(f64, f64)>),
+    /// ⌥ pressed or let go (macOS, `ContentEvents::option_key`).
+    OptionKey(bool),
     /// `None`: close it (the page was touched or scrolled).
     ImageMenu(TabId, Option<(&'a str, snorkle_core::selection::SelectionRect)>),
     /// Console entries were removed (cleared, or the private session ended).
@@ -763,6 +765,9 @@ impl ContentEvents for Events {
     fn edge_pointer(&self, at: Option<(f64, f64)>) {
         (self.shared.emit)(ChromeEvent::EdgePointer(at));
     }
+    fn option_key(&self, down: bool) {
+        (self.shared.emit)(ChromeEvent::OptionKey(down));
+    }
     fn note(&self, text: &str) {
         self.shared.log(console::Level::Info, None, text);
     }
@@ -794,7 +799,7 @@ impl ContentEvents for Events {
         }
     }
     fn reload_requested(&self, tab: TabId) {
-        self.apply(|b| b.reload(tab));
+        self.apply(|b| b.reload_by_user(tab, now_ms()));
     }
     fn may_download(&self, tab: TabId, url: &Url) -> bool {
         let shared = &self.shared;

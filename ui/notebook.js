@@ -6,10 +6,10 @@
 // chrome (chrome.js) hosts it and brings things in from pages.
 //
 // What is the same as in zotero-helper: one continuous surface — a slim bar
-// of tools over a canvas with a faint dot grid that pans. The pen (a Pencil,
-// or the mouse with a drag) writes in the theme's ink or in red; a finger,
-// a wheel or a trackpad pans; held still for half a second any press draws
-// a lasso, which selects strokes and links (framed, with Delete; dragged to
+// of tools over a canvas with a faint dot grid that pans. The pen (a Pencil
+// only, since 2026-11-16) writes in the theme's ink or in red; a finger, a
+// mouse or trackpad drag, or a wheel pans; held still for half a second any
+// press draws a lasso, which selects strokes and links (framed, with Delete; dragged to
 // move; ⌫ deletes, Escape lets go). The eraser takes out what it passes
 // over. Two taps (or a double-click) on the bare canvas type a note in
 // Markdown. Links are chips: dragged, tapped to go to their place, held (or
@@ -1012,7 +1012,7 @@
       setTimeout(() => { if (open === o && document.activeElement !== ta) focus(); }, 20);
     }
 
-    function create(cx, cy) {
+    function create(cx, cy, text = '') {
       const r = env.host.getBoundingClientRect();
       const pan = env.pan();
       const p = env.place();
@@ -1023,7 +1023,7 @@
         y: Math.round(cy - r.top - pan.y),
         target: { kind: 'page', url: p && p.url, title: p && p.title },
         w: room < TEXT_MAX_W ? Math.round(Math.max(TEXT_MIN_W, room)) : undefined,
-      }, '');
+      }, text);
     }
 
     function edit(l) {
@@ -1120,6 +1120,14 @@
       commit,
       editing: () => (open && open.link ? open.link.id : null),
       bareTap(cx, cy) { if (second('', cx, cy)) create(cx, cy); },
+      // A key typed over the canvas: a note where the pointer is, begun
+      // with it (or the note being typed, if one is open).
+      typeAt(cx, cy, text) {
+        if (!open) { create(cx, cy, text); return; }
+        focus();
+        ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end');
+        fit();
+      },
       tap(l, on, cx, cy) {
         const box = on && on.closest('[data-task]');
         const ticked = box ? toggleTask(l.text || '', Number(box.dataset.task)) : null;
@@ -1155,7 +1163,7 @@
   // ---- the canvas (surface.ts) ------------------------------------------------------------
 
   const PEN_WIDTH = 2;
-  const RED_INK = '#ff5f57';
+  const RED_INK = '#ff5f57'; // also notebook.css --nb-red (typed notes' headings)
   const HIT_PX = 12;
   const TAP_PX = 6;
   const STILL_PX = 4;
@@ -1558,7 +1566,11 @@
         lasso.clear();
         cleared = true;
       }
-      if (e.pointerType === 'touch') {
+      // Only a pencil draws (owner request 2026-11-16): a finger, a mouse
+      // or a trackpad pans, a tap is a tap, and holding still selects (the
+      // lasso). The eraser and lasso tools, when chosen, work with a mouse.
+      const mouseTool = e.pointerType === 'mouse' && (tool === 'eraser' || tool === 'lasso');
+      if (e.pointerType === 'touch' || (e.pointerType !== 'pen' && !mouseTool)) {
         g = { ...press, kind: 'pan', panning: false, cleared };
         armHold(g);
         return;
@@ -1858,6 +1870,7 @@
         lasso.selectItems(strokes, links);
         env.changed();
       },
+      typeAt: (cx, cy, text) => texts.typeAt(cx, cy, text),
       // Text from elsewhere: a web address becomes a link, other text a
       // typed note, near the view's top left.
       pasteText(text) {
@@ -2510,6 +2523,49 @@
         // have): what was copied here, if anything.
         catchTimer = setTimeout(() => { if (catcher) pasted(''); }, 400);
       }
+    });
+
+    // Typing over the notebook (owner request 2026-11-16): keyboard focus
+    // follows a mouse or trackpad pointer here, and back to what had it
+    // (a page) when the pointer leaves (natively: `hover_focus`, macOS),
+    // unless a text field elsewhere in the chrome is being typed in. A
+    // printable key then begins a typed note where the pointer is; keys
+    // with ⌘ or ⌃ stay shortcuts.
+    let hovering = false;
+    let tookFocus = false;
+    let hoverAt = null;
+    const typingElsewhere = () => {
+      const a = document.activeElement;
+      return !!a && !root.contains(a) && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+    };
+    root.addEventListener('pointerenter', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      hovering = true;
+      if (typingElsewhere()) return;
+      tookFocus = true;
+      if (!root.contains(document.activeElement)) root.focus({ preventScroll: true });
+      env.invoke('hover_focus', { on: true }).then(() => {
+        if (hovering && !typingElsewhere() && !root.contains(document.activeElement)) root.focus({ preventScroll: true });
+      }).catch(() => {});
+    });
+    root.addEventListener('pointerleave', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      hovering = false;
+      hoverAt = null;
+      if (!tookFocus) return;
+      tookFocus = false;
+      // A note being typed keeps the focus (and the notebook) until done.
+      if (document.activeElement && document.activeElement.closest && document.activeElement.closest('textarea, input') && root.contains(document.activeElement)) return;
+      if (root.contains(document.activeElement)) root.blur();
+      env.invoke('hover_focus', { on: false }).catch(() => {});
+    });
+    canvas.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') hoverAt = [e.clientX, e.clientY]; });
+    root.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.isComposing || !surface || !hovering || !hoverAt) return;
+      if (e.target.closest && e.target.closest('textarea, input')) return;
+      if (e.key.length !== 1 || !e.key.trim()) return;
+      e.preventDefault();
+      surface.typeAt(hoverAt[0], hoverAt[1], e.key);
     });
 
     // ⌘Z in the notebook (not while typing a note).

@@ -73,6 +73,40 @@ fn address_bar_ignores_provisional_and_cross_origin_url_changes() {
     assert_eq!(displayed(&b, t).unwrap(), "https://evil.example/");
 }
 
+#[test]
+fn try_again_loads_the_page_that_failed() {
+    // A new tab whose first page fails (offline): nothing was committed, so
+    // the web view's reload would do nothing. Try Again loads the address.
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(t, "https://news.example/story", 0).unwrap();
+    b.on_provisional_start(t);
+    b.on_fail(t, true, NavErrorKind::Network, Some(u("https://news.example/story")), "offline");
+    assert!(matches!(b.tab(t).unwrap().notice, Some(Notice::LoadError { .. })));
+    let out = b.reload_by_user(t, 0);
+    assert!(out
+        .iter()
+        .any(|e| matches!(e, Effect::Load { tab, url } if *tab == t && url.as_str() == "https://news.example/story")));
+    assert!(b.tab(t).unwrap().notice.is_none());
+
+    // After a page that loaded, a failed link: the failed page, not the one before.
+    webkit_load(&mut b, t, "https://news.example/story");
+    let next = u("https://news.example/next");
+    b.decide_navigation(t, &next, Frame::Main, NavKind::LinkActivated, 0);
+    b.on_provisional_start(t);
+    b.on_fail(t, true, NavErrorKind::Network, Some(next), "offline");
+    let out = b.reload_by_user(t, 0);
+    assert!(out.iter().any(|e| matches!(e, Effect::Load { url, .. } if url.as_str() == "https://news.example/next")));
+    assert!(!out.iter().any(|e| matches!(e, Effect::Reload(_))));
+
+    // A certificate failure is not retried from its address; no notice: a plain reload.
+    b.on_provisional_start(t);
+    b.on_fail(t, true, NavErrorKind::Certificate, Some(u("https://news.example/x")), "bad certificate");
+    assert!(!b.reload_by_user(t, 0).iter().any(|e| matches!(e, Effect::Load { .. })));
+    webkit_load(&mut b, t, "https://news.example/story");
+    assert!(b.reload_by_user(t, 0).iter().any(|e| matches!(e, Effect::Reload(_))));
+}
+
 // ---- HTTPS-first -----------------------------------------------------------
 
 #[test]
