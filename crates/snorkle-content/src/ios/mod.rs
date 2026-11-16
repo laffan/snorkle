@@ -453,6 +453,70 @@ impl ContentHost {
         }
     }
 
+    /// Notebook (2026-11-15): a JPEG of a region of `tab`'s page as its
+    /// view draws it now (`rect` in the page's visual-viewport CSS pixels,
+    /// `vw` that viewport's width, from a C23 report; `crate::clip_rect`),
+    /// drawn by the app from its own web view, at most `CLIP_MAX_WIDTH`
+    /// points wide. `None` without a live view or if WebKit cannot draw it.
+    pub fn clip_region(&mut self, tab: TabId, rect: (f64, f64, f64, f64), vw: f64, done: crate::ThumbDone) {
+        let Some(v) = self.views.get(&tab) else {
+            done(None);
+            return;
+        };
+        let b = v.web.bounds();
+        let Some((x, y, w, h)) = crate::clip_rect(rect, vw, (b.size.width, b.size.height)) else {
+            done(None);
+            return;
+        };
+        let done = RefCell::new(Some(done));
+        unsafe {
+            let cfg = objc2_web_kit::WKSnapshotConfiguration::new(self.mtm);
+            cfg.setRect(CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)));
+            cfg.setSnapshotWidth(Some(&objc2_foundation::NSNumber::new_f64(w.min(crate::CLIP_MAX_WIDTH))));
+            let block = RcBlock::new(move |image: *mut UIImage, _err: *mut NSError| {
+                let jpeg = image
+                    .as_ref()
+                    .and_then(|i| i.jpeg_representation(crate::CLIP_QUALITY))
+                    .map(|d| d.to_vec())
+                    .filter(|d| d.len() <= crate::CLIP_MAX_BYTES);
+                if let Some(f) = done.borrow_mut().take() {
+                    f(jpeg);
+                }
+            });
+            v.web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
+        }
+    }
+
+    /// Runs constant notebook code (`snorkle_core::notebook`: clip mode,
+    /// the quote button's marker) in `tab`'s page, client world, main frame.
+    pub fn notebook_run(&mut self, tab: TabId, source: &str) {
+        if let Some(v) = self.views.get(&tab) {
+            injection::run_now(self.mtm, &v.web, source);
+        }
+    }
+
+    /// Reads the sentence under the notebook's quote button when it is let
+    /// go (`snorkle_core::notebook::drop_js`, C23).
+    pub fn notebook_read(&mut self, tab: TabId, source: &str, done: crate::TextDone) {
+        match self.views.get(&tab) {
+            Some(v) => injection::read_now(self.mtm, &v.web, source, done),
+            None => done(None),
+        }
+    }
+
+    /// A page shown without its view modes (`on`), or with them again, for
+    /// a notebook clip: the styles only, its appearance left as it is (so
+    /// a dark page is not hidden while its detector waits for it).
+    pub fn plain_page(&mut self, tab: TabId, on: bool) {
+        let Some(v) = self.views.get(&tab) else { return };
+        if on {
+            injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::plain_js());
+        } else {
+            let view = self.injections.view_for(tab);
+            injection::run_now(self.mtm, &v.web, &view.apply_js);
+        }
+    }
+
     /// ⋯ → Open in App: offers the page's address (http/https, from the
     /// core) to the app that claims it, with UIKit's "universal links only"
     /// option, so nothing opens if no installed app claims it (no browser,
@@ -645,9 +709,9 @@ impl ContentHost {
         crate::webkit::downloads::answer_frame(ask, allow);
     }
 
-    /// Light, dark or the system's appearance for the whole window: the
-    /// chrome, system UI it presents and content views (a content view in
-    /// dark pages mode keeps its own dark override).
+    /// Light, dark or the system's appearance for the window: the chrome
+    /// and the system UI it presents. Content views keep their own
+    /// override (light, or dark in dark pages mode; `set_dark`).
     /// Settings → General → Swipe between pages (also future views, through
     /// `crate::swipe_navigation`).
     pub fn set_swipe_navigation(&mut self, on: bool) {
@@ -686,6 +750,12 @@ impl ContentHost {
     /// and whether they are suspended (the editor is recording a key).
     pub fn set_shortcuts(&mut self, bindings: Vec<crate::KeyBinding>, suspend: bool) {
         menu::set_bindings(self.mtm, bindings, suspend);
+    }
+
+    /// Text editing began or ended (`crate::set_text_editing`, already
+    /// set): the arrow-key shortcuts are offered again or withdrawn.
+    pub fn text_editing_changed(&mut self) {
+        menu::text_editing_changed(self.mtm);
     }
 
     /// The view controller to present system UI from: the window's root,
@@ -1218,8 +1288,14 @@ fn apply_mask(view: &UIView, holes: &[Hole], glide: Option<f64>) {
 /// Length of the chrome's sidebar slide (CSS `.25s ease-in-out`).
 const GLIDE_SECONDS: f64 = 0.25;
 
-/// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
-/// and the default canvas); otherwise the system's.
+/// A page's appearance never follows the app's (Settings → General →
+/// Appearance, the window's interface style): without dark pages mode the
+/// view is light with a white canvas; with it, it prefers dark
+/// (`prefers-color-scheme`, the default canvas of pages that support a
+/// dark scheme) over a black canvas, so sites with a dark theme use it.
+/// (Until 2026-11-15 a view without the mode followed the window, so with
+/// the app dark, pages declaring both schemes turned dark and pages with
+/// no background of their own were drawn on the system's black.)
 fn set_light(web: &WKWebView) {
     let color = UIColor::whiteColor();
     web.setOpaque(false);
@@ -1229,12 +1305,16 @@ fn set_light(web: &WKWebView) {
 }
 
 fn set_dark(web: &WKWebView, dark: bool) {
+    if !dark {
+        set_light(web);
+        return;
+    }
     // Set the native canvas before navigation can create its first document.
-    let color = if dark { UIColor::blackColor() } else { UIColor::systemBackgroundColor() };
+    let color = UIColor::blackColor();
     web.setOpaque(false);
     web.setBackgroundColor(Some(&color));
     unsafe { web.scrollView() }.setBackgroundColor(Some(&color));
-    web.setOverrideUserInterfaceStyle(if dark { UIUserInterfaceStyle::Dark } else { UIUserInterfaceStyle::Unspecified });
+    web.setOverrideUserInterfaceStyle(UIUserInterfaceStyle::Dark);
 }
 
 /// A popover source rectangle from the chrome (window coordinates), made

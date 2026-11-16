@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>Snorkle</title>
   <link rel="stylesheet" href="chrome.css">
+  <link rel="stylesheet" href="notebook.css">
+  <script src="notebook.js" defer></script>
   <script src="chrome.js" defer></script>
 </head>
 <body>
@@ -44,6 +46,8 @@
     </div>
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <!-- The Notebook (right panel): one notebook for every page. -->
+      <button id="notebook-btn" class="icon" aria-label="Notebook" title="Notebook" aria-pressed="false" aria-controls="notebook"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v18M12.5 8h3.5M12.5 11.5h3.5"/></svg></button>
       <button id="later-btn" class="icon" aria-label="Saved for later" title="Saved for later" aria-pressed="false" aria-controls="later-view" hidden><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11M8 10l4 4 4-4"/></svg></button>
       <span class="spacer"></span>
       <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><g class="sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g><path class="moon" d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg></button>
@@ -324,7 +328,7 @@
           <div class="option">
             <div>
               <div class="option-title">Appearance</div>
-              <div class="muted small">The browser's own colours, menus and keyboard. Pages follow it too when they have a dark theme (dark pages mode is separate).</div>
+              <div class="muted small">The browser's own colours, menus and keyboard. Pages are not affected: dark pages mode (the moon button) is what lets sites show their dark themes.</div>
             </div>
             <select id="appearance" aria-label="Appearance">
               <option value="system">System</option>
@@ -600,6 +604,10 @@
     <ol id="outline-list" class="outline-list"></ol>
   </aside>
 
+  <!-- The Notebook (notebook.js), docked right of the page with the other
+       right panels: ink, typed notes, quotes and clips from any page. -->
+  <aside id="notebook" class="sheet" aria-label="Notebook" hidden></aside>
+
   <!-- AI chat about the current page, docked right of the page. Replies
        are model output: textContent only. -->
   <aside id="chat" class="sheet chat" aria-labelledby="chat-title" hidden>
@@ -626,6 +634,12 @@
   </aside>
 
   <!-- Over the text selected on a page (cut out of the page, like the pill). -->
+  <!-- ⌥-click on text or an image in a page (C23): one button above it.
+       What it sends is read only when it is pressed. -->
+  <div id="nb-pop" class="sel-pop" role="menu" aria-label="Notebook" hidden>
+    <button id="nb-send" class="nb-send" role="menuitem">Send to Notebook</button>
+  </div>
+
   <div id="sel-pop" class="sel-pop" role="menu" aria-label="Selected text" hidden>
     <button id="sel-google" role="menuitem">Google This</button>
     <button id="sel-ask" role="menuitem">Ask AI</button>

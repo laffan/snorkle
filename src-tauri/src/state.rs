@@ -88,6 +88,11 @@ pub enum ChromeEvent<'a> {
     ImageMenu(TabId, Option<(&'a str, snorkle_core::selection::SelectionRect)>),
     /// Console entries were removed (cleared, or the private session ended).
     ConsoleReset,
+    /// A tab's page gained (`true`) or lost a focused text field (C19).
+    PageEditing(TabId, bool),
+    /// A notebook capture asked for in a tab's page (C23): ⌥-click on text
+    /// or an image, ⌥-drag or a clip-mode drag, or clip mode left there.
+    NotebookPick(TabId, snorkle_core::notebook::Report),
     /// Save for Later: how far saving a tab ("save") or adding pages to a
     /// saved one ("add") is, in percent.
     LaterProgress(TabId, &'static str, u8),
@@ -629,6 +634,18 @@ impl ContentEvents for Events {
     }
     fn selection(&self, tab: Option<TabId>, body: String) {
         let Some(tab) = tab else { return };
+        if let Some(on) = snorkle_core::selection::parse_edit_report(&body) {
+            (self.shared.emit)(ChromeEvent::PageEditing(tab, on));
+            return;
+        }
+        // The notebook's watcher (C23) posts to the same handler.
+        if snorkle_core::notebook::is_report(&body) {
+            match snorkle_core::notebook::parse_report(&body) {
+                Some(r) => (self.shared.emit)(ChromeEvent::NotebookPick(tab, r)),
+                None => self.shared.log(console::Level::Warn, Some(tab), "notebook: malformed report ignored"),
+            }
+            return;
+        }
         // The image watcher (C21) posts to the same handler.
         if snorkle_core::imagemenu::is_image_report(&body) {
             if snorkle_core::imagemenu::is_hide_report(&body) {

@@ -894,3 +894,73 @@ and backgrounds that change after load. Live NASA verification is pending.
   13,977 generic hiding selectors apply on those sites. Not found to break Docs; emulating the
   exemption would mean an `unless-domain` list on the generic `css-display-none` rules. Not
   changed.
+
+## Notebook, conversations, dark pages, arrow shortcuts (2026-11-15)
+
+Nothing in this round was built for or run on Apple hardware. The chrome's new UI (Notebook,
+confirmation placement) was exercised in Chromium with a mocked Tauri bridge; the page scripts
+(Notebook watcher, conversation capture, dark-page detector) in Chromium against synthetic pages.
+The live sites were not reachable or not signed in from this environment.
+
+- **[verify] Pages no longer follow the app's appearance.** A content view without dark pages
+  mode is now forced light (`overrideUserInterfaceStyle` Light / `NSAppearanceNameAqua`) with a
+  white canvas; before, it inherited the window's style and, on iPadOS, drew
+  `systemBackgroundColor` (black in dark appearance) under pages without a background of their
+  own. Check with Settings → Appearance → Dark and dark pages off: plain pages are white, sites
+  with a dark theme are light.
+- **[verify] Dark pages mode gives sites their dark theme first.** Turning the moon on for a
+  loaded page sets the view's dark appearance a moment before the detector runs; the detector
+  now waits (≤ 0.6 s, page hidden) for `prefers-color-scheme: dark` to match, and re-checks when
+  the preference changes, when the root's or body's class/style/theme attributes change, and
+  after their colour transitions end. Assumed: WebKit fires the `MediaQueryList` change event in
+  a page when the web view's appearance changes. A site that reads the preference only once at
+  load still needs a reload. `<meta name="color-scheme">` now counts as opting in.
+- **[verify] ⌘← / ⌘→ / ⌘↑ / ⌘↓.** iPadOS: the arrow key commands use UIKit's
+  `UIKeyInput…Arrow` inputs with priority over system behaviour; they are withdrawn from
+  `keyCommands` while text is being edited (a page's focused field, reported by the selection
+  watcher, or the chrome's), so text fields keep ⌘← (line start) and the others. Assumed: UIKit
+  asks `keyCommands` again after the cache is cleared (it is rebuilt on the next key press), and
+  `document.hasFocus()` in a page is false while another view is first responder. macOS: the
+  key monitor maps key codes 123–126 and lets arrow bindings through while editing. A focused
+  frame (`<iframe>`) counts as editing (its inside is not visible to the watcher), so ⌘← does not
+  go back while an embedded frame has focus. On a page with no field focused, ⌘↑ / ⌘↓ now
+  detach/attach the URL bar instead of scrolling to the top/bottom (owner request).
+- **[decide] AI conversations (Save for Later on chatgpt.com, claude.ai, gemini.google.com).**
+  The saved copy is a page of the conversation's turns rebuilt from the rendered document, not
+  the site's app. Asking the site for a share link was not done: it publishes the conversation
+  on the provider's servers and the shared page is the same kind of app. Selectors (ChatGPT
+  `[data-message-author-role]` or its "You said:/ChatGPT said:" labels; Claude
+  `[data-testid="transcript-row"]` with `user-message` / `assistant-message`; Gemini
+  `user-query` / `model-response`) come from two open-source exporters updated in October 2026
+  (tronicum/inkpour, 123tervil/AI-Conversation-Exporter) and will break when the sites change;
+  then the copy falls back to WebKit's copy of the live document with scripts off. The capture
+  scrolls the thread (up to 20 s loading earlier turns, then about 0.25 s per 80% of a screen,
+  75 s in all), since ChatGPT and Claude keep only the turns in view in the document; the reader
+  sees the thread scroll, and the tab closes as before. Not captured: collapsed reasoning,
+  Claude's artifacts panel, files that are not images, images over 1.5 MB (5 MB in all) held as
+  `blob:` URLs. Images held as http(s) URLs come from WebKit's archive when WebKit has them.
+  MathML (from KaTeX's hidden MathML) is shown by WebKit's MathML support.
+- **[verify] Notebook clips.** `takeSnapshotWithConfiguration` with `rect` is assumed to take the
+  rectangle in the web view's bounds coordinates, top-left origin on both platforms (AppKit's
+  `WKWebView` is flipped); the page reports visual-viewport CSS pixels, converted with
+  `bounds.width / visualViewport.width`, which is assumed to hold under the iPadOS page-scale
+  transform and pinch zoom. For a clip the page is shown without its view modes for 0.32 s
+  (black and white, hidden media and the dark inversion are removed; the appearance is not
+  changed), which is visible as a brief flash; lazy images that never loaded stay empty.
+- **[verify] ⌥-click and ⌥-drag in pages.** The watcher uses pointer events with `altKey`. On
+  macOS, ⌥-click on a link would download it in Safari; here it is cancelled (capture-phase
+  handlers in the client world) and picks the link's sentence. Pages that handle ⌥ themselves
+  (editors, maps) lose ⌥-click and ⌥-drag to the notebook. On iPadOS this needs a hardware
+  keyboard; touch alone has no ⌥ (the notebook's scissors work with a finger). Assumed:
+  `Intl.Segmenter` (sentence) and `document.caretRangeFromPoint` are available in WebKit 26.
+- **[decide] Notebook and private tabs.** Nothing from a private tab is captured (quotes, clips,
+  the quote button), and strokes written while a private tab is shown keep no address. The
+  notebook itself stays usable in private browsing.
+- **[decide] Notebook size.** The whole notebook is one JSON file (clips inline, two JPEGs each),
+  written a moment after each change once the pen pauses, refused over 64 MB. A notebook of a
+  few hundred clips will make each save slow; splitting images into their own files would fix
+  that if it matters.
+- **[gap] Notebook vs zotero-helper.** Not ported: the floating, edge-docked window and its icon
+  (it lives in the right panel), auto-shift (a PDF two-page mode), Apple Pencil double-tap
+  (no UIKit `UIPencilInteraction` reaches the chrome's web view). The scroll link follows the
+  page shown (it glides to what was written about the current address) instead of PDF pages.

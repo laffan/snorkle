@@ -301,9 +301,23 @@ pub const DARK_CSS: &str = concat!(
 /// Decides whether the page is light (then marks the root `snorkle-dark`).
 /// The page's own background: the root's, else the body's; if both are
 /// transparent, the canvas, which is dark only when the page opts into a
-/// dark color scheme and the web view prefers dark (dark mode also sets
-/// that, so sites with their own dark theme use it and are left alone).
+/// dark color scheme (CSS `color-scheme`, or `<meta name="color-scheme">`)
+/// and the web view prefers dark (dark mode also sets that, so sites with
+/// their own dark theme use it and are left alone).
 /// Runs at document end, on load and once more 1.5 s later. Constant code.
+///
+/// Sites get the chance to show their own dark theme first (2026-11-15):
+/// - When dark mode is turned on for a loaded page, the web view's dark
+///   appearance reaches the page a moment after this script; until
+///   `prefers-color-scheme: dark` matches (at most 0.6 s) the first check
+///   waits, with the page hidden by [`DARK_CSS`], so a site that switches
+///   to its dark theme is never inverted on the way.
+/// - Later changes of the preference, of the root's or the body's
+///   `class`, `style` or theme attributes (sites that apply their theme
+///   from a script after loading), and the end of a colour transition on
+///   either are checked again within 0.12 s (changes that only touch this
+///   script's own `snorkle-*` classes are ignored), so a page that turns
+///   dark after it was found light is shown as it is.
 ///
 /// It also marks each video's frame with [`MEDIA_BOX_ATTR`] (see
 /// [`DARK_CSS`]): the nearest ancestor whose box matches the video's to
@@ -323,8 +337,9 @@ if(document.body){var body=lum(getComputedStyle(document.body).backgroundColor);
 var light=0,dark=0;[0.25,0.5,0.75].forEach(function(x){[0.25,0.5,0.75].forEach(function(y){var e=document.elementFromPoint(innerWidth*x,innerHeight*y);\
 for(var i=0;e&&i<16;i++,e=e.parentElement){if(/^(IMG|VIDEO|CANVAS|SVG|IFRAME)$/.test(e.tagName))continue;var v=lum(getComputedStyle(e).backgroundColor);if(v!==null){if(v>0.5)light++;else dark++;break;}}});});\
 if(light+dark>=3)l=light>=dark?1:0;\
-if(l===null){var cs=String(getComputedStyle(d).colorScheme||'');l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
-flips(l>0.5);d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);boxes(full!==false);d.classList.add('snorkle-dark-checked');}\
+if(l===null){var cs=String(getComputedStyle(d).colorScheme||''),mt=document.querySelector(\"meta[name='color-scheme' i]\");if(mt)cs+=' '+mt.content;\
+l=(/dark/.test(cs)&&matchMedia('(prefers-color-scheme: dark)').matches)?0:1;}\
+flips(l>0.5);d.classList.toggle('snorkle-dark',l>0.5);d.classList.toggle('snorkle-dark-bg',root===null);boxes(full!==false);watch();d.classList.add('snorkle-dark-checked');}\
 if(window.__snorkleDark){window.__snorkleDark.check();return;}\
 var BOX='data-snorkle-media-box',marked=[],timer=0,hosts=[];\
 function videos(full){var out=[].slice.call(document.querySelectorAll('video'));\
@@ -350,14 +365,28 @@ want=want.filter(function(w){var bad=gone.indexOf(w[1])>=0||fixed.some(function(
 flipped.forEach(function(e){if(want.indexOf(e)<0)e.removeAttribute(FLIP);});\
 want.forEach(function(e){if(!e.hasAttribute(FLIP))e.setAttribute(FLIP,'');});flipped=want;}\
 function later(){if(!timer)timer=setTimeout(function(){check(false);},500);}\
+function soon(){if(!timer)timer=setTimeout(function(){check(false);},120);}\
 function onMeta(e){if(e.target&&e.target.tagName==='VIDEO')later();}\
 var obs=new MutationObserver(later);obs.observe(document,{childList:true,subtree:true});\
-document.addEventListener('loadedmetadata',onMeta,true);window.addEventListener('resize',later);\
-window.__snorkleDark={check:check,stop:function(){obs.disconnect();clearTimeout(timer);\
-document.removeEventListener('loadedmetadata',onMeta,true);window.removeEventListener('resize',later);\
+function own(v){return String(v||'').split(/\\s+/).filter(function(c){return c&&c.indexOf('snorkle-')!==0;}).sort().join(' ');}\
+var seen=null,aobs=new MutationObserver(function(l){for(var i=0;i<l.length;i++){var m=l[i];\
+if(m.attributeName!=='class'||own(m.oldValue)!==own(m.target.getAttribute('class'))){soon();return;}}});\
+function watch(){var b=document.body;if(b===seen)return;seen=b;aobs.disconnect();\
+var o={attributes:true,attributeOldValue:true,attributeFilter:['class','style','data-theme','data-color-mode','data-color-scheme','data-mode','theme']};\
+aobs.observe(document.documentElement,o);if(b)aobs.observe(b,o);}\
+function onTr(e){var t=e.target;if((t===document.documentElement||t===document.body)&&/background|color/.test(e.propertyName||''))soon();}\
+var mq=window.matchMedia?matchMedia('(prefers-color-scheme: dark)'):null;\
+function onScheme(){clearTimeout(timer);timer=0;soon();}\
+if(mq&&mq.addEventListener)mq.addEventListener('change',onScheme);\
+document.addEventListener('loadedmetadata',onMeta,true);document.addEventListener('transitionend',onTr,true);window.addEventListener('resize',later);\
+window.__snorkleDark={check:check,stop:function(){obs.disconnect();aobs.disconnect();clearTimeout(timer);\
+document.removeEventListener('loadedmetadata',onMeta,true);document.removeEventListener('transitionend',onTr,true);window.removeEventListener('resize',later);\
+if(mq&&mq.removeEventListener)mq.removeEventListener('change',onScheme);\
 marked.forEach(function(e){e.removeAttribute(BOX);});marked=[];\
 flipped.forEach(function(e){e.removeAttribute(FLIP);});flipped=[];}};\
-check();window.addEventListener('load',check);window.addEventListener('pageshow',check);window.addEventListener('pagehide',function(){document.documentElement.classList.remove('snorkle-dark-checked');});setTimeout(check,1500);})();";
+function first(){if(!mq||mq.matches||!mq.addEventListener){check();return;}var done=false;\
+function go(){if(done)return;done=true;mq.removeEventListener('change',go);check();}mq.addEventListener('change',go);setTimeout(go,600);}\
+first();window.addEventListener('load',check);window.addEventListener('pageshow',check);window.addEventListener('pagehide',function(){document.documentElement.classList.remove('snorkle-dark-checked');});setTimeout(check,1500);})();";
 
 const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}if(window.__snorkleDark&&window.__snorkleDark.stop)window.__snorkleDark.stop();delete window.__snorkleDark;})();";
 
@@ -911,6 +940,25 @@ mod tests {
             off.contains("removeEventListener('load',s.onLoad,true)")
                 && off.contains("removeAttribute(\"data-snorkle-loading\")")
         );
+    }
+
+    #[test]
+    fn dark_mode_lets_sites_show_their_own_dark_theme() {
+        // The first check waits for the dark appearance to reach the page.
+        assert!(DARK_DETECT_JS.contains("function first(){if(!mq||mq.matches"));
+        assert!(DARK_DETECT_JS.contains("setTimeout(go,600)"), "bounded wait");
+        // Theme changes made later are checked again.
+        assert!(DARK_DETECT_JS.contains("mq.addEventListener('change',onScheme)"));
+        assert!(DARK_DETECT_JS.contains("attributeFilter:['class','style','data-theme'"));
+        assert!(DARK_DETECT_JS.contains("document.addEventListener('transitionend',onTr,true)"));
+        // Its own classes do not trigger it (no loop).
+        assert!(DARK_DETECT_JS.contains("c.indexOf('snorkle-')!==0"));
+        // `<meta name="color-scheme">` counts as opting in.
+        assert!(DARK_DETECT_JS.contains("meta[name='color-scheme' i]"));
+        // Everything it starts, stop ends.
+        for off in ["aobs.disconnect()", "removeEventListener('transitionend',onTr,true)", "removeEventListener('change',onScheme)"] {
+            assert!(DARK_DETECT_JS.contains(off), "{off}");
+        }
     }
 
     #[test]

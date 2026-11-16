@@ -696,6 +696,19 @@ pub fn set_swipe_navigation(on: bool) {
     snorkle_content::dispatch_main(move || with_host(|h| h.set_swipe_navigation(on)));
 }
 
+/// Whether text is being edited with keyboard focus, in the chrome or in a
+/// page (the chrome combines its own focus with the pages' reports, C19):
+/// arrow-key shortcuts (⌘← back, …) are left to the text meanwhile. A
+/// boolean only.
+#[tauri::command]
+pub fn set_text_editing(on: bool) {
+    if snorkle_content::text_editing() == on {
+        return;
+    }
+    snorkle_content::set_text_editing(on);
+    snorkle_content::dispatch_main(|| with_host(|h| h.text_editing_changed()));
+}
+
 /// A page saved for later, as the chrome lists it.
 #[derive(Serialize)]
 pub struct LaterView {

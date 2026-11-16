@@ -50,7 +50,7 @@ define_class!(
             let cmds: Vec<Retained<UIKeyCommand>> = if super::menu::installed() || super::menu::suspended() {
                 Vec::new()
             } else {
-                (0..SHORTCUTS.len()).map(|i| super::menu::key_command(self.mtm(), i)).collect()
+                (0..SHORTCUTS.len()).filter(|i| super::menu::offered(*i)).map(|i| super::menu::key_command(self.mtm(), i)).collect()
             };
             Some(NSArray::from_retained_slice(&cmds))
         }

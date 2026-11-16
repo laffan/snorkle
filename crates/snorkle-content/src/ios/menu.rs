@@ -29,11 +29,15 @@ use objc2::runtime::{AnyClass, AnyObject, Imp, ProtocolObject, Sel};
 use objc2::{msg_send, sel, ClassType, MainThreadMarker};
 use objc2_foundation::{NSArray, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
-    UIApplication, UICommand, UIKeyCommand, UIKeyInputEscape, UIKeyModifierFlags, UIMenuBuilder, UIMenuClose,
-    UIMenuFind, UIMenuSystem, UIResponder, UIView, UIViewController, UIWindow,
+    UIApplication, UICommand, UIKeyCommand, UIKeyInputDownArrow, UIKeyInputEscape, UIKeyInputLeftArrow,
+    UIKeyInputRightArrow, UIKeyInputUpArrow, UIKeyModifierFlags, UIMenuBuilder, UIMenuClose, UIMenuFind, UIMenuSystem,
+    UIResponder, UIView, UIViewController, UIWindow,
 };
 
-use crate::{shortcut_index, ContentEvents, KeyBinding, Shortcut, MOD_ALT, MOD_CTRL, MOD_SHIFT, SHORTCUTS};
+use crate::{
+    shortcut_index, yields_to_editing, ContentEvents, KeyBinding, Shortcut, ARROW_KEYS, MOD_ALT, MOD_CTRL, MOD_SHIFT,
+    SHORTCUTS,
+};
 
 thread_local! {
     static EVENTS: RefCell<Option<Rc<dyn ContentEvents>>> = const { RefCell::new(None) };
@@ -78,6 +82,32 @@ pub fn set_bindings(_mtm: MainThreadMarker, bindings: Vec<KeyBinding>, record: b
     COMMANDS.with(|c| *c.borrow_mut() = None);
 }
 
+/// Text editing began or ended (`crate::set_text_editing`): the arrow-key
+/// shortcuts are offered only while no text is being edited, so a text
+/// field keeps ⌘← and the others (UIKit asks for `keyCommands` again).
+pub fn text_editing_changed(_mtm: MainThreadMarker) {
+    COMMANDS.with(|c| *c.borrow_mut() = None);
+}
+
+/// Whether `SHORTCUTS[index]` is offered now (not an arrow binding while
+/// text is being edited).
+pub fn offered(index: usize) -> bool {
+    BINDINGS.with(|b| b.borrow().get(index).is_some_and(|k| !yields_to_editing(k)))
+}
+
+/// The key command input for a binding's key: the key itself, or UIKit's
+/// constant for an arrow key.
+fn input_for(key: &str) -> Retained<NSString> {
+    let arrow = match key {
+        "left" => Some(unsafe { UIKeyInputLeftArrow }),
+        "right" => Some(unsafe { UIKeyInputRightArrow }),
+        "up" => Some(unsafe { UIKeyInputUpArrow }),
+        "down" => Some(unsafe { UIKeyInputDownArrow }),
+        _ => None,
+    };
+    arrow.map_or_else(|| NSString::from_str(key), objc2::Message::retain)
+}
+
 fn flags(mods: u8) -> UIKeyModifierFlags {
     let mut f = UIKeyModifierFlags::Command;
     if mods & MOD_SHIFT != 0 {
@@ -118,7 +148,7 @@ fn command(mtm: MainThreadMarker, title: Option<&str>, input: &NSString, f: UIKe
 pub fn key_command(mtm: MainThreadMarker, index: usize) -> Retained<UIKeyCommand> {
     let def = SHORTCUTS[index];
     let b = BINDINGS.with(|b| b.borrow()[index].clone());
-    command(mtm, Some(def.title), &NSString::from_str(&b.key), flags(b.mods), sel!(snorkleShortcut:), def.id)
+    command(mtm, Some(def.title), &input_for(&b.key), flags(b.mods), sel!(snorkleShortcut:), def.id)
 }
 
 /// What the app delegate offers: the shortcuts, or while recording, every
@@ -130,8 +160,9 @@ fn commands(mtm: MainThreadMarker) -> Retained<NSArray<UIKeyCommand>> {
         }
         let list: Vec<Retained<UIKeyCommand>> = if suspended() {
             let mut v = Vec::new();
-            for key in RECORD_KEYS.chars() {
-                let input = NSString::from_str(&key.to_string());
+            let keys = RECORD_KEYS.chars().map(|c| c.to_string()).chain(ARROW_KEYS.iter().map(|k| k.to_string()));
+            for key in keys {
+                let input = input_for(&key);
                 for mods in 0..8u8 {
                     v.push(command(mtm, None, &input, flags(mods), sel!(snorkleRecord:), &format!("record\t{key}\t{mods}")));
                 }
@@ -139,7 +170,7 @@ fn commands(mtm: MainThreadMarker) -> Retained<NSArray<UIKeyCommand>> {
             v.push(command(mtm, None, unsafe { UIKeyInputEscape }, UIKeyModifierFlags::empty(), sel!(snorkleRecord:), RECORD_CANCEL));
             v
         } else {
-            (0..SHORTCUTS.len()).map(|i| key_command(mtm, i)).collect()
+            (0..SHORTCUTS.len()).filter(|i| offered(*i)).map(|i| key_command(mtm, i)).collect()
         };
         let arr = NSArray::from_retained_slice(&list);
         *cache.borrow_mut() = Some(arr.clone());

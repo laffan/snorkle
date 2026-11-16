@@ -116,6 +116,13 @@
     "allow-open-later",
     "allow-add-later-pages",
     "allow-finish-adding-pages",
-    "allow-cancel-adding-pages"
+    "allow-cancel-adding-pages",
+    "allow-notebook-link-drop",
+    "allow-notebook-link-hover",
+    "allow-notebook-clip-mode",
+    "allow-notebook-clip",
+    "allow-save-notebook",
+    "allow-load-notebook",
+    "allow-set-text-editing"
   ]
 }

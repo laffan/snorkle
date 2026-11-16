@@ -108,4 +108,11 @@ pub const COMMANDS: &[&str] = &[
     "add_later_pages",
     "finish_adding_pages",
     "cancel_adding_pages",
+    "set_text_editing",
+    "load_notebook",
+    "save_notebook",
+    "notebook_clip",
+    "notebook_clip_mode",
+    "notebook_link_hover",
+    "notebook_link_drop",
 ];

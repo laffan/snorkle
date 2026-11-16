@@ -22,6 +22,7 @@
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
+use snorkle_core::conversation::{self, Site};
 use snorkle_core::later::{self, PageCapture};
 use snorkle_core::tabs::{Profile, SavedCopy, TabId};
 use snorkle_core::webarchive;
@@ -138,6 +139,65 @@ pub fn capture(tab: TabId, page_url: &str, fallback_title: &str, progress: &dyn 
     Some(PageCapture { url: page_url.to_string(), title, html, scripts, resources })
 }
 
+/// AI conversations (owner request 2026-11-15; chatgpt.com, claude.ai,
+/// gemini.google.com): the thread as a page of its own
+/// (`snorkle_core::conversation`): earlier turns loaded, the thread
+/// scrolled through so every turn is read (long threads keep only the
+/// turns in view in the document), then the reader's place restored.
+/// The page is shown with JavaScript off, with the images WebKit holds
+/// for it. Without any turn found, WebKit's copy of the live document
+/// (also with JavaScript off): the site's own HTML is an app shell that
+/// shows nothing offline.
+fn capture_conversation(
+    tab: TabId,
+    site: Site,
+    url: &Url,
+    title: &str,
+    saved_ms: u64,
+    progress: &dyn Fn(u8),
+) -> Option<PageCapture> {
+    let started = Instant::now();
+    let steps = run_js(tab, conversation::start_js(), conversation::MAX_STEP_BYTES, Duration::from_secs(30))
+        .and_then(|t| conversation::parse_steps(&t))
+        .unwrap_or(0);
+    progress(10);
+    while steps > 0 && started.elapsed() < Duration::from_secs(85) {
+        let Some((done, pct)) =
+            run_js(tab, conversation::STEP_JS.to_string(), conversation::MAX_STEP_BYTES, Duration::from_secs(15))
+                .and_then(|t| conversation::parse_step(&t))
+        else {
+            break;
+        };
+        progress(10 + (pct as u32 * 70 / 100) as u8);
+        if done {
+            break;
+        }
+    }
+    let end = run_js(tab, conversation::END_JS.to_string(), conversation::MAX_END_BYTES, Duration::from_secs(30));
+    progress(85);
+    let wk = webkit_archive(tab);
+    progress(95);
+    match end.and_then(|t| conversation::parse(&t)) {
+        Some(conv) => {
+            let resources = wk
+                .as_deref()
+                .and_then(webarchive::read_subresources)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| later::clean_url(&r.url).is_some_and(|u| conv.images.contains(&u)))
+                .collect();
+            let html = conversation::to_html(&conv, site, url, title, saved_ms);
+            Some(PageCapture { url: url.to_string(), title: title.to_string(), html, scripts: false, resources })
+        }
+        None => {
+            let bytes = wk?;
+            let main = webarchive::read_main(&bytes).filter(|m| m.data.len() <= later::MAX_PAGE_BYTES)?;
+            let resources = webarchive::read_subresources(&bytes).unwrap_or_default();
+            Some(PageCapture { url: url.to_string(), title: title.to_string(), html: main.data, scripts: false, resources })
+        }
+    }
+}
+
 /// Save for Later (blocking): a thumbnail of the tab's page in light mode,
 /// with images and in full colour (owner request 2026-11-09: view modes are
 /// taken off its loaded page and its view drawn light first; its settings
@@ -156,8 +216,12 @@ pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool
     report(8);
     let thumb = thumbnail(tab);
     report(12);
-    let capture =
-        if live { capture(tab, url.as_str(), title, &|p| report(12 + (p as u32 * 84 / 100) as u8)) } else { None };
+    let progress = |p: u8| report(12 + (p as u32 * 84 / 100) as u8);
+    let capture = match conversation::site_of(url) {
+        _ if !live => None,
+        Some(site) => capture_conversation(tab, site, url, title, wall_ms(), &progress),
+        None => capture(tab, url.as_str(), title, &progress),
+    };
     let added = store.later().add(url.as_str(), title, thumb.as_deref(), capture, wall_ms());
     match added {
         Ok(Some(_)) => {}

@@ -31,7 +31,7 @@ use objc2::{DefinedClass, MainThreadMarker};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSView, NSWindow};
 
 use super::views::Container;
-use crate::{ContentEvents, KeyBinding, MOD_ALT, MOD_CTRL, MOD_SHIFT, SHORTCUTS};
+use crate::{is_arrow, yields_to_editing, ContentEvents, KeyBinding, MOD_ALT, MOD_CTRL, MOD_SHIFT, SHORTCUTS};
 
 thread_local! {
     /// Effective binding of each `SHORTCUTS` entry (the user's or default).
@@ -46,6 +46,19 @@ thread_local! {
 const RECORD_KEYS: &str = "abcdefghijklmnopqrstuvwxyz0123456789[]\\;',./-=`";
 /// `kVK_Escape`.
 const ESCAPE: u16 = 53;
+
+/// The arrow keys' names (`crate::ARROW_KEYS`) by virtual key code
+/// (`kVK_LeftArrow` 123, `kVK_RightArrow` 124, `kVK_DownArrow` 125,
+/// `kVK_UpArrow` 126), which do not depend on the keyboard layout.
+fn arrow_name(code: u16) -> Option<&'static str> {
+    match code {
+        123 => Some("left"),
+        124 => Some("right"),
+        125 => Some("down"),
+        126 => Some("up"),
+        _ => None,
+    }
+}
 
 /// New bindings (validated, one per `SHORTCUTS` entry) and whether the
 /// editor is recording a key.
@@ -86,6 +99,9 @@ fn command_key(event: &NSEvent) -> Option<(String, u8)> {
     if flags.contains(NSEventModifierFlags::Control) {
         mods |= MOD_CTRL;
     }
+    if let Some(arrow) = arrow_name(event.keyCode()) {
+        return Some((arrow.to_string(), mods));
+    }
     let key = event.charactersByApplyingModifiers(NSEventModifierFlags::empty())?.to_string().to_ascii_lowercase();
     (key.chars().count() == 1).then_some((key, mods))
 }
@@ -98,7 +114,7 @@ fn key_down(event: &NSEvent, events: &Rc<dyn ContentEvents>) -> bool {
             return true;
         }
         return match command_key(event) {
-            Some((key, mods)) if RECORD_KEYS.contains(key.as_str()) => {
+            Some((key, mods)) if is_arrow(&key) || (key.chars().count() == 1 && RECORD_KEYS.contains(key.as_str())) => {
                 events.key_recorded(Some((key, mods)));
                 true
             }
@@ -106,7 +122,9 @@ fn key_down(event: &NSEvent, events: &Rc<dyn ContentEvents>) -> bool {
         };
     }
     let Some((key, mods)) = command_key(event) else { return false };
-    let hit = BINDINGS.with(|b| b.borrow().iter().position(|k| k.key == key && k.mods == mods));
+    // An arrow binding while text is being edited is left to the text
+    // (⌘← to the line's start, and so on): not consumed.
+    let hit = BINDINGS.with(|b| b.borrow().iter().position(|k| k.key == key && k.mods == mods && !yields_to_editing(k)));
     let Some(i) = hit else { return false };
     // A held key repeats; a shortcut runs once per press.
     if !event.isARepeat() {

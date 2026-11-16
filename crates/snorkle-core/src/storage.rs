@@ -100,6 +100,8 @@ pub struct Store {
     inner: Mutex<Data>,
     /// Save for Later (`later/`).
     later: crate::later::LaterStore,
+    /// One Notebook write at a time.
+    notebook_lock: Mutex<()>,
 }
 
 #[derive(Default)]
@@ -365,6 +367,7 @@ const AI_USAGE_FILE: &str = "ai-usage.json";
 const LAUNCH_MODES_FILE: &str = "view-modes.json";
 /// Settings → Blocked: patterns and the message.
 const BLOCKED_FILE: &str = "blocked.json";
+const NOTEBOOK_FILE: &str = "notebook.json";
 /// AI requests remembered for the usage table (oldest dropped first).
 pub const MAX_AI_USAGE_EVENTS: usize = 20_000;
 
@@ -489,6 +492,7 @@ impl Store {
         let next_download = downloads.iter().map(|d| d.id).max().unwrap_or(0) + 1;
         Ok(Store {
             later: crate::later::LaterStore::open(dir.join("later"))?,
+            notebook_lock: Mutex::new(()),
             dir,
             inner: Mutex::new(Data {
                 history,
@@ -720,6 +724,27 @@ impl Store {
     }
 
     /// Save for Later.
+    /// The Notebook (`notebook.json`, owner request 2026-11-15), checked
+    /// again as it is read (`notebook::clean`); `None` when there is none
+    /// or it cannot be read.
+    pub fn notebook(&self) -> Option<String> {
+        let bytes = fs::read(self.dir.join(NOTEBOOK_FILE)).ok()?;
+        if bytes.len() > crate::notebook::MAX_NOTEBOOK_BYTES {
+            return None;
+        }
+        crate::notebook::clean(std::str::from_utf8(&bytes).ok()?)
+    }
+
+    /// Writes the Notebook as the chrome sends it, checked and rebuilt
+    /// (`notebook::clean`). `Ok(false)`: refused (not a notebook, too
+    /// large). Writes are serialised (one temporary file).
+    pub fn set_notebook(&self, json: &str) -> std::io::Result<bool> {
+        let Some(clean) = crate::notebook::clean(json) else { return Ok(false) };
+        let _one = self.notebook_lock.lock().unwrap_or_else(|e| e.into_inner());
+        atomic_write(&self.dir.join(NOTEBOOK_FILE), clean.as_bytes())?;
+        Ok(true)
+    }
+
     pub fn later(&self) -> &crate::later::LaterStore {
         &self.later
     }
@@ -1331,7 +1356,7 @@ pub fn png_data_url(png: &[u8]) -> Option<String> {
 }
 
 /// `data:<mime>;base64,…` (the caller validated the bytes).
-pub(crate) fn data_url(mime: &str, bytes: &[u8]) -> String {
+pub fn data_url(mime: &str, bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(13 + mime.len() + bytes.len().div_ceil(3) * 4);
     out.push_str("data:");
@@ -1524,6 +1549,23 @@ mod tests {
         let d = std::env::temp_dir().join(format!("snorkle-store-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn notebook_is_checked_both_ways() {
+        let dir = tmpdir("notebook");
+        let s = Store::open(&dir).unwrap();
+        assert!(s.notebook().is_none(), "none yet");
+        assert!(!s.set_notebook("[1,2]").unwrap(), "not a notebook");
+        let pad = r#"{"strokes":[],"notes":[],"links":[{"id":"l-1","x":1,"y":2,"text":"hi","target":{"kind":"page","url":"javascript:x"}}],"pan":{"x":0,"y":0}}"#;
+        assert!(s.set_notebook(pad).unwrap());
+        let back = s.notebook().unwrap();
+        assert!(back.contains("\"text\":\"hi\"") && !back.contains("javascript"));
+        // A file changed on disk is checked again as it is read.
+        fs::write(dir.join(NOTEBOOK_FILE), br#"{"links":[{"id":"x","x":1,"y":1,"image":"data:text/html;base64,AA","target":{"kind":"clip"}}]}"#).unwrap();
+        assert!(!s.notebook().unwrap().contains("text/html"));
+        fs::write(dir.join(NOTEBOOK_FILE), b"garbage").unwrap();
+        assert!(s.notebook().is_none());
     }
 
     #[test]

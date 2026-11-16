@@ -7,6 +7,7 @@ mod adblock;
 mod ai;
 mod command_list;
 pub mod commands;
+mod notebook;
 mod pins;
 mod saved;
 mod scripts;
@@ -136,6 +137,13 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::add_later_pages,
         commands::finish_adding_pages,
         commands::cancel_adding_pages,
+        notebook::load_notebook,
+        notebook::save_notebook,
+        notebook::notebook_clip,
+        notebook::notebook_clip_mode,
+        notebook::notebook_link_hover,
+        notebook::notebook_link_drop,
+        commands::set_text_editing,
     ])
 }
 
@@ -249,6 +257,20 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             }
             ChromeEvent::Headings(tab, list) => {
                 handle.emit_to(CHROME_LABEL, "headings", serde_json::json!({ "tab": tab, "headings": list }))
+            }
+            ChromeEvent::NotebookPick(tab, report) => {
+                use snorkle_core::notebook::Report;
+                let (kind, rect) = match report {
+                    Report::Text(r) => ("text", Some(r)),
+                    Report::Image(r) => ("img", Some(r)),
+                    Report::Clip(r) => ("clip", Some(r)),
+                    Report::End => ("end", None),
+                    Report::Hide => ("hide", None),
+                };
+                handle.emit_to(CHROME_LABEL, "notebook_pick", serde_json::json!({ "tab": tab, "kind": kind, "rect": rect }))
+            }
+            ChromeEvent::PageEditing(tab, on) => {
+                handle.emit_to(CHROME_LABEL, "page_editing", serde_json::json!({ "tab": tab, "on": on }))
             }
             ChromeEvent::Selection(tab, rect) => {
                 handle.emit_to(CHROME_LABEL, "selection", serde_json::json!({ "tab": tab, "rect": rect }))

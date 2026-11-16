@@ -35,6 +35,9 @@
   let scriptsOpen = false;
   let menuOpen = false;
   let chatOpen = false;
+  // The Notebook (notebook.js; remembered): docked with the right panels.
+  let notebookOpen = false;
+  let notebook = null;
   // ⌘⇧\ hides the right panels without closing them (headers mode and
   // the chat stay on, and come back with the next ⌘⇧\).
   let rightHidden = false;
@@ -115,6 +118,8 @@
     if (findOpen && find.tab !== null && find.tab !== state.active) closeFind();
     if (selection && selection.tab !== state.active && !(state.split && (selection.tab === state.split.left || selection.tab === state.split.right))) hideSelection();
     if (confirmAction && confirmAction.tab !== null && confirmAction.tab !== state.active && confirmAction.tab !== state.sheet) closeConfirm();
+    if (confirmAction && confirmAction.anchor) placeConfirm(); // its row may have been drawn again
+    notebookTrack();
     reportLayout();
   }
 
@@ -284,13 +289,14 @@
           tabsKey = '';
           renderTabs();
         });
+        head.dataset.site = key;
         const close = el('button', 'close', '×');
         close.setAttribute('aria-label', `Close all ${members.length} tabs on ${site}`);
         close.addEventListener('click', () => {
           const ids = members.map((m) => m.id);
           askConfirm(`Close ${ids.length} tabs on ${site}?`, 'Close tabs', null, async () => {
             for (const tab of ids) await invoke('close_tab', { tab });
-          }, null, { shortcut: false });
+          }, null, { shortcut: false, anchor: () => document.querySelector(`.site-heading[data-site="${CSS.escape(key)}"]`) });
         });
         const acts = el('span', 'row-actions');
         acts.appendChild(close);
@@ -1578,8 +1584,8 @@
 
   // Appearance (Settings → General): system, light or dark. The chrome's
   // colours follow `data-theme`; the host sets the window's interface
-  // style, so system UI (share sheet, keyboard) and pages that follow the
-  // system match.
+  // style, so system UI (share sheet, keyboard) matches. Pages keep their
+  // own appearance (light, or dark in dark pages mode; 2026-11-15).
   function applyAppearance(mode) {
     if (!['system', 'light', 'dark'].includes(mode)) mode = 'system';
     if (mode === 'system') delete document.documentElement.dataset.theme;
@@ -1684,6 +1690,12 @@
     if (!shown) closeMenu();
     renderSidebarMode();
     if (changed) applySidebar(true);
+    // A confirmation beside a sidebar row follows the sidebar (or goes
+    // back above the pill), once it has finished sliding.
+    if (changed && confirmAction && confirmAction.anchor) {
+      placeConfirm();
+      setTimeout(() => { if (confirmAction && confirmAction.anchor) { placeConfirm(); reportLayout(); } }, 270);
+    }
   }
 
   // Show or hide, keeping the mode.
@@ -1860,7 +1872,7 @@
   const LEAVE_MS = 150;
   let tabPointer = 'mouse';
   function sidebarBusy() {
-    return menuOpen || !$('vm-pop').hidden || !!dragState || !!resize;
+    return menuOpen || !$('vm-pop').hidden || !!dragState || !!resize || $('confirm-pop').classList.contains('anchored');
   }
   function hideFlyoutSoon() {
     clearTimeout(flyTimer);
@@ -2404,6 +2416,7 @@
     $('scripts-pop').hidden = !open;
     $('scripts-pop').classList.toggle('dock', open && !narrow);
     renderOutline();
+    applyNotebook();
     if (open) {
       $('script-editor').hidden = true;
       loadScripts();
@@ -2451,7 +2464,7 @@
     // beside the page (shrinking the content area), float over it as a
     // hole (the pill, its popup, toasts: the page is cut out there), or set
     // `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || !$('edit-modal').hidden || (scriptsOpen && narrow) || (chatShown() && narrow) || (narrow && sidebarShown);
+    const overlay = !!panel || modalOpen || !$('edit-modal').hidden || (scriptsOpen && narrow) || (chatShown() && narrow) || (notebookShown() && narrow) || (narrow && sidebarShown);
     // Docked right panels (site scripts; or the headers outline and the
     // chat, one above the other when both are open) take the right of the
     // content area, full height, at the width the user dragged.
@@ -2460,13 +2473,13 @@
     $('chrome').style.left = left + 'px';
     $('chrome').style.right = right + 'px';
     const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
-    const mid = Math.round(top + (window.innerHeight - top) / 2);
+    // Several right panels share the height, one under the other.
+    const part = (window.innerHeight - top) / Math.max(1, docks.length);
     docks.forEach((d, i) => {
-      const split = docks.length > 1;
-      d.style.top = (split && i === 1 ? mid : top) + 'px';
-      d.style.bottom = (split && i === 0 ? window.innerHeight - mid : 0) + 'px';
+      d.style.top = Math.round(top + part * i) + 'px';
+      d.style.bottom = (i === docks.length - 1 ? 0 : Math.round(window.innerHeight - top - part * (i + 1))) + 'px';
       d.style.width = right + 'px';
-      d.classList.toggle('split-lower', split && i === 1);
+      d.classList.toggle('split-lower', i > 0);
     });
     const edge = $('right-resize');
     edge.hidden = !docks.length;
@@ -2552,7 +2565,7 @@
       if (f && pill) f.h = Math.max(1, pill.y - f.y);
       if (f) out.push(f);
     }
-    for (const id of ['actions-pop', 'confirm-pop', 'pick-bar', 'sel-pop', 'img-pop', 'toast', 'os-banner']) {
+    for (const id of ['actions-pop', 'confirm-pop', 'pick-bar', 'sel-pop', 'img-pop', 'nb-pop', 'toast', 'os-banner']) {
       const e = $(id);
       if (e.hidden) continue;
       const h = hole(e, 15);
@@ -2594,11 +2607,16 @@
     const out = [];
     if (outlineShown()) out.push($('outline'));
     if (chatShown()) out.push($('chat'));
+    if (notebookShown()) out.push($('notebook'));
     return out;
   }
 
   function chatShown() {
     return chatOpen && !rightHidden;
+  }
+
+  function notebookShown() {
+    return notebookOpen && !rightHidden && !scriptsOpen;
   }
 
   // ---- ad blocking ------------------------------------------------------
@@ -3344,6 +3362,236 @@
     if (!$('chat-model-menu').hidden && !$('chat-model-menu').contains(ev.target) && ev.target !== $('chat-model-btn')) setModelMenu(false);
   });
 
+  // ---- Notebook (owner request 2026-11-15) ------------------------------------
+  //
+  // notebook.js draws it (zotero-helper's notepad); here it is docked with
+  // the right panels and fed from pages: ⌥-click on text or an image shows
+  // "Send to Notebook" above it, ⌥-drag clips a part of the page (C23), the
+  // scissors turn clip mode on in the page, and the quote button dragged
+  // onto a page links the sentence there. Nothing comes from private tabs.
+
+  function applyNotebook() {
+    const shown = notebookShown();
+    const nb = $('notebook');
+    const was = !nb.hidden;
+    nb.hidden = !shown;
+    nb.classList.toggle('dock', shown && !narrow);
+    if (!shown) nb.classList.remove('split-lower');
+    $('notebook-btn').setAttribute('aria-pressed', String(notebookOpen));
+    $('notebook-btn').classList.toggle('on', notebookOpen);
+    if (notebook && shown && !was) requestAnimationFrame(() => notebook.shown());
+    if (notebook && !shown && was) notebook.hidden();
+  }
+
+  function setNotebook(open) {
+    notebookOpen = open;
+    setPref('notebookOpen', open ? '1' : '0');
+    if (open) {
+      rightHidden = false;
+      if (scriptsOpen) setScripts(false);
+    } else if (notebook && notebook.clipping()) {
+      endClipMode();
+    }
+    applyNotebook();
+    applyChat();
+    renderOutline();
+    reportLayout();
+  }
+
+  // The tab a capture is from (the focused pane), or null with a toast.
+  function captureTab(tab) {
+    const t = state && state.tabs.find((x) => x.id === tab);
+    if (!t || !t.url) return null;
+    if (t.private) { toast('Private tabs don’t send anything to the notebook.'); return null; }
+    return t;
+  }
+
+  // A link to the sentence `text` on page `url` (a text fragment), so
+  // going there scrolls to it and marks it.
+  function textFragmentUrl(url, text) {
+    const base = url.split('#')[0];
+    const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    const enc = (w) => encodeURIComponent(w).replace(/-/g, '%2D').replace(/,/g, '%2C');
+    const frag = words.length <= 10 ? enc(words.join(' ')) : `${enc(words.slice(0, 5).join(' '))},${enc(words.slice(-5).join(' '))}`;
+    return frag ? `${base}#:~:text=${frag}` : base;
+  }
+
+  // Opens a notebook link's page: the tab already showing it (moved to the
+  // quote, if there is one), or a new tab. Through the navigation policy.
+  function openTarget(target) {
+    const url = target && target.url;
+    if (!url || !/^https?:/i.test(url)) { toast('This note has no page to go to.'); return; }
+    const page = url.split('#')[0];
+    const open = state && state.tabs.find((t) => !t.private && t.sheet_over === null && t.url && t.url.full.split('#')[0] === page);
+    if (open) {
+      invoke('activate_tab', { tab: open.id });
+      if (url !== open.url.full && url.includes('#')) invoke('navigate', { tab: open.id, input: url });
+      return;
+    }
+    T.core.invoke('new_tab', { private: false })
+      .then((id) => invoke('navigate', { tab: id, input: url }))
+      .catch((e) => toast(String(e)));
+  }
+
+  // A link typed in a note: a web address (or a bare host) opens in a new
+  // tab; anything else is not opened.
+  function openTypedLink(href) {
+    const h = String(href || '').trim();
+    if (/^https?:/i.test(h)) openTarget({ url: h });
+    else if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(h)) {
+      T.core.invoke('new_tab', { private: false }).then((id) => invoke('navigate', { tab: id, input: h })).catch((e) => toast(String(e)));
+    } else toast('Only web addresses open from the notebook.');
+  }
+
+  // The pages on screen (both halves of a split) and where each is.
+  function shownPanes() {
+    if (!state || state.active === null || state.sheet !== null) return [];
+    const b = contentBox;
+    const w = window.innerWidth - b.left - b.right;
+    const h = window.innerHeight - b.top - b.bottom;
+    const s = state.split;
+    if (!s) return [{ tab: state.active, x: b.left, y: b.top, w, h }];
+    if (s.orientation === 'rows') {
+      const [first, second] = splitSizes(h, s.ratio);
+      return [{ tab: s.left, x: b.left, y: b.top, w, h: first }, { tab: s.right, x: b.left, y: b.top + h - second, w, h: second }];
+    }
+    const [first, second] = splitSizes(w, s.ratio);
+    return [{ tab: s.left, x: b.left, y: b.top, w: first, h }, { tab: s.right, x: b.left + w - second, y: b.top, w: second, h }];
+  }
+  function paneAt(x, y) {
+    return shownPanes().find((p) => x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h) || null;
+  }
+
+  // The quote button dragged out of the notebook: the page under the
+  // pointer marks the sentence it would link (and draws the line on from
+  // its right edge); let go, that sentence is quoted.
+  const linkDrag = { tab: null, next: null, busy: false };
+  function sendLinkHover() {
+    if (linkDrag.busy || !linkDrag.next) return;
+    const n = linkDrag.next;
+    linkDrag.next = null;
+    linkDrag.busy = true;
+    T.core.invoke('notebook_link_hover', n).catch(() => {}).finally(() => {
+      linkDrag.busy = false;
+      requestAnimationFrame(sendLinkHover);
+    });
+  }
+  function dragLink(phase, x, y, fromY) {
+    const pane = phase === 'cancel' ? null : paneAt(x, y);
+    const usable = pane && state.tabs.some((t) => t.id === pane.tab && !t.private && t.url);
+    if (linkDrag.tab !== null && (!usable || linkDrag.tab !== pane.tab)) {
+      linkDrag.next = { tab: linkDrag.tab, fx: -1, fy: 0, fromY: 0 };
+      sendLinkHover();
+      linkDrag.tab = null;
+    }
+    if (phase === 'cancel') return Promise.resolve(null);
+    if (!usable) {
+      if (phase === 'end') toast(pane ? 'Private tabs don’t send anything to the notebook.' : 'Let go over a page to quote it.');
+      return Promise.resolve(null);
+    }
+    const fx = (x - pane.x) / pane.w;
+    const fy = (y - pane.y) / pane.h;
+    if (phase === 'move') {
+      linkDrag.tab = pane.tab;
+      linkDrag.next = { tab: pane.tab, fx, fy, fromY: (fromY - pane.y) / pane.h };
+      sendLinkHover();
+      return Promise.resolve(null);
+    }
+    linkDrag.tab = null;
+    linkDrag.next = null;
+    const t = captureTab(pane.tab);
+    if (!t) return Promise.resolve(null);
+    return T.core.invoke('notebook_link_drop', { tab: t.id, fx, fy }).then((text) => {
+      if (text) return { kind: 'quote', url: textFragmentUrl(t.url.full, text), title: t.title || '', text };
+      return { kind: 'page', url: t.url.full, title: t.title || '' };
+    }).catch((e) => { toast(String(e)); return null; });
+  }
+
+  // Clip mode (the notebook's scissors) is in one page: the focused one.
+  let clipTab = null;
+  function setClipMode(on) {
+    if (!on) { endClipMode(); return Promise.resolve(false); }
+    const t = activeTab();
+    if (!t || !t.url) { toast('Open a page to clip it.'); return Promise.resolve(false); }
+    if (t.private) { toast('Private tabs don’t send anything to the notebook.'); return Promise.resolve(false); }
+    return T.core.invoke('notebook_clip_mode', { tab: t.id, on: true }).then(() => {
+      clipTab = t.id;
+      toast('Drag over the page to clip part of it (Esc stops).');
+      return true;
+    }).catch((e) => { toast(String(e)); return false; });
+  }
+  function endClipMode() {
+    if (clipTab !== null) T.core.invoke('notebook_clip_mode', { tab: clipTab, on: false }).catch(() => {});
+    clipTab = null;
+    if (notebook) notebook.clipEnded();
+  }
+
+  // Draws a clip of a page's region (the app's own picture of its view)
+  // and puts it in the notebook.
+  function clipToNotebook(t, r) {
+    T.core.invoke('notebook_clip', { tab: t.id, x: r.x, y: r.y, w: r.w, h: r.h, vw: r.vw })
+      .then((image) => {
+        notebook.addClip(image, { kind: 'clip', url: t.url.full, title: t.title || '' });
+        if (!notebookShown()) toast('Clipped to the notebook.');
+      })
+      .catch((e) => toast(String(e)));
+  }
+
+  // ⌥-click on text or an image: "Send to Notebook" above it.
+  let nbPick = null; // { tab, kind, rect }
+  function hideNbPop() {
+    if (!nbPick && $('nb-pop').hidden) return;
+    nbPick = null;
+    $('nb-pop').hidden = true;
+    reportLayout();
+  }
+  T.event.listen('notebook_pick', (e) => {
+    const { tab, kind, rect } = e.payload || {};
+    if (kind === 'end') { if (tab === clipTab) { clipTab = null; if (notebook) notebook.clipEnded(); } return; }
+    if (kind === 'hide') { if (nbPick && nbPick.tab === tab) hideNbPop(); return; }
+    const shown = shownPanes().some((p) => p.tab === tab);
+    if (!rect || !shown || modalOpen || panel) return;
+    const t = captureTab(tab);
+    if (kind === 'clip') {
+      if (tab === clipTab) { clipTab = null; if (notebook) notebook.clipEnded(); }
+      if (t) clipToNotebook(t, rect);
+      return;
+    }
+    if (!t) return;
+    hideSelection();
+    hideImageMenu();
+    nbPick = { tab, kind, rect };
+    placeOverPage($('nb-pop'), tab, rect);
+  });
+  $('nb-send').addEventListener('click', () => {
+    const pick = nbPick;
+    hideNbPop();
+    const t = pick && captureTab(pick.tab);
+    if (!t) return;
+    if (pick.kind === 'img') { clipToNotebook(t, pick.rect); return; }
+    T.core.invoke('read_selection', { tab: t.id }).then((text) => {
+      if (!text) { toast('Nothing selected to send.'); return; }
+      notebook.addQuote({ kind: 'quote', url: textFragmentUrl(t.url.full, text), title: t.title || '', text });
+      if (!notebookShown()) toast('Sent to the notebook.');
+    }).catch((err) => toast(String(err)));
+  });
+
+  // The page shown changes: a stroke after it starts a new note, the
+  // notebook may follow it, and clip mode ends in the page left.
+  let notebookPage = '';
+  function notebookTrack() {
+    if (!notebook || !state) return;
+    const t = activeTab();
+    const key = t ? `${t.id} ${t.url && !t.private ? t.url.full : ''}` : '';
+    if (key === notebookPage) return;
+    notebookPage = key;
+    if (clipTab !== null && (!t || t.id !== clipTab)) endClipMode();
+    if (nbPick && !shownPanes().some((p) => p.tab === nbPick.tab)) hideNbPop();
+    notebook.pageChanged(t && t.url && !t.private ? t.url.full : '');
+  }
+
+  $('notebook-btn').addEventListener('click', () => setNotebook(!notebookOpen));
+
   // ---- console -----------------------------------------------------------
   //
   // Entries come from Rust (browser events, and page console output while
@@ -3775,6 +4023,16 @@
       else openFind();
     } else if (name === 'toggle_images') {
       toggleMode('hide_media');
+    } else if (name === 'go_back' || name === 'go_forward') {
+      // ⌘← / ⌘→ (2026-11-15): as the pill's buttons.
+      const btn = $(name === 'go_back' ? 'back' : 'forward');
+      if (!btn.disabled) btn.click();
+    } else if (name === 'detach_bar' || name === 'attach_bar') {
+      // ⌘↑ floats the URL bar as the pill, ⌘↓ attaches it along the
+      // bottom of the page (this tab, as ⋯ → Attach URL Bar).
+      const tab = activeTab();
+      const attached = name === 'attach_bar';
+      if (tab && attached !== barAttached) invoke('set_url_bar_attached', { tab: tab.id, attached });
     } else if (name.startsWith('item:')) {
       const item = sidebarItems()[Number(name.slice(5)) - 1];
       if (!item) return;
@@ -3807,11 +4065,12 @@
     // The tab has moved on from the bookmark's page: going back to it is
     // offered first (Return), removing the bookmark stays on ⌘W.
     const moved = t.url && t.url.full !== bm.url;
+    const anchor = () => document.querySelector(`#bookmarks .bm[data-url="${CSS.escape(bm.url)}"]`);
     if (moved) {
       askConfirm(`This tab has left “${name}”. Return to the bookmarked page, or remove the bookmark?`, 'Remove Bookmark', id, remove,
-        { label: 'Return to Original URL', run: () => openLink(bm.url, true) });
+        { label: 'Return to Original URL', run: () => openLink(bm.url, true) }, { anchor });
     } else {
-      askConfirm(`Close this tab and remove the bookmark “${name}”?`, 'Remove Bookmark', id, remove);
+      askConfirm(`Close this tab and remove the bookmark “${name}”?`, 'Remove Bookmark', id, remove, null, { anchor });
     }
   }
 
@@ -3819,7 +4078,11 @@
   // ⌘W or the primary button confirms, Escape cancels. `alt` adds a second
   // action ({ label, run }), which then has the focus (Return). Options:
   // `shortcut: false` (no ⌘W on the primary button), `cancel` (run when
-  // dismissed: Cancel, Escape, a click elsewhere) and `cancelLabel`.
+  // dismissed: Cancel, Escape, a click elsewhere), `cancelLabel`, and
+  // `anchor` (a function returning the sidebar row the confirmation is
+  // about: closing a bookmark's tab or a site's tabs). With an anchor in
+  // a sidebar that is showing, it sits just right of the sidebar beside
+  // that row (2026-11-15) instead of above the pill.
   function askConfirm(text, ok, tab, run, alt = null, opts = {}) {
     if (confirmAction) closeConfirm();
     const shortcut = opts.shortcut !== false;
@@ -3829,6 +4092,7 @@
       run: () => { closeConfirm(false); run(); },
       alt: alt && (() => { closeConfirm(false); alt.run(); }),
       cancel: opts.cancel || null,
+      anchor: opts.anchor || null,
     };
     $('confirm-text').textContent = text;
     $('confirm-ok').textContent = shortcut ? ok + ' (⌘W)' : ok;
@@ -3836,15 +4100,39 @@
     $('confirm-alt').hidden = !alt;
     $('confirm-alt').textContent = alt ? alt.label : '';
     $('confirm-pop').hidden = false;
+    placeConfirm();
     $(alt ? 'confirm-alt' : 'confirm-ok').focus();
     syncMenuOpen();
     reportLayout();
+  }
+  // Beside its sidebar row (see askConfirm), or above the pill when the
+  // row is not on screen (sidebar hidden, row scrolled away).
+  function placeConfirm() {
+    const pop = $('confirm-pop');
+    const row = confirmAction && confirmAction.anchor ? confirmAction.anchor() : null;
+    const side = $('sidebar').getBoundingClientRect();
+    const r = row && row.isConnected ? row.getBoundingClientRect() : null;
+    const visible = r && sidebarShown && r.height > 0 && side.right > 40 && r.bottom > side.top && r.top < side.bottom;
+    pop.classList.toggle('anchored', !!visible);
+    if (!visible) {
+      pop.style.left = pop.style.top = pop.style.maxWidth = '';
+      return;
+    }
+    const left = Math.round(side.right) + 10;
+    pop.style.left = left + 'px';
+    pop.style.maxWidth = Math.max(220, Math.min(420, window.innerWidth - left - 12)) + 'px';
+    const h = pop.offsetHeight;
+    const mid = r.top + r.height / 2;
+    const top = Math.max(8, Math.min(mid - h / 2, window.innerHeight - h - 8));
+    pop.style.top = Math.round(top) + 'px';
+    pop.style.setProperty('--notch', Math.round(Math.max(12, Math.min(h - 12, mid - top))) + 'px');
   }
   // `dismissed`: closed without choosing an action (runs `cancel`).
   function closeConfirm(dismissed = true) {
     const was = confirmAction;
     confirmAction = null;
     $('confirm-pop').hidden = true;
+    $('confirm-pop').classList.remove('anchored');
     $('confirm-alt').hidden = true;
     syncMenuOpen();
     reportLayout();
@@ -3884,6 +4172,9 @@
     downloadAsks.push(a);
     nextDownloadAsk();
   });
+  // The row moves with the sidebar's scrolling and the window's size.
+  $('side-scroll').addEventListener('scroll', () => { if (confirmAction && confirmAction.anchor) { placeConfirm(); reportLayout(); } }, { passive: true });
+  window.addEventListener('resize', () => { if (confirmAction && confirmAction.anchor) placeConfirm(); });
   $('confirm-ok').addEventListener('click', () => { if (confirmAction) confirmAction.run(); });
   $('confirm-alt').addEventListener('click', () => { if (confirmAction && confirmAction.alt) confirmAction.alt(); });
   $('confirm-cancel').addEventListener('click', closeConfirm);
@@ -3911,11 +4202,12 @@
   // ⌘⇧\: hide the right panels (keeping them on), or show them again; with
   // none on, open the chat.
   function toggleRight() {
-    const anyOn = scriptsOpen || chatOpen || (state && headersOn(state.active));
+    const anyOn = scriptsOpen || chatOpen || notebookOpen || (state && headersOn(state.active));
     if (!anyOn) { setChat(true); return; }
-    if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !(state && headersOn(state.active))) return; }
+    if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !notebookOpen && !(state && headersOn(state.active))) return; }
     rightHidden = !rightHidden;
     applyChat();
+    applyNotebook();
     renderOutline();
     renderViewMode();
     reportLayout();
@@ -4013,11 +4305,42 @@
   document.addEventListener('keydown', (ev) => {
     if (!ev.metaKey || recordingKey) return;
     const pressed = keyOf(ev);
+    // ⌘← and the other arrows move the caret in a text field.
+    if (pressed && ARROW_LABELS[pressed.key] && editableTarget(ev.target)) return;
     const hit = pressed && shortcutList.find((x) => x.key === pressed.key && x.mods === pressed.mods);
     const name = hit ? hit.action : null;
     if (!name) return;
     ev.preventDefault();
     runShortcut(name, 'chrome');
+  });
+
+  // Text being edited with keyboard focus, here or in a page (C19
+  // reports, by tab): arrow-key shortcuts are left to the text meanwhile
+  // (natively too: `set_text_editing`).
+  function editableTarget(e) {
+    if (!e || !e.tagName) return false;
+    if (e.isContentEditable || e.tagName === 'TEXTAREA' || e.tagName === 'SELECT') return true;
+    return e.tagName === 'INPUT' && !/^(button|submit|reset|checkbox|radio|range|color|file|image|hidden)$/i.test(e.type || 'text');
+  }
+  const pageEditing = new Map(); // tab id → true while its page edits text
+  let textEditingSent = false;
+  function syncTextEditing() {
+    if (state) for (const id of [...pageEditing.keys()]) if (!state.tabs.some((t) => t.id === id)) pageEditing.delete(id);
+    const on = (document.hasFocus() && editableTarget(document.activeElement)) || [...pageEditing.values()].some(Boolean);
+    if (on === textEditingSent) return;
+    textEditingSent = on;
+    T.core.invoke('set_text_editing', { on }).catch(() => {});
+  }
+  document.addEventListener('focusin', syncTextEditing);
+  document.addEventListener('focusout', () => setTimeout(syncTextEditing, 0));
+  window.addEventListener('focus', syncTextEditing);
+  window.addEventListener('blur', () => setTimeout(syncTextEditing, 0));
+  T.event.listen('page_editing', (e) => {
+    const { tab, on } = e.payload || {};
+    if (typeof tab !== 'number') return;
+    if (on) pageEditing.set(tab, true);
+    else pageEditing.delete(tab);
+    syncTextEditing();
   });
 
   // ---- keyboard shortcuts (Settings → Keyboard) ------------------------------
@@ -4043,9 +4366,12 @@
 
   // The unshifted key of a ⌘ key press (by physical key, so ⇧ does not turn
   // \ into |), and its other modifiers.
+  const ARROWS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+  const ARROW_LABELS = { left: '←', right: '→', up: '↑', down: '↓' };
   function keyOf(ev) {
     let key = null;
-    if (/^Key[A-Z]$/.test(ev.code)) key = ev.code.slice(3).toLowerCase();
+    if (ARROWS[ev.code] || ARROWS[ev.key]) key = ARROWS[ev.code] || ARROWS[ev.key];
+    else if (/^Key[A-Z]$/.test(ev.code)) key = ev.code.slice(3).toLowerCase();
     else if (/^Digit[0-9]$/.test(ev.code)) key = ev.code.slice(5);
     else if (CODE_KEYS[ev.code]) key = CODE_KEYS[ev.code];
     else if (ev.key && ev.key.length === 1) key = SHIFTED[ev.key] || ev.key.toLowerCase();
@@ -4055,7 +4381,7 @@
   }
 
   function comboLabel(key, mods) {
-    return (mods & MOD_CTRL ? '⌃' : '') + (mods & MOD_ALT ? '⌥' : '') + (mods & MOD_SHIFT ? '⇧' : '') + '⌘' + (key === ' ' ? 'Space' : key.toUpperCase());
+    return (mods & MOD_CTRL ? '⌃' : '') + (mods & MOD_ALT ? '⌥' : '') + (mods & MOD_SHIFT ? '⇧' : '') + '⌘' + (key === ' ' ? 'Space' : ARROW_LABELS[key] || key.toUpperCase());
   }
 
   function savedBindings() {
@@ -4208,7 +4534,12 @@
     const generation = ++selectionGeneration;
     const { tab, rect } = e.payload;
     const shown = state && (tab === state.active || (state.split && (tab === state.split.left || tab === state.split.right)));
-    if (!rect || !shown || modalOpen || panel) { hideSelection(); return; }
+    if (!rect || !shown || modalOpen || panel) {
+      hideSelection();
+      if (!rect && nbPick && nbPick.tab === tab && nbPick.kind === 'text') hideNbPop();
+      return;
+    }
+    if (nbPick && nbPick.tab === tab) return; // "Send to Notebook" is up for it
     T.core.invoke('read_selection', { tab }).then((text) => {
       if (generation !== selectionGeneration) return;
       if (!text || !text.trim()) { hideSelection(); return; }
@@ -4297,6 +4628,23 @@
   }));
 
   // ---- wiring -----------------------------------------------------------
+  // The Notebook (notebook.js), in its panel; open as it was left.
+  notebook = window.SnorkleNotebook.create($('notebook'), {
+    invoke: (cmd, args) => T.core.invoke(cmd, args),
+    toast,
+    place: () => {
+      const t = activeTab();
+      return t && t.url && !t.private ? { url: t.url.full, title: t.title || '' } : null;
+    },
+    goTo: openTarget,
+    openLink: openTypedLink,
+    setClipMode,
+    dragLink,
+    close: () => setNotebook(false),
+  });
+  notebookOpen = pref('notebookOpen') === '1';
+  applyNotebook();
+
 
   function withTab(f) {
     return () => { const t = activeTab(); if (t) f(t); };
@@ -4357,6 +4705,7 @@
     if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
     if (!$('pin-pop').hidden && !$('pin-pop').contains(ev.target)) closePinPop();
     if (!$('img-pop').hidden && !$('img-pop').contains(ev.target)) hideImageMenu();
+    if (!$('nb-pop').hidden && !$('nb-pop').contains(ev.target)) hideNbPop();
     if (!$('actions-pop').hidden && !$('actions').contains(ev.target)) setActions(false);
     // Taps outside close the overlaid sidebar (narrow) and the flyout.
     if ((narrow || flyoutMode()) && sidebarShown && !$('sidebar').contains(ev.target)) setSidebar(false);
@@ -4374,6 +4723,7 @@
     else if (!$('actions-pop').hidden) setActions(false);
     else if (!$('pin-pop').hidden) closePinPop();
     else if (!$('img-pop').hidden) hideImageMenu();
+    else if (!$('nb-pop').hidden) hideNbPop();
     else if (menuOpen) closeMenu();
     else if (modalOpen) setModal(false);
     else if (scriptsOpen) setScripts(false);
@@ -4418,6 +4768,7 @@
     }
     setSidebarWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 264);
     applyChat();
+    applyNotebook();
     $('scripts-pop').classList.toggle('dock', scriptsOpen && !narrow);
     applySidebar();
   });

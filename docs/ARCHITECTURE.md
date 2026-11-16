@@ -90,7 +90,7 @@ processes as for Safari.
 
 | # | Boundary | Direction | Mechanism | Enforced by |
 |---|---|---|---|---|
-| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). Exception, only when the user sends a page-chat message: the result of one constant script (title, visible text, selection) is read back (§5g, C17). Exception, only when the user saves a page for later or adds pages to a saved one: constant capture code reads back the page's HTML, the URLs it loaded and those resources (§5b, C22). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
+| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). Exception, only when the user sends a page-chat message: the result of one constant script (title, visible text, selection) is read back (§5g, C17). Exception, only when the user saves a page for later or adds pages to a saved one: constant capture code reads back the page's HTML, the URLs it loaded and those resources (§5b, C22; on AI chat sites the conversation's turns as node trees, C22b). Exception, the Notebook (§5i, C23): a client-world watcher reports ⌥-click and ⌥-drag geometry, and the sentence under the quote button is read back when it is let go. | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
 | B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants every app command in `command_list.rs` and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews inside the content area (between the status bar, the sidebar and any docked panel; down to the bottom of the window), `clipsToBounds`. The URL pill, its popup and toasts float over the content area as **holes**: every container is masked there and does not take touches there, so the chrome below shows through and a page can never draw over or under them (§5f). Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Other chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs` (`apply_mask`), `ios/keys.rs` (`pointInside`), `snorkle_content::sanitize_holes`, `Browser::sync_visibility`, `browser_invariants.rs` |
@@ -208,7 +208,8 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   section element and whether it is uppercase, and asks the model for section labels first. The style modes use the same
   mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
   **Dark** (off by default; moon button; remembered across launches) makes content web views prefer a dark appearance
-  (`overrideUserInterfaceStyle`), so sites with their own dark theme use it; a constant detector
+  (`overrideUserInterfaceStyle`), so sites with their own dark theme use it (without the mode a content view is
+  always light over white, whatever the app's appearance; 2026-11-15); a constant detector
   then checks the page's background (root, body, else the canvas) and, if it is light, marks the
   root so a constant style inverts the page with hues kept (`invert(1) hue-rotate(180deg)`).
   Sections kept dark (2026-11-08): on an inverted page the detector also marks each element whose
@@ -222,7 +223,11 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   runs with the light check (document end, load, 1.5 s, and DOM changes at most every 0.5 s);
   marks are decided before the root is marked, so nothing transitions from the inverted state.
   Until the detector has run, the page is dimmed to 20% brightness so white pages do not flash
-  while loading. Images, video and embeds are never shown inverted and are dimmed to 60% until
+  while loading. Sites get their own dark theme first (2026-11-15): when the mode is turned on for
+  a loaded page, the first check waits (≤ 0.6 s) for `prefers-color-scheme: dark` to reach the
+  page, and the page is checked again when the preference changes, when the root's or body's
+  `class`, `style` or theme attributes change (a site applying its theme from a script) and when
+  their colour transitions end; `<meta name="color-scheme">` counts as opting in. Images, video and embeds are never shown inverted and are dimmed to 60% until
   pointed at (with hide media on, its gray boxes stay, and what it reveals is shown un-inverted). With black and white also on, the root filter includes `grayscale`.
   Video gets its counter-filter on its frame rather than on itself: the detector marks the
   nearest ancestor with the same box as the video (`data-snorkle-media-box`, in the document,
@@ -294,7 +299,10 @@ the window): back, forward and reload on its left (the sidebar's toggle is a tab
 edge); the address (about 400 pt wide; full
 width in narrow windows), with the share button inside its right end (hidden while editing);
 then a ⋯ button that opens a popup with the page actions (ad blocking,
-bookmark, site scripts, page zoom), the per-tab headers-view button and the chat button. Toasts and banners
+bookmark, site scripts, page zoom), the per-tab headers-view button and the chat button.
+The confirmation for closing a bookmark's tab (⌘W) or a site's group of tabs (its ×) sits beside
+that row, just right of the sidebar, pointing at it, when the sidebar shows (2026-11-15; a flyout
+stays open meanwhile); otherwise above the pill. It is a hole either way. Toasts and banners
 appear above the pill. With a pointer device the pill and the sidebar sit at 50% opacity until
 hovered (the sidebar fades in and out over 0.3 s, the pill over 0.15 s). Since 2026-11-03 the
 sidebar's toggle tab shows only in flyout mode; an attached sidebar is shown and hidden with ⌘\.
@@ -339,7 +347,11 @@ bookmark's page, the confirmation offers Return to Original URL first), ⌘F fin
 ⌘⇧G next / previous match, ⌘\ sidebar, ⌘⇧\ right panels, ⌘S / ⌘⇧S split side by side / top
 and bottom, ⌘D bookmark (on a bookmark's tab: un-bookmark; ⌥⌘D from 2026-11-03 to 2026-11-04,
 when ⌘D split the view), ⌘I images,
-⌘1–5 sidebar items, ⌘⇧] / ⌘⇧[ next / previous tab (2026-11-08; Chrome's and Safari's keys:
+⌘1–5 sidebar items, ⌘← / ⌘→ back / forward and ⌘↑ / ⌘↓ detach / attach the URL bar (2026-11-15;
+the arrow keys are named `left`…`down` in bindings; while a text field or editable region has keyboard
+focus, in a page (reported by the selection watcher, C19) or in the chrome, arrow bindings are left to
+the text: withdrawn from the key commands on iPadOS, passed on by the key monitor on macOS),
+⌘⇧] / ⌘⇧[ next / previous tab (2026-11-08; Chrome's and Safari's keys:
 the sidebar's order, wrapping; pins and bookmarks count only where they have a tab, so cycling never
 loads one that was not open). The sidebar has two modes (Settings → General, or ⌘-click its toggle; its toggle tab reaches 3 pt
 into the sidebar, over the resize edge's line, and in attached mode with the sidebar hidden and a
@@ -461,8 +473,10 @@ page), the emoji `Tab::emoji` (both saved with the session, `Browser::set_tab_la
 URL loads in the tab like the address bar. Bookmark rows are one line, like tabs. **Pins:** up to 12
 (three rows of four); their menu adds Return to Bookmark (moves it to the top of the bookmarks). **Appearance**
 (Settings → General: System, Light, Dark) sets the chrome's colours (`data-theme`) and the
-window's `overrideUserInterfaceStyle`, so system UI and content views without dark pages mode
-follow it.
+window's `overrideUserInterfaceStyle`, so system UI follows it. Pages do not (2026-11-15): a
+content view is light over a white canvas unless dark pages mode is on for it (until then a view
+without the mode followed the window, and pages without a background of their own were drawn on
+the system's black).
 
 **Offline copies:** when a pinned or bookmarked page finishes loading, the host saves it as a web
 archive (`createWebArchiveData`), at most every 10 minutes per page, under the pin's or
@@ -539,8 +553,8 @@ record (interrupted downloads, earlier private ones) are deleted when the app st
 Native page views sit above the chrome's webview, so the chrome cannot draw over a page except
 in holes (§5f). Panels that should leave the page visible dock beside it instead: the chrome
 reports `right` and `bottom` insets and the host shrinks the content area. Site scripts dock on
-the right, full height; otherwise the headers outline and the page chat do, the outline on top
-and the chat below when both are open (in narrow windows site scripts and chat overlay and hide
+the right, full height; otherwise the headers outline, the page chat and the Notebook (§5i) do,
+in that order from the top, sharing the height when several are open (in narrow windows site scripts and chat overlay and hide
 the page). The right panels' width is dragged at their left edge (260–640 pt, at most 60% of the
 area, remembered); ⌘⇧\ hides them without turning them off and shows them again. The console
 docks at the bottom. A ring around the `{ }` row (and the ⋯ button while its popup is closed) marks
@@ -620,6 +634,20 @@ thumbnail opens the saved copy in a new tab (it stays in the list; without an ar
 live page). On hover: Recover (the live page in a new tab), "+" (add pages), Bookmark (added at the
 end of the bookmarks) and Delete; Recover, Bookmark and Delete remove the page from the list.
 
+*AI conversations* (2026-11-15; `snorkle_core::conversation`, C22b): on chatgpt.com (and
+chat.openai.com), claude.ai and gemini.google.com the archive's page is the conversation itself,
+built by the app, instead of the site's app shell. Constant code in the client world finds the
+turns (each site's markers), scrolls the thread to the top until no earlier turns load (≤ 20 s),
+then down through it a screen at a time, noting each turn as the site puts it in the document
+(ChatGPT and Claude keep only the turns in view), merges what it saw in order, scrolls back to
+where the reader was, and hands the turns over as node trees (text, or tag, attributes and
+children; `blob:` images as `data:` URLs). Rust rebuilds a page from them with a fixed set of tags
+and checked attributes (no scripts, styles, frames or handlers can come out), labels each turn
+(You / ChatGPT / Claude / Gemini) and adds the title, the date and the address; it is shown with
+JavaScript off, with the images WebKit's archive holds. With no turns found, WebKit's copy of the
+live document is kept instead, also with JavaScript off. Asking the site for a share link was not
+done: it would publish the conversation.
+
 *Archives* (the method of laffan/thedailyprophet, without its element removal, as WebKit web
 archives; `snorkle_core::webarchive`, `src-tauri/src/saved.rs`): the page's HTML is kept as the
 server sends it and every resource the page loaded under its original URL. Capture reads, from the
@@ -659,6 +687,42 @@ edge; pointing at it (or tapping it, without a pointer) shows the sidebar as a p
 20 pt from the top and bottom, rounded on the right, over the page (a hole); it goes away 0.28 s
 after the pointer leaves it, or on a tap outside or Escape. In narrow windows the tab opens the
 overlaid sidebar instead.
+
+## 5i. Notebook (2026-11-15)
+
+One notebook for every page, not bound to a tab: the notepad of laffan/zotero-helper
+(`src/notepad/`, `NotepadBody.tsx`) ported to the chrome as plain DOM (`ui/notebook.js`,
+`ui/notebook.css`). The toggle sits between the menu and Save for Later at the sidebar's foot; the
+notebook docks right of the page with the other right panels (remembered open or closed; ⌘⇧\
+hides it with them). As in zotero-helper: a bar (the quote button and the scissors in one orange
+pill, the minimap, the scroll link, a switch of ink / red / eraser / lasso, undo, close) over a
+canvas with a faint dot grid. The pen or the mouse writes (one canvas the size of the view; a
+stroke costs the same on a full pad), a finger or a wheel pans, a press held still draws a lasso
+(framed selection, Delete, drag to move, ⌫, Escape), two taps type a note in Markdown (headings,
+bold, italic, links, highlights, quotes, tasks, lists), links are chips (dragged, tapped to go,
+held for Delete / Edit, sized by a grip, fixed by a pin under the ink), undo takes back each
+change, and the trash can clears it after asking. A note remembers the page it was written beside
+(its site shows small above it; a tap goes there); the scroll link makes the pad glide to what was
+written about the page shown. Not ported: the floating window, auto-shift, Pencil double-tap.
+
+Bringing things in (C23): a constant watcher in every page's client world reports
+- ⌥-click on a selection, or on text (it selects that sentence, `Intl.Segmenter`), or on an image:
+  "Send to Notebook" appears above it (a hole); pressed, text is read as the selection menu reads
+  it (C20) and becomes a quote linking back with a text fragment (`#:~:text=`), an image becomes
+  a clip of its box;
+- ⌥-drag, or a drag while the scissors are on (clip mode, which then ends): a dashed box, and the
+  region becomes a clip at once.
+
+A clip is a JPEG the app draws from its own web view (`takeSnapshotWithConfiguration` with the
+region; the page is shown without its view modes for 0.32 s first, so black and white, hidden media
+and the dark inversion are not in it); the chrome makes its white-on-black copy (zotero-helper's
+`darkPagesCopy`). The quote button dragged onto a page: the page marks the sentence under the
+pointer and draws the line on from its edge (constant code with two numbers); let go, that sentence
+is read back and quoted (or the page linked when there is none). Links open the page shown in an
+open tab or in a new one, through the navigation policy. Nothing comes from private tabs (every
+command refuses them) and notes written while one is shown keep no address. The notebook is one
+file, `notebook.json` (≤ 64 MB), written a moment after each change once the pen pauses, and
+rebuilt field by field in Rust on every write and read (`snorkle_core::notebook::clean`).
 
 ## 6. Credentials
 

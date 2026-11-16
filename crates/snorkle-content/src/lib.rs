@@ -158,6 +158,41 @@ pub enum Shortcut {
     /// ⌘⇧[, as in Chrome and Safari).
     NextTab,
     PreviousTab,
+    /// Back / forward in the tab's history (⌘← / ⌘→, 2026-11-15).
+    Back,
+    Forward,
+    /// Detach the URL bar into the floating pill (⌘↑) or attach it along
+    /// the bottom of the page (⌘↓), for the current tab.
+    DetachUrlBar,
+    AttachUrlBar,
+}
+
+/// Arrow keys a binding may use, by name (the other keys are single
+/// characters). While text is being edited (a text field or editable
+/// region has keyboard focus, in a page or in the chrome;
+/// [`set_text_editing`]) a binding on an arrow key is not taken, so ⌘←,
+/// ⌘→, ⌘↑ and ⌘↓ keep moving the caret there.
+pub const ARROW_KEYS: [&str; 4] = ["left", "right", "up", "down"];
+
+pub fn is_arrow(key: &str) -> bool {
+    ARROW_KEYS.contains(&key)
+}
+
+/// Whether text is being edited with keyboard focus (see [`ARROW_KEYS`]).
+/// Set by the chrome, from its own focus and the pages' reports (C19).
+static TEXT_EDITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_text_editing(on: bool) {
+    TEXT_EDITING.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn text_editing() -> bool {
+    TEXT_EDITING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether a binding is left to text editing right now.
+pub fn yields_to_editing(binding: &KeyBinding) -> bool {
+    is_arrow(&binding.key) && text_editing()
 }
 
 /// Modifier bits of a binding besides ⌘ (always required): Shift, Option,
@@ -212,6 +247,10 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
     def("item_5", ShortcutMenu::Tabs, "Go to Item 5", "5", 0, Shortcut::Item(5)),
     def("next_tab", ShortcutMenu::Tabs, "Next Tab", "]", MOD_SHIFT, Shortcut::NextTab),
     def("prev_tab", ShortcutMenu::Tabs, "Previous Tab", "[", MOD_SHIFT, Shortcut::PreviousTab),
+    def("back", ShortcutMenu::View, "Back", "left", 0, Shortcut::Back),
+    def("forward", ShortcutMenu::View, "Forward", "right", 0, Shortcut::Forward),
+    def("detach_bar", ShortcutMenu::View, "Detach URL Bar", "up", 0, Shortcut::DetachUrlBar),
+    def("attach_bar", ShortcutMenu::View, "Attach URL Bar", "down", 0, Shortcut::AttachUrlBar),
 ];
 
 /// Where a shortcut appears in the iPadOS menu bar.
@@ -247,6 +286,10 @@ impl Shortcut {
             Shortcut::Item(n) => format!("item:{n}"),
             Shortcut::NextTab => "next_tab".into(),
             Shortcut::PreviousTab => "prev_tab".into(),
+            Shortcut::Back => "go_back".into(),
+            Shortcut::Forward => "go_forward".into(),
+            Shortcut::DetachUrlBar => "detach_bar".into(),
+            Shortcut::AttachUrlBar => "attach_bar".into(),
         }
     }
 }
@@ -263,12 +306,14 @@ pub struct KeyBinding {
     pub mods: u8,
 }
 
-/// Keys a binding may use: letters, digits and a few punctuation keys
-/// (what `UIKeyCommand` matches reliably as input).
+/// Keys a binding may use: letters, digits, a few punctuation keys (what
+/// `UIKeyCommand` matches reliably as input) and the arrow keys, by name
+/// ([`ARROW_KEYS`]).
 pub fn validate_binding(key: &str, mods: u8) -> Option<KeyBinding> {
     let key = key.to_ascii_lowercase();
-    let ok = key.chars().count() == 1
-        && key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "[]\\;',./-=`".contains(c));
+    let ok = is_arrow(&key)
+        || (key.chars().count() == 1
+            && key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "[]\\;',./-=`".contains(c)));
     (ok && mods & !(MOD_SHIFT | MOD_ALT | MOD_CTRL) == 0).then_some(KeyBinding { key, mods })
 }
 
@@ -334,6 +379,28 @@ pub type ThumbDone = Box<dyn FnOnce(Option<Vec<u8>>) + Send>;
 pub const THUMB_WIDTH: f64 = 320.0;
 /// JPEG quality of a thumbnail.
 pub const THUMB_QUALITY: f64 = 0.6;
+
+/// Notebook clips (2026-11-15): the widest a clip is drawn, in points (at
+/// the screen's scale), its JPEG quality, and the largest kept.
+pub const CLIP_MAX_WIDTH: f64 = 900.0;
+pub const CLIP_QUALITY: f64 = 0.82;
+pub const CLIP_MAX_BYTES: usize = 2 * 1024 * 1024;
+
+/// A region a page reported (`notebook` C23: visual-viewport CSS pixels,
+/// `vw` that viewport's width) in its web view's coordinates (`size`, its
+/// bounds), cut to the view; `None` when nothing of at least 4 × 4 points
+/// is left or the numbers are not finite.
+pub fn clip_rect(rect: (f64, f64, f64, f64), vw: f64, size: (f64, f64)) -> Option<(f64, f64, f64, f64)> {
+    let (x, y, w, h) = rect;
+    let finite = [x, y, w, h, vw, size.0, size.1].iter().all(|n| n.is_finite());
+    if !finite || vw < 1.0 || size.0 < 1.0 || size.1 < 1.0 {
+        return None;
+    }
+    let k = size.0 / vw;
+    let (x0, y0) = ((x * k).max(0.0), (y * k).max(0.0));
+    let (x1, y1) = (((x + w) * k).min(size.0), ((y + h) * k).min(size.1));
+    (x1 - x0 >= 4.0 && y1 - y0 >= 4.0).then_some((x0, y0, x1 - x0, y1 - y0))
+}
 
 /// Settings → General → Pull to refresh (iPadOS): whether content views get
 /// a `UIRefreshControl` (OPEN_QUESTIONS 109: suspected of turning trackpad
@@ -696,6 +763,35 @@ mod tests {
         ]);
         assert_eq!(ignored.unwrap(), defaults, "unknown ids and invalid keys are ignored");
         assert!(validate_binding("\\", MOD_SHIFT).is_some() && validate_binding(" ", 0).is_none());
+    }
+
+    #[test]
+    fn arrow_shortcuts_yield_to_text_editing() {
+        let defaults = effective_bindings(&[]).unwrap();
+        for (id, key, name) in [("back", "left", "go_back"), ("forward", "right", "go_forward"), ("detach_bar", "up", "detach_bar"), ("attach_bar", "down", "attach_bar")] {
+            let i = shortcut_index(id).unwrap();
+            assert_eq!(defaults[i], KeyBinding { key: key.into(), mods: 0 }, "{id}");
+            assert_eq!(SHORTCUTS[i].action.name(), name);
+        }
+        assert!(validate_binding("Left", MOD_SHIFT).is_some());
+        assert!(validate_binding("leftward", 0).is_none() && validate_binding("home", 0).is_none());
+        let left = KeyBinding { key: "left".into(), mods: 0 };
+        let t = KeyBinding { key: "t".into(), mods: 0 };
+        set_text_editing(true);
+        assert!(yields_to_editing(&left) && !yields_to_editing(&t));
+        set_text_editing(false);
+        assert!(!yields_to_editing(&left));
+    }
+
+    #[test]
+    fn clip_rects_are_cut_to_the_view() {
+        // A page 1,000 CSS px wide in a view 500 pt wide: half the size.
+        assert_eq!(clip_rect((100.0, 50.0, 200.0, 100.0), 1000.0, (500.0, 400.0)), Some((50.0, 25.0, 100.0, 50.0)));
+        assert_eq!(clip_rect((-100.0, 700.0, 300.0, 400.0), 1000.0, (500.0, 400.0)), Some((0.0, 350.0, 100.0, 50.0)));
+        assert_eq!(clip_rect((2000.0, 0.0, 100.0, 100.0), 1000.0, (500.0, 400.0)), None, "outside the view");
+        assert_eq!(clip_rect((0.0, 0.0, 4.0, 100.0), 1000.0, (500.0, 400.0)), None, "too narrow");
+        assert_eq!(clip_rect((0.0, 0.0, f64::NAN, 100.0), 1000.0, (500.0, 400.0)), None);
+        assert_eq!(clip_rect((0.0, 0.0, 100.0, 100.0), 0.0, (500.0, 400.0)), None);
     }
 
     #[test]

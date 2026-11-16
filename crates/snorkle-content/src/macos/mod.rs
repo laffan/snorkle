@@ -433,6 +433,64 @@ impl ContentHost {
         }
     }
 
+    /// Notebook (2026-11-15): a JPEG of a region of `tab`'s page as its
+    /// view draws it now (see the iPadOS host; `crate::clip_rect`). The
+    /// web view is flipped (top-left origin), as the rectangle is.
+    pub fn clip_region(&mut self, tab: TabId, rect: (f64, f64, f64, f64), vw: f64, done: crate::ThumbDone) {
+        let Some(v) = self.views.get(&tab) else {
+            done(None);
+            return;
+        };
+        let b = v.web.bounds();
+        let Some((x, y, w, h)) = crate::clip_rect(rect, vw, (b.size.width, b.size.height)) else {
+            done(None);
+            return;
+        };
+        let done = RefCell::new(Some(done));
+        unsafe {
+            let cfg = objc2_web_kit::WKSnapshotConfiguration::new(self.mtm);
+            cfg.setRect(objc2_foundation::NSRect::new(objc2_foundation::NSPoint::new(x, y), objc2_foundation::NSSize::new(w, h)));
+            cfg.setSnapshotWidth(Some(&objc2_foundation::NSNumber::new_f64(w.min(crate::CLIP_MAX_WIDTH))));
+            let block = block2::RcBlock::new(move |image: *mut NSImage, _err: *mut NSError| {
+                let jpeg = image
+                    .as_ref()
+                    .and_then(|i| jpeg_data(i, crate::CLIP_QUALITY))
+                    .filter(|d| d.len() <= crate::CLIP_MAX_BYTES);
+                if let Some(f) = done.borrow_mut().take() {
+                    f(jpeg);
+                }
+            });
+            v.web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
+        }
+    }
+
+    /// Runs constant notebook code in `tab`'s page (see the iPadOS host).
+    pub fn notebook_run(&mut self, tab: TabId, source: &str) {
+        if let Some(v) = self.views.get(&tab) {
+            injection::run_now(self.mtm, &v.web, source);
+        }
+    }
+
+    /// Reads the sentence under the notebook's quote button (C23).
+    pub fn notebook_read(&mut self, tab: TabId, source: &str, done: crate::TextDone) {
+        match self.views.get(&tab) {
+            Some(v) => injection::read_now(self.mtm, &v.web, source, done),
+            None => done(None),
+        }
+    }
+
+    /// A page shown without its view modes, or with them again, for a
+    /// notebook clip (see the iPadOS host).
+    pub fn plain_page(&mut self, tab: TabId, on: bool) {
+        let Some(v) = self.views.get(&tab) else { return };
+        if on {
+            injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::plain_js());
+        } else {
+            let view = self.injections.view_for(tab);
+            injection::run_now(self.mtm, &v.web, &view.apply_js);
+        }
+    }
+
     /// ⋯ → Open in App is an iPadOS feature (AppKit has no "universal
     /// links only" open); the chrome does not offer it here.
     pub fn open_in_app(&mut self, _url: &Url, done: crate::OpenedDone) {
@@ -621,9 +679,6 @@ impl ContentHost {
         self.sharing = Some(picker);
     }
 
-    /// Light, dark or the system's appearance for the window: the chrome,
-    /// system UI it presents and content views (a content view in dark
-    /// pages mode keeps its own dark appearance).
     /// macOS has no pull to refresh.
     pub fn set_pull_to_refresh(&mut self, _on: bool) {}
 
@@ -635,6 +690,9 @@ impl ContentHost {
         }
     }
 
+    /// Light, dark or the system's appearance for the window: the chrome
+    /// and the system UI it presents. Content views keep their own
+    /// appearance (Aqua, or Dark Aqua in dark pages mode; `set_dark`).
     pub fn set_appearance(&mut self, appearance: crate::Appearance) {
         let named = |name: &NSString| NSAppearance::appearanceNamed(name);
         let a = match appearance {
@@ -650,6 +708,10 @@ impl ContentHost {
     pub fn set_shortcuts(&mut self, bindings: Vec<crate::KeyBinding>, suspend: bool) {
         keys::set_bindings(bindings, suspend);
     }
+
+    /// Text editing began or ended: the key monitor reads
+    /// `crate::text_editing` on each key press, so nothing to do here.
+    pub fn text_editing_changed(&mut self) {}
 
     /// The system share menu for `url` (an http(s) page URL from the core),
     /// pointing at `from` (the share button).
@@ -990,8 +1052,12 @@ impl Drop for ContentHost {
 /// Gap between the panes of a split, where the chrome draws the divider.
 const SPLIT_GAP: f64 = 8.0;
 
-/// Dark mode prefers a dark appearance for the page (`prefers-color-scheme`
-/// and the default canvas); otherwise the window's.
+/// A page's appearance never follows the app's (the window's appearance,
+/// Settings → General → Appearance): without dark pages mode the view is
+/// Aqua over white; with it, Dark Aqua (`prefers-color-scheme`, the default
+/// canvas of pages that support a dark scheme) over black. (Until
+/// 2026-11-15 a view without the mode followed the window, and pages with
+/// no background of their own showed the dark window colour.)
 fn set_light(web: &WKWebView) {
     unsafe { web.setUnderPageBackgroundColor(Some(&NSColor::whiteColor())) };
     let a = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua });
@@ -999,9 +1065,12 @@ fn set_light(web: &WKWebView) {
 }
 
 fn set_dark(web: &WKWebView, dark: bool) {
-    let color = if dark { NSColor::blackColor() } else { NSColor::windowBackgroundColor() };
-    unsafe { web.setUnderPageBackgroundColor(Some(&color)) };
-    let a = if dark { NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }) } else { None };
+    if !dark {
+        set_light(web);
+        return;
+    }
+    unsafe { web.setUnderPageBackgroundColor(Some(&NSColor::blackColor())) };
+    let a = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua });
     let _: () = unsafe { msg_send![web, setAppearance: a.as_deref()] };
 }
 
@@ -1020,10 +1089,15 @@ unsafe fn load(web: &WKWebView, url: &Url) {
 
 /// Encodes a snapshot as JPEG (Save for Later).
 fn thumbnail_jpeg(image: &NSImage) -> Option<Vec<u8>> {
+    jpeg_data(image, crate::THUMB_QUALITY)
+}
+
+/// Encodes a snapshot as JPEG at `quality` (thumbnails, notebook clips).
+fn jpeg_data(image: &NSImage, quality: f64) -> Option<Vec<u8>> {
     use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImageCompressionFactor};
     let tiff = image.TIFFRepresentation()?;
     let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
-    let quality = objc2_foundation::NSNumber::new_f64(crate::THUMB_QUALITY);
+    let quality = objc2_foundation::NSNumber::new_f64(quality);
     let quality: Retained<AnyObject> = Retained::into_super(Retained::into_super(Retained::into_super(quality)));
     let props = objc2_foundation::NSDictionary::from_retained_objects(&[unsafe { NSImageCompressionFactor }], &[quality]);
     unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::JPEG, &props) }.map(|d| d.to_vec())

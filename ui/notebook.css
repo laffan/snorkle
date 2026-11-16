@@ -1,0 +1,252 @@
+/* The Notebook (notebook.js): zotero-helper's notepad (notepad.css,
+   notepad-clips.css, notepad-texts.css), on Snorkle's colours. One
+   continuous surface in the panel's colour: a slim bar of tools over the
+   canvas, which the pen writes on in the theme's ink (or red) and a finger
+   pans. Docked right of the page, with the other right panels. */
+.notepad {
+  --notepad-ink: var(--fg);
+  --nb-text: var(--fg);
+  --nb-dim: var(--muted);
+  --nb-panel: var(--bar);
+  --nb-border: var(--line);
+  --nb-select: var(--field);
+  --nb-accent: #2f6fdb;
+  --nb-bad: #d0342c;
+  --nb-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  display: flex;
+  flex-direction: column;
+  background: var(--nb-panel);
+  overflow: hidden;
+  touch-action: none;
+}
+#notebook.sheet.dock { padding: 0; }
+#notebook:not(.dock) { padding: 0; height: calc(100% - env(safe-area-inset-top) - 80px); }
+.notepad-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 6px 4px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.notepad-bar-grab { flex: 1; align-self: stretch; min-width: 8px; }
+.notepad-tool {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px; padding: 0; border: none; border-radius: 6px;
+  background: transparent; color: var(--nb-dim);
+}
+.notepad-tool:hover:not(:disabled) { background: var(--nb-select); color: var(--nb-text); }
+.notepad-tool.active { background: var(--nb-select); color: var(--nb-text); }
+.notepad-tool:disabled { opacity: 0.35; }
+.notepad-close { min-width: 28px; height: 28px; border-radius: 14px; font-size: 20px; margin-left: 2px; }
+/* What the pen does: one switch of four parts — ink, red, the eraser, the
+   lasso — the part in force filled. */
+.notepad-modes {
+  display: inline-flex; flex-shrink: 0; margin: 0 2px 0 4px; padding: 2px; border-radius: 7px;
+  background: color-mix(in srgb, var(--nb-dim) 14%, transparent);
+}
+.notepad-mode {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 20px; padding: 0; border: none; border-radius: 5px;
+  background: transparent; color: var(--nb-dim); cursor: pointer;
+}
+.notepad-mode svg { width: 14px; height: 14px; }
+.notepad-mode.on { background: var(--nb-panel); color: var(--nb-text); box-shadow: 0 1px 3px rgb(0 0 0 / 0.18); }
+.notepad-mode-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--swatch, var(--notepad-ink));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nb-dim) 45%, transparent);
+}
+/* The quote button and the scissors: one orange pill split in two, their
+   glyphs in the panel's colour; a half is darker while its tool works. */
+.notepad-from-pages {
+  display: inline-flex; flex-shrink: 0; margin: 0 6px 0 2px; border-radius: 13px; overflow: hidden; background: #f19837;
+}
+.notepad-quote-btn, .notepad-clip-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 26px; padding: 0; border: none; border-radius: 0;
+  background: transparent; color: var(--nb-panel);
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.notepad-quote-btn { padding-left: 2px; cursor: grab; touch-action: none; }
+.notepad-clip-btn { padding-right: 2px; box-shadow: inset 1px 0 0 color-mix(in srgb, var(--nb-panel) 55%, transparent); }
+.notepad-quote-btn svg, .notepad-clip-btn svg { width: 13px; height: 13px; }
+.notepad-quote-btn:hover, .notepad-clip-btn:hover { background: rgb(0 0 0 / 0.08); }
+.notepad-quote-btn.on, .notepad-clip-btn.on { background: rgb(0 0 0 / 0.22); }
+.notepad-undo { color: var(--nb-text); opacity: 0.8; }
+/* Under the bar: the minimap (when shown) and the canvas, side by side;
+   the trash can at the canvas's lower left. */
+.notepad-main { position: relative; flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--nb-border); }
+/* A very faint dot grid, moving with the canvas as it pans. */
+.notepad-canvas {
+  position: relative; flex: 1; overflow: hidden; overflow: clip; cursor: crosshair; touch-action: none;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--nb-dim) 30%, transparent) 1px, transparent 1.3px);
+  background-size: 20px 20px;
+}
+.notepad-canvas.erasing { cursor: cell; }
+.notepad-canvas.lassoing { cursor: default; }
+.notepad-layer { position: absolute; top: 0; left: 0; width: 0; height: 0; }
+.notepad-ink { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.notepad-strokes {
+  position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible;
+  fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none;
+}
+.notepad-labels { position: absolute; top: 0; left: 0; }
+/* Each note's page, small, above it: a tap on the note goes there. */
+.notepad-note-label {
+  position: absolute; color: var(--nb-dim); font-size: 10px; white-space: nowrap; pointer-events: none;
+}
+/* A link from a page: a link icon and the page's title — or, for a quote,
+   the whole of its text beside a yellow bar. Tapped to go, dragged. */
+.notepad-link {
+  position: absolute; display: inline-flex; align-items: flex-start; gap: 5px;
+  width: max-content; max-width: 260px; padding: 4px 9px 4px 7px; border: none; border-radius: 6px;
+  background: var(--bg); color: var(--nb-text); font-size: 12px; line-height: 1.4; text-align: left;
+  touch-action: none; cursor: pointer; box-shadow: 0 1px 3px rgb(0 0 0 / 0.14);
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.notepad-link > svg { flex-shrink: 0; margin-top: 2px; color: #ff5f57; }
+.notepad-link-quote { border-left: 3px solid #ffd400; }
+.notepad-link-page { opacity: 0.5; white-space: nowrap; }
+.notepad-link.sized { max-width: none; overflow: hidden; }
+.notepad-link-text { min-width: 0; overflow-wrap: anywhere; }
+.notepad-link-size { position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; cursor: nwse-resize; touch-action: none; }
+.notepad-link.sized .notepad-link-size { right: 0; bottom: 0; }
+.notepad-link-size::after {
+  content: ""; position: absolute; right: 7px; bottom: 7px; width: 7px; height: 7px;
+  border: 1.5px dotted var(--nb-dim); border-radius: 50%; opacity: 0.7;
+}
+.notepad-link.sized .notepad-link-size::after { right: 3px; bottom: 3px; }
+/* The lasso being drawn, and what it selected: framed, Delete above. */
+.notepad-strokes .notepad-lasso {
+  fill: color-mix(in srgb, var(--nb-accent) 8%, transparent); stroke: var(--nb-accent);
+  stroke-width: 1.5; stroke-dasharray: 4 4;
+}
+.notepad-selection {
+  position: absolute; border: 1.5px dashed var(--nb-accent); border-radius: 6px;
+  background: color-mix(in srgb, var(--nb-accent) 6%, transparent); pointer-events: none;
+}
+.notepad-selection-menu, .notepad-link-menu {
+  padding: 3px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-panel);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.22);
+}
+.notepad-selection-menu { position: absolute; bottom: calc(100% + 6px); left: 0; pointer-events: auto; }
+.notepad-link-menu { position: absolute; z-index: 4; }
+.notepad-link-menu button, .notepad-selection-menu button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: none; border-radius: 6px;
+  background: transparent; color: var(--nb-bad); font-size: 12px; white-space: nowrap;
+}
+.notepad-link-menu button:hover, .notepad-selection-menu button:hover { background: var(--nb-select); }
+.notepad-link-menu button.notepad-menu-edit { color: var(--nb-text); }
+/* The minimap: the whole pad, small, down the left. */
+.notepad-minimap {
+  flex: 0 0 60px; position: relative; overflow: hidden; border-right: 1px solid var(--nb-border);
+  background: color-mix(in srgb, var(--nb-dim) 6%, transparent); cursor: pointer; touch-action: none;
+}
+.notepad-minimap-svg, .notepad-minimap-ink { position: absolute; inset: 0; width: 100%; height: 100%; }
+.notepad-minimap-ink { opacity: 0.75; }
+.notepad-minimap-frame { fill: color-mix(in srgb, var(--nb-accent) 10%, transparent); stroke: var(--nb-accent); stroke-width: 1.2; }
+/* Clearing the pad: a faint trash can, and the question it asks. */
+.notepad-trash {
+  position: absolute; z-index: 3; left: 6px; bottom: 6px; display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--nb-dim); opacity: 0.45;
+}
+.notepad-main.with-map .notepad-trash { left: 66px; }
+.notepad-trash:hover { opacity: 1; background: var(--nb-select); }
+.notepad-confirm {
+  position: absolute; z-index: 4; left: 6px; bottom: 42px; display: flex; align-items: center; gap: 6px;
+  padding: 6px 6px 6px 10px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-panel);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.22); font-size: 12px; white-space: nowrap;
+}
+.notepad-main.with-map .notepad-confirm { left: 66px; }
+.notepad-confirm button { padding: 3px 10px; border: none; border-radius: 6px; font-size: 12px; }
+.notepad-confirm-clear { background: var(--nb-bad); color: #fff; }
+.notepad-confirm-cancel { background: var(--nb-select); color: var(--nb-text); }
+/* The quote button's line, out to the page (over the chrome; the page
+   draws its own part). */
+.notepad-link-line { position: fixed; inset: 0; z-index: 1000; width: 100vw; height: 100vh; pointer-events: none; }
+.notepad-link-line line { stroke: #ff5f57; stroke-width: 2; stroke-dasharray: 6 5; stroke-linecap: round; }
+.notepad-link-line circle { fill: #ff5f57; }
+
+/* ---- pins and clips (notepad-clips.css) ---- */
+.notepad-link-icons {
+  flex-shrink: 0; align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; gap: 4px; margin-top: 2px;
+}
+.notepad-link-icons > svg { color: #ff5f57; }
+.notepad-link-pin {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 12px; height: 12px; color: var(--nb-dim); opacity: 0.5; cursor: pointer;
+}
+.notepad-link-pin::before { content: ""; position: absolute; inset: -7px; }
+.notepad-link-pin svg { fill: none; }
+.notepad-link-pin:hover { opacity: 1; }
+.notepad-link.fixed { pointer-events: none; box-shadow: none; cursor: default; }
+.notepad-link.fixed .notepad-link-size { display: none; }
+.notepad-link.fixed .notepad-link-pin { pointer-events: auto; opacity: 1; color: #f19837; }
+.notepad-link.fixed .notepad-link-pin svg { fill: currentColor; }
+.notepad-link.notepad-clip { flex-direction: column; align-items: stretch; gap: 3px; max-width: none; padding: 4px 4px 3px; }
+.notepad-clip-img {
+  display: block; width: 100%; height: auto; border-radius: 3px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nb-dim) 25%, transparent); pointer-events: none; -webkit-user-drag: none;
+}
+/* Which of a clip's pictures shows: as the page showed it, but for one
+   pinned in the dark theme — written over in white ink — white on black. */
+.notepad-clip-img.dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .notepad-clip.fixed.has-dark .notepad-clip-img.light { display: none; }
+  :root:not([data-theme="light"]) .notepad-clip.fixed .notepad-clip-img.dark { display: block; }
+  :root:not([data-theme="light"]) .notepad-clip.fixed:not(.has-dark) .notepad-clip-img.light { filter: invert(1) hue-rotate(180deg); }
+}
+:root[data-theme="dark"] .notepad-clip.fixed.has-dark .notepad-clip-img.light { display: none; }
+:root[data-theme="dark"] .notepad-clip.fixed .notepad-clip-img.dark { display: block; }
+:root[data-theme="dark"] .notepad-clip.fixed:not(.has-dark) .notepad-clip-img.light { filter: invert(1) hue-rotate(180deg); }
+.notepad-clip-foot { display: flex; align-items: center; gap: 6px; padding: 0 2px; font-size: 11px; line-height: 1.3; min-width: 0; }
+.notepad-clip-foot .notepad-link-page { opacity: 0.55; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- typed notes (notepad-texts.css), as Hush sets a text shape ---- */
+.notepad-text {
+  position: absolute; width: max-content; max-width: 350px; color: var(--nb-text); font-family: var(--nb-sans);
+  font-size: 16px; line-height: 1.3; cursor: pointer; touch-action: none;
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.notepad-text.editing { visibility: hidden; }
+.notepad-text > .notepad-note-label { left: 0; top: -16px; line-height: 1; }
+.notepad-text .notepad-link-size { right: -16px; bottom: -10px; }
+.notepad-text .notepad-link-size::after { opacity: 0.35; }
+.notepad-text:hover .notepad-link-size::after { opacity: 0.8; }
+.notepad-text-body { white-space: pre-wrap; overflow-wrap: break-word; }
+.notepad-text-line { position: relative; }
+.notepad-text-line.h1 .notepad-text-words, .notepad-text-line.h2 .notepad-text-words, .notepad-text-line.h3 .notepad-text-words { color: var(--nb-accent); }
+.notepad-text-line.h1 .notepad-text-words { font-size: 1.8em; }
+.notepad-text-line.h2 .notepad-text-words { font-size: 1.4em; }
+.notepad-text-line.h3 .notepad-text-words { font-size: 1.15em; }
+.notepad-text-line.quote::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: color-mix(in srgb, var(--nb-text) 50%, transparent);
+}
+.notepad-text-line.quote .notepad-text-words { opacity: 0.8; }
+.notepad-text-marker { position: absolute; top: 0; opacity: 0.75; font-style: normal; font-weight: normal; }
+.notepad-text-box {
+  position: absolute; top: 0.225em; width: 0.85em; height: 0.85em; box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, var(--nb-text) 60%, transparent); cursor: pointer;
+}
+.notepad-text-box::before { content: ""; position: absolute; inset: -0.45em; }
+.notepad-text-box svg {
+  position: absolute; inset: -1.5px; width: calc(100% + 3px); height: calc(100% + 3px);
+  fill: none; stroke: var(--nb-text); stroke-width: 2px; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85;
+}
+.notepad-text .b { font-weight: 700; }
+.notepad-text .i { font-style: italic; }
+.notepad-text .hl { background: rgb(255 208 0 / 0.3); }
+.notepad-text .ln { text-decoration: underline 1px var(--nb-accent); text-underline-offset: 2px; }
+.notepad-text-editor {
+  position: absolute; z-index: 2; box-sizing: content-box; min-width: 20px; margin: 0; padding: 0; border: none; border-radius: 0;
+  outline: none; background: transparent; box-shadow: none; color: var(--nb-text); caret-color: var(--nb-text);
+  font-family: var(--nb-sans); font-size: 16px; line-height: 1.3; white-space: pre-wrap; overflow-wrap: break-word;
+  overflow: hidden; resize: none; -webkit-appearance: none; appearance: none; -webkit-user-select: text; user-select: text;
+}
+.notepad-text-editor.empty { padding-left: 2px; border-left: 2px solid var(--nb-text); caret-color: transparent; animation: notepad-text-blink 1s step-end infinite; }
+@keyframes notepad-text-blink { 50% { border-left-color: transparent; } }
+
+/* ---- around the notebook: its toggle and the page's "Send to Notebook" ---- */
+/* ⌥-click on a page: one button above what was picked (a hole, like the
+   selection menu). */
+#nb-pop .nb-send { font-weight: 600; }

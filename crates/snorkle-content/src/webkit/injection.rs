@@ -40,6 +40,12 @@
 //!   constant watcher (`snorkle_core::imagemenu::watch_js`) added with the
 //!   selection watcher posts an image's URL and position to the same
 //!   handler; `imagemenu::parse_report` parses it strictly.
+//! - Notebook (channel C23, every page, owner request 2026-11-15): a
+//!   constant watcher (`snorkle_core::notebook::watch_js`) added with the
+//!   selection watcher posts ⌥-click and ⌥-drag reports (geometry only) to
+//!   the same handler; `notebook::parse_report` parses them strictly. The
+//!   notebook's quote button reads the sentence under a point with
+//!   [`read_now`] (`notebook::drop_js`, two numbers) when it is let go.
 //! - Save for Later (channel C22, owner request 2026-11-09): [`call_async`]
 //!   runs `snorkle_core::later`'s constant capture code in the client world
 //!   when the user saves a page or adds pages to a saved one, and reads
@@ -263,7 +269,11 @@ pub fn make_scripts(
     let selection = selection.map(|events| unsafe {
         let watcher = WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
             WKUserScript::alloc(mtm),
-            &NSString::from_str(&(snorkle_core::selection::watch_js() + &snorkle_core::imagemenu::watch_js())),
+            &NSString::from_str(
+                &(snorkle_core::selection::watch_js()
+                    + &snorkle_core::imagemenu::watch_js()
+                    + &snorkle_core::notebook::watch_js()),
+            ),
             WKUserScriptInjectionTime::AtDocumentEnd,
             true,
             &world,

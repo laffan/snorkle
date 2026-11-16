@@ -36,13 +36,33 @@ pub struct SelectionRect {
     pub vw: f64,
 }
 
+/// Reports that the page has, or no longer has, a text field or editable
+/// region with keyboard focus (2026-11-15; [`parse_edit_report`]).
+pub const EDIT_ON: &str = "{\"edit\":1}";
+pub const EDIT_OFF: &str = "{\"edit\":0}";
+
 /// Watches the selection: on change (debounced) posts `{"r":[x,y,w,h],
 /// "vw":w}` or `null`; on scroll posts `null` at once and the new place
 /// when scrolling stops. Constant code, main frame, document end.
+///
+/// It also posts [`EDIT_ON`] / [`EDIT_OFF`] when the page gains or loses a
+/// focused text field (an `input` that takes text, a `textarea`, an
+/// editable element or `designMode`; a focused frame counts, since its
+/// insides cannot be seen) while the page itself has keyboard focus, so
+/// the arrow-key shortcuts leave ⌘← and the others to the text.
 pub fn watch_js() -> String {
     format!(
         r#"(function(){{var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.{HANDLER_NAME};
 if(!h||window.__snorkleSel)return;window.__snorkleSel=1;var t=0,last='';
+var ed=0;function act(){{var e=document.activeElement;for(var i=0;e&&e.shadowRoot&&e.shadowRoot.activeElement&&i<8;i++)e=e.shadowRoot.activeElement;return e;}}
+function editable(e){{if(!e)return false;if(e.isContentEditable||document.designMode==='on')return true;var n=e.tagName;
+if(n==='TEXTAREA'||n==='IFRAME'||n==='FRAME')return true;
+return n==='INPUT'&&!/^(button|submit|reset|checkbox|radio|range|color|file|image|hidden)$/i.test(e.type||'text');}}
+function edit(){{var v=document.hasFocus()&&editable(act())?1:0;if(v!==ed){{ed=v;h.postMessage(v?'{EDIT_ON}':'{EDIT_OFF}');}}}}
+function editSoon(){{setTimeout(edit,0);}}
+document.addEventListener('focusin',edit,true);document.addEventListener('focusout',editSoon,true);
+window.addEventListener('focus',edit);window.addEventListener('blur',editSoon);
+window.addEventListener('pagehide',function(){{if(ed){{ed=0;h.postMessage('{EDIT_OFF}');}}}});edit();
 function send(){{t=0;var s=window.getSelection(),out=null;
 if(s&&s.rangeCount&&!s.isCollapsed&&String(s).trim()){{var r=s.getRangeAt(0).getBoundingClientRect(),v=window.visualViewport;
 if(r.width||r.height){{var ox=v?v.offsetLeft:0,oy=v?v.offsetTop:0;
@@ -83,6 +103,16 @@ pub fn parse_report(body: &str) -> Option<Option<SelectionRect>> {
     Some(Some(SelectionRect { x: n[0], y: n[1], w: n[2], h: n[3], vw }))
 }
 
+/// An editing report from [`watch_js`]: `Some(true)` / `Some(false)`, or
+/// `None` if the body is not one (exact match only).
+pub fn parse_edit_report(body: &str) -> Option<bool> {
+    match body {
+        EDIT_ON => Some(true),
+        EDIT_OFF => Some(false),
+        _ => None,
+    }
+}
+
 /// The selected text as read back: cleaned, capped; `None` if empty.
 pub fn clean_text(raw: &str) -> Option<String> {
     let t = clean_multiline(raw, MAX_TEXT_CHARS);
@@ -115,5 +145,11 @@ mod tests {
         assert_eq!(clean_text("  hello \u{202e}\n\n\nworld ").as_deref(), Some("hello\n\nworld"));
         assert!(clean_text(" \n ").is_none());
         assert!(watch_js().contains(&format!("messageHandlers.{HANDLER_NAME}")));
+        assert_eq!(parse_edit_report(r#"{"edit":1}"#), Some(true));
+        assert_eq!(parse_edit_report(r#"{"edit":0}"#), Some(false));
+        for bad in [r#"{"edit":2}"#, r#"{"edit":true}"#, r#" {"edit":1}"#, "null"] {
+            assert_eq!(parse_edit_report(bad), None, "{bad}");
+        }
+        assert!(watch_js().contains(EDIT_ON) && watch_js().contains(EDIT_OFF));
     }
 }

@@ -115,6 +115,20 @@ impl ContentHost {
 
     pub fn set_shortcuts(&mut self, _bindings: Vec<crate::KeyBinding>, _suspend: bool) {}
 
+    pub fn text_editing_changed(&mut self) {}
+
+    pub fn clip_region(&mut self, _tab: TabId, _rect: (f64, f64, f64, f64), _vw: f64, done: crate::ThumbDone) {
+        done(None);
+    }
+
+    pub fn notebook_run(&mut self, _tab: TabId, _source: &str) {}
+
+    pub fn notebook_read(&mut self, _tab: TabId, _source: &str, done: crate::TextDone) {
+        done(None);
+    }
+
+    pub fn plain_page(&mut self, _tab: TabId, _on: bool) {}
+
     /// No downloads off iOS and macOS.
     pub fn cancel_download(&mut self, _id: u64) {}
 
