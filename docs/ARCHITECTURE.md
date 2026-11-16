@@ -713,6 +713,15 @@ Bringing things in (C23): a constant watcher in every page's client world report
 - ⌥-drag, or a drag while the scissors are on (clip mode, which then ends): a dashed box, and the
   region becomes a clip at once.
 
+- dragging selected text or an image out of a page (2026-11-16): the watcher reports where the
+  drag began (the selection, or the image's box) and when it ends; let go on the notebook's
+  canvas, it lands where it was dropped as a quote (the selection read with C20) or a clip of that
+  box. The drag's own data (the page's HTML, image files) is not used. Text dragged from elsewhere
+  becomes a typed note (a bare web address, a link); images from elsewhere are refused. A drag
+  resting on the notebook's button opens it. Tauri's macOS file-drop handler is off for the
+  chrome's window (`dragDropEnabled: false`), since it swallows every drag into the chrome; the
+  chrome cancels any drop it does not take (outside text fields), so nothing dropped navigates it.
+
 A clip is a JPEG the app draws from its own web view (`takeSnapshotWithConfiguration` with the
 region; the page is shown without its view modes for 0.32 s first, so black and white, hidden media
 and the dark inversion are not in it); the chrome makes its white-on-black copy (zotero-helper's

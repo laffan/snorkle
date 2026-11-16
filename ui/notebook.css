@@ -246,6 +246,12 @@
 .notepad-text-editor.empty { padding-left: 2px; border-left: 2px solid var(--nb-text); caret-color: transparent; animation: notepad-text-blink 1s step-end infinite; }
 @keyframes notepad-text-blink { 50% { border-left-color: transparent; } }
 
+/* Something dragged over the canvas (text or an image from a page). */
+.notepad-main.drop-target .notepad-canvas {
+  box-shadow: inset 0 0 0 2px #f19837;
+  background-color: color-mix(in srgb, #f19837 7%, transparent);
+}
+
 /* ---- around the notebook: its toggle and the page's "Send to Notebook" ---- */
 /* ⌥-click on a page: one button above what was picked (a hole, like the
    selection menu). */

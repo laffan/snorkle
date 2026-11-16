@@ -116,6 +116,11 @@ fn macos_window_and_bundle() {
     let w = &c["app"]["windows"][0];
     assert_eq!(w["titleBarStyle"], "Overlay", "macOS: no title bar; pages run the full height");
     assert_eq!(w["hiddenTitle"], Value::Bool(true));
+    // Text and images dragged from pages are dropped on the Notebook as
+    // HTML5 drops; Tauri's own file-drop handler (macOS) would swallow
+    // every drag into the chrome. The chrome cancels drops it does not
+    // take, so nothing dropped can navigate it.
+    assert_eq!(w["dragDropEnabled"], Value::Bool(false));
     assert!(c["bundle"]["macOS"]["minimumSystemVersion"].as_str().is_some());
     let e = fs::read_to_string(root().join(c["bundle"]["macOS"]["entitlements"].as_str().unwrap())).unwrap();
     let keys: Vec<&str> = e.lines().filter_map(|l| l.trim().strip_prefix("<key>")?.strip_suffix("</key>")).collect();

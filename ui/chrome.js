@@ -3548,6 +3548,9 @@
   T.event.listen('notebook_pick', (e) => {
     const { tab, kind, rect } = e.payload || {};
     if (kind === 'end') { if (tab === clipTab) { clipTab = null; if (notebook) notebook.clipEnded(); } return; }
+    // A drag began in a page (selected text, or an image), or ended.
+    if (kind === 'dtext' || kind === 'dimg') { if (rect) pageDrag = { tab, kind, rect, at: performance.now(), ended: 0 }; return; }
+    if (kind === 'dend') { if (pageDrag && pageDrag.tab === tab) pageDrag.ended = performance.now(); return; }
     if (kind === 'hide') { if (nbPick && nbPick.tab === tab) hideNbPop(); return; }
     const shown = shownPanes().some((p) => p.tab === tab);
     if (!rect || !shown || modalOpen || panel) return;
@@ -3575,6 +3578,48 @@
       if (!notebookShown()) toast('Sent to the notebook.');
     }).catch((err) => toast(String(err)));
   });
+
+  // Dragged onto the notebook (2026-11-16): what a drag from a page holds
+  // is taken from the page itself, as ⌥-click takes it (selected text read
+  // with C20, an image clipped from the app's own picture of the page);
+  // the drag's own data (HTML, image files) is never used. The page reports
+  // where a drag began; its report stays good until the drag ends (and a
+  // moment after, as the end may arrive before the drop) or for 2 minutes.
+  let pageDrag = null; // { tab, kind, rect, at, ended }
+  const cleanDropped = (t) => String(t || '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
+  const sameText = (a, b) => a.replace(/\s+/g, ' ').trim().slice(0, 40) === b.replace(/\s+/g, ' ').trim().slice(0, 40);
+  function dropOnNotebook({ text, files }) {
+    const now = performance.now();
+    const d = pageDrag && now - pageDrag.at < 120000 && (!pageDrag.ended || now - pageDrag.ended < 3000) ? pageDrag : null;
+    pageDrag = null;
+    const dropped = cleanDropped(text);
+    if (d) {
+      const t = captureTab(d.tab);
+      if (!t) return Promise.resolve(null);
+      const source = { url: t.url.full, title: t.title || '' };
+      if (d.kind === 'dimg') {
+        return T.core.invoke('notebook_clip', { tab: t.id, x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h, vw: d.rect.vw })
+          .then((image) => ({ kind: 'clip', image, target: { kind: 'clip', ...source } }))
+          .catch((err) => { toast(String(err)); return null; });
+      }
+      return T.core.invoke('read_selection', { tab: t.id }).then((sel) => {
+        // Text dropped from elsewhere meanwhile: not this page's selection.
+        if (sel && (!dropped || sameText(sel, dropped))) {
+          return { kind: 'quote', target: { kind: 'quote', url: textFragmentUrl(t.url.full, sel), title: source.title, text: sel } };
+        }
+        return dropped ? { kind: 'text', text: dropped, target: { kind: 'page' } } : null;
+      }).catch(() => null);
+    }
+    // Not from a page: a link becomes a link, other text a typed note;
+    // pictures from elsewhere are not taken (the chrome decodes no images
+    // it did not make).
+    if (/^https?:\/\/\S+$/i.test(dropped)) return Promise.resolve({ kind: 'page', target: { kind: 'page', url: dropped, title: dropped } });
+    if (dropped) return Promise.resolve({ kind: 'text', text: dropped, target: { kind: 'page' } });
+    if (files) toast('Images can be dragged in from pages.');
+    return Promise.resolve(null);
+  }
+  // A drag resting on the notebook's button opens it, to drop into.
+  $('notebook-btn').addEventListener('dragenter', (e) => { e.preventDefault(); if (!notebookOpen) setNotebook(true); });
 
   // The page shown changes: a stroke after it starts a new note, the
   // notebook may follow it, and clip mode ends in the page left.
@@ -4640,7 +4685,22 @@
     openLink: openTypedLink,
     setClipMode,
     dragLink,
+    drop: dropOnNotebook,
     close: () => setNotebook(false),
+  });
+
+  // Nothing dropped on the chrome navigates it (Tauri's own file-drop
+  // handler is off, so the notebook can take drops): a drop no part of
+  // the chrome takes is refused, except into text fields.
+  const takesText = (t) => t && t.closest && t.closest('input, textarea, [contenteditable="true"]');
+  document.addEventListener('dragover', (e) => {
+    if (e.defaultPrevented || takesText(e.target)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+  });
+  document.addEventListener('drop', (e) => {
+    if (e.defaultPrevented || takesText(e.target)) return;
+    e.preventDefault();
   });
   notebookOpen = pref('notebookOpen') === '1';
   applyNotebook();

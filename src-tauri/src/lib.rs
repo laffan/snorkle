@@ -266,6 +266,9 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
                     Report::Clip(r) => ("clip", Some(r)),
                     Report::End => ("end", None),
                     Report::Hide => ("hide", None),
+                    Report::DragText(r) => ("dtext", Some(r)),
+                    Report::DragImage(r) => ("dimg", Some(r)),
+                    Report::DragEnd => ("dend", None),
                 };
                 handle.emit_to(CHROME_LABEL, "notebook_pick", serde_json::json!({ "tab": tab, "kind": kind, "rect": rect }))
             }

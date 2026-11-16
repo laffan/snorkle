@@ -1303,19 +1303,21 @@
 
     // A new link, once drawn, is kept inside the view's width and moved
     // down past anything it would cover (zotero-helper stacked them at the
-    // middle, 14 px apart, where a clip could hide a quote).
-    function settle(link, vw) {
+    // middle, 14 px apart, where a clip could hide a quote). One dropped
+    // where the user let it go (`avoid` false) stays there.
+    function settle(link, vw, avoid = true) {
       const chip = chips.get(link.id);
       if (!chip) return;
       const w = chip.offsetWidth || 120;
       const h = chip.offsetHeight || 30;
       const right = vw - pan.x - 8;
       if (link.x + w > right) link.x = Math.round(Math.max(-pan.x + 8, right - w));
+      if (link.x < -pan.x + 8) link.x = Math.round(-pan.x + 8);
       const boxes = env.pad().links.filter((l) => l !== link).map((l) => {
         const c = chips.get(l.id);
         return [l.x, l.y, l.x + (c ? c.offsetWidth : 120), l.y + (c ? c.offsetHeight : 30)];
       });
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; avoid && i < 40; i++) {
         const hit = boxes.find((b) => link.x < b[2] + 6 && link.x + w > b[0] - 6 && link.y < b[3] + 6 && link.y + h > b[1] - 6);
         if (!hit) break;
         link.y = Math.round(hit[3] + 12);
@@ -1560,10 +1562,11 @@
         env.changed();
         return true;
       },
-      // A link (or, with `clip`, a clip `w` wide) from a page: at the
-      // middle of the view while the pad is shown; while it is not, under
-      // everything on the pad, and the pad panned to it for next time.
-      addLink(target, clip) {
+      // A link (or, with `clip`, a clip `w` wide) from a page: where it was
+      // dropped (`at`, a client point), else at the middle of the view
+      // while the pad is shown; while it is not, under everything on the
+      // pad, and the pad panned to it for next time.
+      addLink(target, clip, at) {
         const pad = env.pad();
         const shown = host.clientWidth > 0 && host.clientHeight > 0;
         const vw = shown ? host.clientWidth : seen.w;
@@ -1571,7 +1574,11 @@
         const half = clip ? Math.max(80, Math.min(clip.w, vw * 0.7)) / 2 : 90;
         const link = { id: newId('link'), x: 0, y: 0, target };
         if (clip) { link.image = clip.image; if (clip.imageDark) link.imageDark = clip.imageDark; link.w = Math.round(half * 2); }
-        if (shown) {
+        if (shown && at) {
+          const [x, y] = toCanvas(at.x, at.y);
+          link.x = Math.round(x - (clip ? half : 12));
+          link.y = Math.round(y - 12);
+        } else if (shown) {
           const nudge = (pad.links.length % 5) * 14;
           link.x = Math.round(vw / 2 - pan.x - half + nudge);
           link.y = Math.round(vh / 2 - pan.y - (clip ? 60 : 12) + nudge);
@@ -1588,7 +1595,19 @@
         pad.links.push(link);
         history.push({ kind: 'link', id: link.id });
         drawLabels();
-        settle(link, vw);
+        settle(link, vw, !at);
+        env.changed();
+        return link;
+      },
+      // A typed note with `text` (dropped text from outside a page), its
+      // top left where it was let go.
+      addText(text, target, at) {
+        const [x, y] = toCanvas(at.x, at.y);
+        const link = { id: newId('text'), x: Math.round(x), y: Math.round(y), target, text };
+        env.pad().links.push(link);
+        history.push({ kind: 'link', id: link.id });
+        drawLabels();
+        settle(link, host.clientWidth || seen.w, false);
         env.changed();
         return link;
       },
@@ -2094,6 +2113,48 @@
       window.addEventListener('pointerdown', awayConfirm, true);
     });
 
+    // Dragged in (2026-11-16): selected text or an image from a page, let
+    // go on the canvas, lands there (the chrome takes what it is from the
+    // page itself: `env.drop`); text from elsewhere becomes a typed note.
+    // A note being typed takes a drop into its words as usual.
+    let dropDepth = 0;
+    const dropShown = (on) => main.classList.toggle('drop-target', on);
+    const intoText = (e) => e.target && e.target.closest && e.target.closest('textarea');
+    canvas.addEventListener('dragenter', (e) => {
+      if (intoText(e)) return;
+      e.preventDefault();
+      dropDepth++;
+      dropShown(true);
+    });
+    canvas.addEventListener('dragover', (e) => {
+      if (intoText(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      dropShown(true);
+    });
+    canvas.addEventListener('dragleave', () => {
+      dropDepth = Math.max(0, dropDepth - 1);
+      if (!dropDepth) dropShown(false);
+    });
+    canvas.addEventListener('drop', (e) => {
+      if (intoText(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dropDepth = 0;
+      dropShown(false);
+      const dt = e.dataTransfer;
+      const text = dt ? dt.getData('text/plain') : '';
+      const files = !!(dt && dt.files && dt.files.length);
+      const at = { x: e.clientX, y: e.clientY };
+      Promise.resolve(env.drop({ text, files })).then((got) => {
+        if (!got || !surface) return;
+        if (got.kind === 'clip') placeClip(got.image, got.target, at);
+        else if (got.kind === 'text') surface.addText(got.text, got.target, at);
+        else surface.addLink(got.target, null, at);
+      });
+    });
+
     // ⌘Z in the notebook (not while typing a note).
     root.addEventListener('keydown', (e) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
@@ -2133,6 +2194,19 @@
     const waiting = [];
     const whenReady = (f) => { if (surface) f(); else waiting.push(f); };
 
+    // A clip (an app-made JPEG), as wide as it was on screen (at most
+    // 600 px), at `at` or where links from pages go; then its dark copy.
+    function placeClip(image, target, at) {
+      const probe = new Image();
+      probe.onload = () => {
+        const w = Math.min(probe.naturalWidth / Math.min(2, window.devicePixelRatio || 1), 600);
+        const link = surface.addLink(target, { image, w: Math.max(80, Math.round(w)) }, at);
+        darkCopy(image).then((dark) => surface.setDark(link, dark));
+      };
+      probe.onerror = () => env.toast('That clip could not be shown.');
+      probe.src = image;
+    }
+
     return {
       // The page shown changed (another page, or another tab): a stroke
       // after it starts a new note; the pad follows it, if asked to.
@@ -2149,18 +2223,7 @@
       clipping: () => clipping,
       // Something from a page: a quote (target only), or a clip.
       addQuote(target) { whenReady(() => surface.addLink(target)); },
-      addClip(image, target) {
-        whenReady(() => {
-          const probe = new Image();
-          probe.onload = () => {
-            const w = Math.min(probe.naturalWidth / Math.min(2, window.devicePixelRatio || 1), 600);
-            const link = surface.addLink(target, { image, w: Math.max(80, Math.round(w)) });
-            darkCopy(image).then((dark) => surface.setDark(link, dark));
-          };
-          probe.onerror = () => env.toast('That clip could not be shown.');
-          probe.src = image;
-        });
-      },
+      addClip(image, target) { whenReady(() => placeClip(image, target, null)); },
       shown() {
         whenReady(() => { surface.render(); renderBar(); });
       },

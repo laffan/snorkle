@@ -14,7 +14,12 @@
 //! - ⌥-drag, or a drag while the notebook's scissors are on (clip mode):
 //!   `{"nb":"clip", ...}` with the box drawn;
 //! - Escape in clip mode: `{"nb":"end"}`; a press or a scroll after a
-//!   pick: `{"nb":"hide"}` (its "Send to Notebook" goes).
+//!   pick: `{"nb":"hide"}` (its "Send to Notebook" goes);
+//! - a drag beginning in the page (2026-11-16): `{"nb":"dtext", ...}` with
+//!   where the selection is, or `{"nb":"dimg", ...}` with the image's box;
+//!   and `{"nb":"dend"}` when it ends. Dropped on the notebook, the drag
+//!   becomes a quote (the selection read with C20) or a clip of that box:
+//!   the drag's own data (the page's HTML, image bytes) is never used.
 //!
 //! Reports carry geometry only, parsed strictly ([`parse_report`]). An
 //! image or a region becomes a picture the app draws itself from its own
@@ -69,6 +74,13 @@ pub enum Report {
     /// The page was pressed or scrolled after a pick: "Send to Notebook"
     /// goes.
     Hide,
+    /// A drag began in the page: selected text (where the selection is),
+    /// or an image (its box in view). What is dropped in the notebook is
+    /// taken from the page by these, not from the drag's data.
+    DragText(SelectionRect),
+    DragImage(SelectionRect),
+    /// A drag that began in the page ended (dropped anywhere, or not).
+    DragEnd,
 }
 
 /// Watches for ⌥-click, ⌥-drag and clip mode (see the module docs).
@@ -83,7 +95,7 @@ var st=document.createElement('style');st.textContent="html[data-snorkle-nb-clip
 (document.head||document.documentElement).appendChild(st);
 function vp(){{var v=window.visualViewport;return [v?v.offsetLeft:0,v?v.offsetTop:0,Math.round(v?v.width:innerWidth),Math.round(v?v.height:innerHeight)];}}
 var picked=0;function unpick(){{if(picked){{picked=0;h.postMessage('{{"nb":"hide"}}');}}}}
-function post(kind,r){{if(kind!=='clip')picked=1;var o=vp(),x0=Math.max(0,r.left-o[0]),y0=Math.max(0,r.top-o[1]),x1=Math.min(o[2],r.right-o[0]),y1=Math.min(o[3],r.bottom-o[1]);
+function post(kind,r){{if(kind==='text'||kind==='img')picked=1;var o=vp(),x0=Math.max(0,r.left-o[0]),y0=Math.max(0,r.top-o[1]),x1=Math.min(o[2],r.right-o[0]),y1=Math.min(o[3],r.bottom-o[1]);
 if(x1-x0<1||y1-y0<1)return;h.postMessage(JSON.stringify({{nb:kind,r:[Math.round(x0),Math.round(y0),Math.round(x1-x0),Math.round(y1-y0)],vw:o[2]}}));}}
 function el(css){{var e=document.createElement('div');for(var k in css)e.style.setProperty(k,css[k],'important');document.documentElement.appendChild(e);return e;}}
 var MEDIA=/^(IMG|VIDEO|CANVAS|PICTURE)$/;
@@ -136,6 +148,10 @@ line.style.setProperty('width',Math.hypot(dx,dy)+'px','important');line.style.se
 var r=sentenceAt(p[0]-o[0],p[1]-o[1]);if(window.CSS&&CSS.highlights&&window.Highlight){{if(r)CSS.highlights.set('snorkle-nb',new Highlight(r));else CSS.highlights.delete('snorkle-nb');}}hl=r;}};
 nb.drop=function(fx,fy){{var p=point(fx,fy),o=vp(),r=sentenceAt(p[0]-o[0],p[1]-o[1]);clearHover();return JSON.stringify({{t:r?String(r).slice(0,2000):''}});}};
 nb.leave=clearHover;
+document.addEventListener('dragstart',function(e){{var t=e.target&&e.target.nodeType===1?e.target:(e.target&&e.target.parentElement),s=window.getSelection(),
+txt=s&&s.rangeCount&&!s.isCollapsed&&String(s).trim(),img=t&&t.closest?t.closest('img,picture,video,canvas'):null;
+if(img&&!(txt&&s.containsNode(img,true)))post('dimg',img.getBoundingClientRect());else if(txt)post('dtext',s.getRangeAt(0).getBoundingClientRect());}},true);
+document.addEventListener('dragend',function(){{h.postMessage('{{"nb":"dend"}}');}},true);
 window.addEventListener('pagehide',function(){{nb.setClip(false);clearHover();}});}})();"#
     )
 }
@@ -196,6 +212,9 @@ pub fn parse_report(body: &str) -> Option<Report> {
     if body == r#"{"nb":"hide"}"# {
         return Some(Report::Hide);
     }
+    if body == r#"{"nb":"dend"}"# {
+        return Some(Report::DragEnd);
+    }
     let v: Value = serde_json::from_str(body).ok()?;
     let kind = v.get("nb")?.as_str()?;
     let r = v.get("r")?.as_array()?;
@@ -212,6 +231,8 @@ pub fn parse_report(body: &str) -> Option<Report> {
     match kind {
         "text" => Some(Report::Text(rect)),
         "img" => Some(Report::Image(rect)),
+        "dtext" => Some(Report::DragText(rect)),
+        "dimg" => Some(Report::DragImage(rect)),
         "clip" => Some(Report::Clip(rect)),
         _ => None,
     }
@@ -385,6 +406,9 @@ mod tests {
         assert_eq!(parse_report(r#"{"nb":"clip","r":[10,20,300,18],"vw":1024}"#), Some(Report::Clip(r)));
         assert_eq!(parse_report(r#"{"nb":"end"}"#), Some(Report::End));
         assert_eq!(parse_report(r#"{"nb":"hide"}"#), Some(Report::Hide));
+        assert_eq!(parse_report(r#"{"nb":"dend"}"#), Some(Report::DragEnd));
+        assert_eq!(parse_report(r#"{"nb":"dtext","r":[10,20,300,18],"vw":1024}"#), Some(Report::DragText(r)));
+        assert_eq!(parse_report(r#"{"nb":"dimg","r":[10,20,300,18],"vw":1024}"#), Some(Report::DragImage(r)));
         for bad in [
             r#"{"nb":"other","r":[1,2,3,4],"vw":9}"#,
             r#"{"nb":"clip","r":[1,2,0,4],"vw":9}"#,

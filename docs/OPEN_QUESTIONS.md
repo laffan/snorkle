@@ -964,3 +964,13 @@ The live sites were not reachable or not signed in from this environment.
   (it lives in the right panel), auto-shift (a PDF two-page mode), Apple Pencil double-tap
   (no UIKit `UIPencilInteraction` reaches the chrome's web view). The scroll link follows the
   page shown (it glides to what was written about the current address) instead of PDF pages.
+- **[verify] Dragging from pages into the Notebook (2026-11-16).** Assumed: WKWebView fires
+  `dragstart` in the page (the client world hears it) for a dragged selection and a dragged image
+  (iPadOS: a long press then a move, or a trackpad drag; macOS: dragging the selection or the
+  image), and the chrome's web view receives HTML5 `dragover`/`drop` for a drag from another web
+  view in the same window once Tauri's file-drop handler is off (macOS; wry has none on iOS). Also
+  assumed: with the chrome's `dragover` cancelled and `dropEffect` "none", WebKit does not load a
+  dropped link or file in the chrome. The image's box is taken when the drag starts; if the page
+  scrolls during the drag, the clip shows what is there at the drop. The image watcher's
+  `-webkit-touch-callout: none` on images is assumed not to stop iPadOS from dragging them.
+
