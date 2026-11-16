@@ -4054,6 +4054,9 @@
       toggleRight();
     } else if (name === 'bookmark') {
       bookmarkShortcut();
+    } else if ((name === 'find' || name === 'find_next' || name === 'find_prev') && notebook && notebookShown() && notebook.hasFocus()) {
+      // In the notebook, ⌘F / ⌘G search the notebook instead of the page.
+      notebook.findKey(name);
     } else if (name === 'find') {
       openFind();
     } else if (name === 'split_columns' || name === 'split_rows') {

@@ -704,6 +704,13 @@ held for Delete / Edit, sized by a grip, fixed by a pin under the ink), undo tak
 change, and the trash can clears it after asking. A note remembers the page it was written beside
 (its site shows small above it; a tap goes there); the scroll link makes the pad glide to what was
 written about the page shown. Not ported: the floating window, auto-shift, Pencil double-tap.
+**Search** (2026-11-16, not in zotero-helper): the magnifier in the bar, or ⌘F while the notebook
+has the focus (⌘G / ⌘⇧G step; elsewhere they still find in the page), opens a field under the bar.
+It finds typed notes' and quotes' words and, for every item including handwritten notes, the title
+and address of the page it came from; every word must appear, case and accents ignored.
+Handwriting itself is not read. Matches are outlined (handwritten notes framed), everything else
+faded; ↩ / ⇧↩ go through them top to bottom and glide the pad to each. Chrome only: no command,
+nothing stored.
 
 Bringing things in (C23): a constant watcher in every page's client world reports
 - ⌥-click on a selection, or on text (it selects that sentence, `Intl.Segmenter`), or on an image:

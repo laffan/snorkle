@@ -75,6 +75,7 @@
     scissors: () => icon([['circle', { cx: '4', cy: '4.2', r: '2.1' }], ['circle', { cx: '4', cy: '11.8', r: '2.1' }], ['path', { d: 'M5.8 5.3L14 12.5M5.8 10.7L14 3.5' }]], 13),
     eraser: () => icon([['path', { d: 'M6.2 13.5L2.4 9.7a1 1 0 0 1 0-1.4l5.9-5.9a1 1 0 0 1 1.4 0l3.8 3.8a1 1 0 0 1 0 1.4l-6 5.9z' }], ['path', { d: 'M5 7.1l4.9 4.9' }], ['path', { d: 'M6.2 13.5h7.3' }]], 14, { 'stroke-width': '1.6' }),
     lasso: () => icon([['ellipse', { cx: '8.5', cy: '6.3', rx: '5.5', ry: '3.8', 'stroke-dasharray': '2.2 1.8' }], ['path', { d: 'M5.2 9.4c-1 .9-1 2.2 0 2.8.9.6.9 1.6.1 2.3' }]], 14),
+    search: () => icon([['circle', { cx: '7', cy: '7', r: '4.6' }], ['path', { d: 'M10.4 10.4L14 14' }]], 16, { 'stroke-width': '1.7' }),
     map: () => icon([['path', { d: 'M1.8 3.8l4-1.6 4.4 1.6 4-1.6v10l-4 1.6-4.4-1.6-4 1.6z' }], ['path', { d: 'M5.8 2.2v10M10.2 3.8v10' }]], 17),
     follow: () => icon([['path', { d: 'M8 1.8v12.4' }], ['path', { d: 'M5.6 4.2L8 1.8l2.4 2.4' }], ['path', { d: 'M5.6 11.8L8 14.2l2.4-2.4' }], ['path', { d: 'M5.2 7h5.6M5.2 9h5.6' }]], 17),
     undo: () => icon([['path', { d: 'M5.5 3.5L2.5 6.5l3 3' }], ['path', { d: 'M2.5 6.5h7a3.5 3.5 0 0 1 0 7H7' }]], 16, { 'stroke-width': '2' }),
@@ -271,6 +272,8 @@
     let pan = { x: 0, y: 0 };
     let lifted = null;
     let lift = { x: 0, y: 0 };
+    // While a search shows matches: the notes drawn in full (others faint).
+    let keep = null;
     let themeInk = '';
     let writing = false;
     let frame = 0;
@@ -313,9 +316,11 @@
         const [ox, oy] = up ? [lift.x, lift.y] : [0, 0];
         if (box[2] + ox < vx0 || box[0] + ox > vx1 || box[3] + oy < vy0 || box[1] + oy > vy1) continue;
         if (s.color !== color || s.width !== width) style((color = s.color), (width = s.width));
+        ctx.globalAlpha = keep && !keep.has(s.note) ? 0.2 : 1;
         ctx.setTransform(dpr, 0, 0, dpr, tx + ox * dpr, ty + oy * dpr);
         ctx.stroke(path);
       }
+      ctx.globalAlpha = 1;
       if (live) drawLive();
     }
 
@@ -400,6 +405,12 @@
         cancelAnimationFrame(frame);
         if (misfit()) fit();
         draw();
+      },
+      // A search's matching notes (ids) drawn in full and the rest faint;
+      // null: all in full.
+      dim(notes) {
+        keep = notes;
+        redraw();
       },
       lift(list, dx = 0, dy = 0) {
         lifted = list && list.length ? new Set(list) : null;
@@ -1178,6 +1189,11 @@
       const w = host.clientWidth || seen.w;
       const to = { x: pan.x, y: Math.round(40 - top.y) };
       if (top.x + pan.x < 0 || top.x + pan.x > w - 40) to.x = Math.round(20 - top.x);
+      glideTo(to);
+    }
+
+    // The pan eased to `to` (350 ms; a press stops it), then kept.
+    function glideTo(to) {
       const from = { ...pan };
       const t0 = performance.now();
       stopGlide();
@@ -1246,6 +1262,126 @@
       flush: env.flush,
     });
 
+    // ---- search (owner request 2026-11-16; zotero-helper has none) ------------
+    //
+    // What can be found: a typed note's words, a quote's words, and for
+    // every item (handwritten notes included) the title and address of the
+    // page it came from. Handwriting itself is not read. Every word of the
+    // query must appear (case and accents ignored). Matches are outlined,
+    // everything else faded; stepping goes through them top to bottom and
+    // glides the pad to each.
+    let search = null; // { terms, hits, at, frames }
+    const fold = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const where = (url) => String(url || '').replace(/^[a-z]+:\/\/(www\.)?/i, '');
+    const linkWords = (l) => fold([l.text, l.target.text, l.target.title, where(l.target.url)].filter(Boolean).join(' '));
+    const noteWords = (n) => fold([n.title, where(n.url)].filter(Boolean).join(' '));
+
+    function noteBox(id) {
+      let b = null;
+      for (const st of env.pad().strokes) {
+        if (st.note !== id) continue;
+        const k = strokeBox(st);
+        b = b ? [Math.min(b[0], k[0]), Math.min(b[1], k[1]), Math.max(b[2], k[2]), Math.max(b[3], k[3])] : [...k];
+      }
+      return b;
+    }
+
+    function findHits() {
+      const pad = env.pad();
+      const hits = [];
+      const all = (words) => search.terms.every((t) => words.includes(t));
+      for (const l of pad.links) {
+        if (!all(linkWords(l))) continue;
+        const c = chips.get(l.id);
+        hits.push({ link: l.id, box: [l.x, l.y, l.x + (c ? c.offsetWidth : 120), l.y + (c ? c.offsetHeight : 30)] });
+      }
+      for (const n of pad.notes) {
+        if (!all(noteWords(n))) continue;
+        const box = noteBox(n.id);
+        if (box) hits.push({ note: n.id, box });
+      }
+      hits.sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]);
+      return hits;
+    }
+
+    // Marks the matches (and fades the rest) as they are drawn now.
+    function paintSearch() {
+      if (!search) return;
+      const on = search.terms.length > 0;
+      const linkHits = new Set(search.hits.filter((h) => h.link).map((h) => h.link));
+      const cur = search.hits[search.at] || null;
+      for (const [id, c] of chips) {
+        c.classList.toggle('nb-dim', on && !linkHits.has(id));
+        c.classList.toggle('nb-hit', linkHits.has(id));
+        c.classList.toggle('nb-current', !!cur && cur.link === id);
+      }
+      for (const f of search.frames) f.remove();
+      search.frames = search.hits.filter((h) => h.note).map((h) => {
+        const f = el('div', 'nb-note-hit' + (cur === h ? ' nb-current' : ''));
+        Object.assign(f.style, { left: `${h.box[0] - 6}px`, top: `${h.box[1] - 6}px`, width: `${h.box[2] - h.box[0] + 12}px`, height: `${h.box[3] - h.box[1] + 12}px` });
+        layer.insertBefore(f, labels);
+        return f;
+      });
+      ink.dim(on ? new Set(search.hits.filter((h) => h.note).map((h) => h.note)) : null);
+    }
+
+    // Brings a match into view (only if it is not already).
+    function showHit(h) {
+      const w = host.clientWidth;
+      const ht = host.clientHeight;
+      if (!h || !w || !ht) return;
+      const [x0, y0, x1, y1] = h.box;
+      const inView = x0 + pan.x >= 0 && x1 + pan.x <= w && y0 + pan.y >= 0 && y1 + pan.y <= ht;
+      if (inView) return;
+      const cx = (x0 + x1) / 2;
+      const top = y1 - y0 > ht * 0.8 ? y0 - 20 : (y0 + y1) / 2 - ht / 2;
+      const fitsX = x0 + pan.x >= 0 && x1 + pan.x <= w;
+      const x = fitsX ? pan.x : x1 - x0 > w * 0.9 ? Math.round(20 - x0) : Math.round(w / 2 - cx);
+      glideTo({ x, y: Math.round(-top) });
+    }
+
+    function setSearch(query) {
+      const terms = fold(query).split(/\s+/).filter(Boolean);
+      if (!search) search = { terms: [], hits: [], at: -1, frames: [] };
+      search.terms = terms;
+      search.hits = terms.length ? findHits() : [];
+      // The first match from the top of the view down, else the first.
+      const top = -pan.y;
+      const next = search.hits.findIndex((h) => h.box[3] >= top);
+      search.at = search.hits.length ? (next >= 0 ? next : 0) : -1;
+      paintSearch();
+      showHit(search.hits[search.at]);
+      return { at: search.at, count: search.hits.length };
+    }
+
+    function stepSearch(dir) {
+      if (!search || !search.hits.length) return { at: -1, count: 0 };
+      search.at = (search.at + dir + search.hits.length) % search.hits.length;
+      paintSearch();
+      showHit(search.hits[search.at]);
+      return { at: search.at, count: search.hits.length };
+    }
+
+    function endSearch() {
+      if (!search) return;
+      for (const f of search.frames) f.remove();
+      search = null;
+      for (const c of chips.values()) c.classList.remove('nb-dim', 'nb-hit', 'nb-current');
+      ink.dim(null);
+    }
+
+    // The pad changed while searching: the matches again, where they are
+    // now (the view stays where it is).
+    function refreshSearch() {
+      if (!search || !search.terms.length) { paintSearch(); return; }
+      const was = search.hits[search.at];
+      search.hits = findHits();
+      const same = was ? search.hits.findIndex((h) => (h.link && h.link === was.link) || (h.note && h.note === was.note)) : -1;
+      search.at = search.hits.length ? Math.max(0, same) : -1;
+      paintSearch();
+      if (env.searchChanged) env.searchChanged({ at: search.at, count: search.hits.length });
+    }
+
     function drawLabels() {
       const pad = env.pad();
       labels.replaceChildren();
@@ -1260,6 +1396,7 @@
       const editing = chips.get(texts.editing() || '');
       if (editing) editing.classList.add('editing');
       lasso.prune();
+      refreshSearch();
       tell('content');
     }
 
@@ -1270,6 +1407,7 @@
       if (old && old.isConnected) old.replaceWith(c);
       else (l.fixed ? under : labels).appendChild(c);
       lasso.prune();
+      refreshSearch();
       tell('content');
     }
 
@@ -1517,6 +1655,7 @@
       history.push({ kind: 'stroke', id: stroke.id });
       const lab = noteLabels.grew(stroke);
       if (lab && !lab.isConnected) labels.prepend(lab);
+      if (search) refreshSearch();
       tell('content');
       env.changed();
     }
@@ -1658,6 +1797,9 @@
       },
       watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },
       closeMenus() { linkChips.closeMenu(); lasso.clear(); },
+      search: setSearch,
+      stepSearch,
+      endSearch,
     };
   }
 
@@ -1931,6 +2073,7 @@
     };
     const mapBtn = toolBtn(ICONS.map(), 'Show a minimap of the whole notebook', 'Minimap');
     const followBtn = toolBtn(ICONS.follow(), 'Follow the page shown: the notebook shows what was written about it', 'Follow the page');
+    const searchBtn = toolBtn(ICONS.search(), 'Search the notebook (⌘F here)', 'Search the notebook');
     const grab = el('div', 'notepad-bar-grab');
     const modes = el('div', 'notepad-modes');
     modes.setAttribute('role', 'radiogroup');
@@ -1957,7 +2100,38 @@
     closeBtn.type = 'button';
     closeBtn.title = 'Close the notebook';
     closeBtn.setAttribute('aria-label', 'Close the notebook');
-    bar.append(fromPages, mapBtn, followBtn, grab, modes, undoBtn, closeBtn);
+    bar.append(fromPages, mapBtn, followBtn, searchBtn, grab, modes, undoBtn, closeBtn);
+
+    // Search (2026-11-16): a field under the bar; ↩ / ⇧↩ (or the arrows)
+    // step through the matches, Escape closes it.
+    const searchRow = el('div', 'notepad-search');
+    searchRow.hidden = true;
+    const searchInput = el('input');
+    searchInput.type = 'text';
+    searchInput.setAttribute('enterkeyhint', 'search');
+    searchInput.placeholder = 'Search notes, quotes and pages';
+    searchInput.setAttribute('aria-label', 'Search the notebook');
+    searchInput.setAttribute('autocapitalize', 'off');
+    searchInput.setAttribute('autocorrect', 'off');
+    searchInput.spellcheck = false;
+    searchInput.maxLength = 200;
+    const searchCount = el('span', 'notepad-search-count');
+    searchCount.setAttribute('aria-live', 'polite');
+    const stepBtn = (d, label, title) => {
+      const b = el('button', 'notepad-tool', d < 0 ? '‹' : '›');
+      b.type = 'button';
+      b.title = title;
+      b.setAttribute('aria-label', label);
+      b.addEventListener('click', () => stepSearch(d));
+      return b;
+    };
+    const searchPrev = stepBtn(-1, 'Previous match', 'Previous (⇧↩)');
+    const searchNext = stepBtn(1, 'Next match', 'Next (↩)');
+    const searchClose = el('button', 'notepad-tool', '×');
+    searchClose.type = 'button';
+    searchClose.title = 'Close search (Esc)';
+    searchClose.setAttribute('aria-label', 'Close search');
+    searchRow.append(searchInput, searchCount, searchPrev, searchNext, searchClose);
 
     const main = el('div', 'notepad-main');
     const mapBox = el('div', 'notepad-minimap');
@@ -1968,7 +2142,7 @@
     trash.setAttribute('aria-label', 'Clear the notebook');
     trash.appendChild(ICONS.trashBig());
     main.append(canvas, trash);
-    root.append(bar, main);
+    root.append(bar, searchRow, main);
 
     // --- state of the bar
     let tool = 'pen';
@@ -2030,6 +2204,51 @@
       if (followOn && surface && p) surface.follow(p.url);
     });
     closeBtn.addEventListener('click', () => env.close());
+
+    function showCount(r) {
+      const q = searchInput.value.trim();
+      searchCount.textContent = !q ? '' : r.count ? `${r.at + 1}/${r.count}` : 'None';
+      searchCount.classList.toggle('none', !!q && !r.count);
+      searchPrev.disabled = searchNext.disabled = r.count < 2;
+    }
+    function openSearch() {
+      searchRow.hidden = false;
+      searchBtn.classList.add('active');
+      searchBtn.setAttribute('aria-pressed', 'true');
+      searchInput.focus();
+      searchInput.select();
+      if (surface && searchInput.value.trim()) showCount(surface.search(searchInput.value));
+    }
+    function closeSearch() {
+      searchRow.hidden = true;
+      searchBtn.classList.remove('active');
+      searchBtn.setAttribute('aria-pressed', 'false');
+      if (surface) surface.endSearch();
+      searchCount.textContent = '';
+    }
+    function stepSearch(d) {
+      if (!surface) return;
+      showCount(surface.stepSearch(d));
+    }
+    let searchTimer = 0;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { if (surface) showCount(surface.search(searchInput.value)); }, 120);
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        clearTimeout(searchTimer);
+        if (surface && e.key === 'Enter' && !searchCount.textContent && searchInput.value.trim()) { showCount(surface.search(searchInput.value)); return; }
+        stepSearch(e.shiftKey || e.key === 'ArrowUp' ? -1 : 1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSearch();
+      }
+    });
+    searchBtn.addEventListener('click', () => (searchRow.hidden ? openSearch() : closeSearch()));
+    searchClose.addEventListener('click', closeSearch);
 
     // The scissors: clip mode in the page shown, on or off.
     clipBtn.addEventListener('click', () => {
@@ -2155,6 +2374,14 @@
       });
     });
 
+    // A press in the notebook gives it the keyboard (the canvas's own
+    // presses take no focus), so ⌘Z and ⌘F act on it.
+    root.tabIndex = -1;
+    root.addEventListener('pointerdown', (e) => {
+      if (e.target.closest && e.target.closest('input, textarea, button')) return;
+      if (!root.contains(document.activeElement)) root.focus({ preventScroll: true });
+    }, true);
+
     // ⌘Z in the notebook (not while typing a note).
     root.addEventListener('keydown', (e) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
@@ -2184,6 +2411,7 @@
         openLink: (href) => env.openLink(href),
         toolChanged: (t) => { tool = t; renderBar(); },
         lassoBorrowed: (b) => { borrowed = b; renderBar(); },
+        searchChanged: (r) => { if (!searchRow.hidden) showCount(r); },
         flush,
       });
       surface.setColor(color);
@@ -2226,6 +2454,12 @@
       addClip(image, target) { whenReady(() => placeClip(image, target, null)); },
       shown() {
         whenReady(() => { surface.render(); renderBar(); });
+      },
+      // ⌘F / ⌘G / ⌘⇧G while the notebook has the focus: its own search.
+      hasFocus: () => root.contains(document.activeElement),
+      findKey(name) {
+        if (name === 'find' || searchRow.hidden) openSearch();
+        else stepSearch(name === 'find_prev' ? -1 : 1);
       },
       hidden() {
         if (surface) { surface.commitText(); surface.closeMenus(); }

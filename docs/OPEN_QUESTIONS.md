@@ -973,4 +973,10 @@ The live sites were not reachable or not signed in from this environment.
   dropped link or file in the chrome. The image's box is taken when the drag starts; if the page
   scrolls during the drag, the clip shows what is there at the drop. The image watcher's
   `-webkit-touch-callout: none` on images is assumed not to stop iPadOS from dragging them.
+- **[gap] Notebook search does not read handwriting (2026-11-16).** It finds typed notes, quotes
+  and the page each item came from. Reading handwriting would need recognition the chrome does not
+  have (iPadOS Scribble works only while writing into a text field; Vision's text recognition
+  would mean sending the pad's strokes, drawn as an image, to native code). **[verify]** ⌘F / ⌘G
+  reach the notebook's search only while its panel holds the keyboard focus (a press in it gives
+  it); on iPadOS the shortcut arrives as a native key command and the chrome checks its own focus.
 

@@ -20,6 +20,7 @@
   touch-action: none;
 }
 #notebook.sheet.dock { padding: 0; }
+#notebook:focus { outline: none; }
 #notebook:not(.dock) { padding: 0; height: calc(100% - env(safe-area-inset-top) - 80px); }
 .notepad-bar {
   display: flex;
@@ -251,6 +252,24 @@
   box-shadow: inset 0 0 0 2px #f19837;
   background-color: color-mix(in srgb, #f19837 7%, transparent);
 }
+
+/* Search: a field under the bar; matches outlined, the rest faded. */
+.notepad-search { display: flex; align-items: center; gap: 2px; padding: 0 6px 6px; }
+.notepad-search[hidden] { display: none; }
+.notepad-search input {
+  flex: 1; min-width: 0; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--field);
+  color: var(--nb-text); padding: 5px 8px; font-size: 13px; outline: none;
+}
+.notepad-search-count { font-size: 12px; color: var(--nb-dim); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; padding: 0 4px; }
+.notepad-search-count.none { color: var(--nb-text); font-weight: 600; }
+.notepad-search .notepad-tool { font-size: 18px; width: 26px; }
+.notepad-link.nb-dim, .notepad-text.nb-dim { opacity: 0.22; }
+.notepad-link.nb-hit, .notepad-text.nb-hit { outline: 2px solid color-mix(in srgb, #f19837 50%, transparent); outline-offset: 3px; border-radius: 6px; }
+.notepad-link.nb-current, .notepad-text.nb-current { outline-color: #f19837; }
+.nb-note-hit {
+  position: absolute; border: 2px solid color-mix(in srgb, #f19837 50%, transparent); border-radius: 8px; pointer-events: none;
+}
+.nb-note-hit.nb-current { border-color: #f19837; background: color-mix(in srgb, #f19837 8%, transparent); }
 
 /* ---- around the notebook: its toggle and the page's "Send to Notebook" ---- */
 /* ⌥-click on a page: one button above what was picked (a hole, like the
