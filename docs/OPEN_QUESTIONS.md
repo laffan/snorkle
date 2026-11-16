@@ -1016,3 +1016,26 @@ The live sites were not reachable or not signed in from this environment.
   by the right panel, overlapped the flyout's hole. The chrome now cuts its floating holes at the
   flyout's edge. Other overlaps between floating holes (a popup over the pill) still merge.
 
+## Round 4: capture finds nothing, selection drags, stage selection, share (2026-11-16)
+
+- **[verify] Conversation markup.** The owner saw capture mode count no messages. The live sites
+  could not be reached from the build environment. Reports from other projects (October and
+  November 2026) say logged-in ChatGPT no longer renders `data-message-author-role`; messages are
+  `[data-content-search-unit-key]` units keyed `…:user` / `…:assistant`, grouped in
+  `[data-turn-key]`, with `[data-user-message-bubble]` and
+  `[data-markdown-text-style="assistant-message"]`, and the previous thread's nodes may stay in
+  the document, hidden. Claude's replies are reported as `[data-testid="assistant-message"]` or
+  `.font-claude-response`. The turn finder now tries those forms (newest first, then the
+  earlier ones), skips hidden nodes and orders `display: contents` wrappers by their contents.
+  Checked in Chromium against simulated pages of each form; not on the live sites. If a site
+  changes again, the bar says no messages were found and Save keeps the page as shown.
+- **[verify] ⌥-drag of a selection.** Over the page's selection the cover lets presses through,
+  so WebKit's own drag of the selection starts (assumed: ⌥ held does not stop WebKit dragging a
+  selection on macOS; it may make the drag a copy). A press there that does not drag re-selects
+  the same range after the click and opens Send to Notebook. Checked in Chromium.
+- **[verify] Stage resizing selected text in WebKit** (not seen in Chromium). While a stage is
+  up or being drawn, a style element makes everything on the page unselectable, the stage's box
+  and corners are unselectable, and presses on them have their default prevented.
+- **[decide] Share in a narrow address field.** When the field is narrower than about 210 pt,
+  share and copy are hidden so the address stays readable; share is then not reachable from
+  the address bar.

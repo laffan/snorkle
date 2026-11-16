@@ -130,40 +130,64 @@ function tree(n, depth) {
   for (const c of n.childNodes) { const t = tree(c, depth + 1); if (t !== null && t !== '') out.push(t); }
   return out.length > 2 || name === 'br' || name === 'hr' ? out : null;
 }
+// The site's turns in the document, each `{role, el, key}`. The sites
+// change their markup often; each lists the forms seen, newest first,
+// and the first that finds anything is used. Hidden nodes (a site may
+// keep an earlier thread's turns in the document, hidden) are skipped.
 function turns() {
   const out = [];
-  const add = (role, el, key) => { if (el) out.push({ role, el, key: key || '' }); };
+  // Has a box, or contents with one (a wrapper may be `display: contents`).
+  const shown = (el) => {
+    if (!el.isConnected) return false;
+    if (el.getClientRects().length) return true;
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    return r.getClientRects().length > 0;
+  };
+  const add = (role, el, key) => { if (el && shown(el)) out.push({ role, el, key: key || '' }); };
+  // Elements matching `sel`, outermost only, in document order.
+  const outer = (sel, root) => {
+    const seen = [];
+    for (const el of (root || document).querySelectorAll(sel)) if (!seen.some((s) => s.contains(el))) seen.push(el);
+    return seen;
+  };
   if (site === 'chatgpt') {
-    const list = document.querySelectorAll('[data-message-author-role]');
-    if (list.length) {
-      for (const el of list) {
+    // 2026-10 and later (logged in): a unit per message, keyed "…:user" / "…:assistant".
+    for (const el of outer('[data-content-search-unit-key]')) {
+      const k = el.getAttribute('data-content-search-unit-key') || '';
+      const r = /:user$/.test(k) ? 'user' : /:assistant$/.test(k) ? 'assistant' : '';
+      if (r) add(r, el, k);
+    }
+    // Earlier: the author's role on each message.
+    if (!out.length) {
+      for (const el of outer('[data-message-author-role]')) {
         const r = el.getAttribute('data-message-author-role');
         if (r === 'user' || r === 'assistant') add(r, el, el.getAttribute('data-message-id'));
       }
-    } else {
-      for (const h of document.querySelectorAll('h4')) {
+    }
+    // A group per exchange: the user's bubble, then the answer.
+    if (!out.length) {
+      for (const g of outer('[data-turn-key]')) {
+        const k = g.getAttribute('data-turn-key') || '';
+        add('user', g.querySelector('[data-user-message-bubble="true"]'), k && k + ':u');
+        outer('[data-markdown-text-style="assistant-message"], .markdown', g).forEach((a, i) => add('assistant', a, k && k + ':a' + i));
+      }
+    }
+    // The headings read to screen readers.
+    if (!out.length) {
+      for (const h of document.querySelectorAll('h4, h5, h6')) {
         const t = h.textContent.trim();
         const r = /^You said:?$/.test(t) ? 'user' : /^ChatGPT said:?$/.test(t) ? 'assistant' : '';
         if (!r) continue;
-        let w = h.parentElement;
-        for (let i = 0; i < 12 && w && !(w.classList && w.classList.contains('group')); i++) w = w.parentElement;
+        let w = h.closest('[data-turn-key], [data-testid^="conversation-turn"], article');
+        if (!w) { w = h.parentElement; for (let i = 0; i < 12 && w && !(w.classList && w.classList.contains('group')); i++) w = w.parentElement; }
         add(r, w || h.parentElement);
       }
     }
   } else if (site === 'claude') {
-    const rows = document.querySelectorAll('[data-testid="transcript-row"]');
-    if (rows.length) {
-      for (const row of rows) {
-        add('user', row.querySelector('[data-testid="user-message"]'));
-        add('assistant', row.querySelector('[data-testid="assistant-message"]'));
-      }
-    } else {
-      const seen = [];
-      for (const el of document.querySelectorAll('[data-testid="user-message"], [data-testid="assistant-message"], .font-claude-response, .font-claude-message')) {
-        if (seen.some((s) => s.contains(el))) continue;
-        seen.push(el);
-        add(el.getAttribute('data-testid') === 'user-message' ? 'user' : 'assistant', el);
-      }
+    const user = '[data-testid="user-message"], .font-user-message';
+    for (const el of outer(user + ', [data-testid="assistant-message"], .font-claude-response, .font-claude-message')) {
+      add(el.matches(user) || el.querySelector(user) ? 'user' : 'assistant', el);
     }
   } else if (site === 'gemini') {
     for (const el of document.querySelectorAll('user-query, model-response')) {
@@ -171,17 +195,31 @@ function turns() {
       add(u ? 'user' : 'assistant', u ? (el.querySelector('.query-text') || el.querySelector('user-query-content') || el)
         : (el.querySelector('message-content') || el.querySelector('.response-content') || el.querySelector('.markdown') || el), el.id);
     }
+    if (!out.length) {
+      for (const el of outer('.user-query-container, .response-container, .response-content')) {
+        add(el.matches('.user-query-container') ? 'user' : 'assistant', el, el.id);
+      }
+    }
   }
   return out;
 }
 // The turns in the document now, in reading order: by where they are on
 // screen (a list that keeps only some turns may add them to the document
 // in any order), the document's order breaking ties.
+// Where an element starts on screen; a `display: contents` wrapper has no
+// box of its own, so its contents' box is used.
+function topOf(el) {
+  const r = el.getBoundingClientRect();
+  if (r.width || r.height) return r.top;
+  const g = document.createRange();
+  g.selectNodeContents(el);
+  return g.getBoundingClientRect().top;
+}
 function snap() {
   budget = 0;
   return turns().map((t, i) => {
     const text = (t.el.textContent || '').replace(/\s+/g, ' ').trim();
-    return { role: t.role, key: t.role + ':' + (t.key || text.slice(0, 200)), text, tree: tree(t.el, 0), top: t.el.getBoundingClientRect().top, i };
+    return { role: t.role, key: t.role + ':' + (t.key || text.slice(0, 200)), text, tree: tree(t.el, 0), top: topOf(t.el), i };
   }).filter((t) => t.tree && (t.text || JSON.stringify(t.tree).indexOf('"img"') >= 0))
     .sort((a, b) => a.top - b.top || a.i - b.i);
 }
@@ -908,6 +946,12 @@ mod tests {
         assert!(begin.contains("st.live") || begin.contains("live: true"));
         assert!(begin.contains("new MutationObserver(soon)") && begin.contains("setTimeout(take, 300)"));
         assert!(CAPTURE_CANCEL_JS.contains("st.stop()") && END_JS.contains("if (st.stop) st.stop();"));
+        // The 2026-10 ChatGPT markup first, then the earlier forms.
+        let unit = begin.find("[data-content-search-unit-key]").unwrap();
+        assert!(
+            unit < begin.find("[data-message-author-role]").unwrap() && unit < begin.find("[data-turn-key]").unwrap()
+        );
+        assert!(begin.contains("[data-testid=\"assistant-message\"], .font-claude-response"));
         assert_eq!(parse_count(r#"{"count":12}"#), Some(12));
         assert_eq!(parse_count(r#"{"count":-1}"#), None);
         assert_eq!(parse_count("nope"), None);

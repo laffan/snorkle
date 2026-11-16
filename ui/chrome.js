@@ -566,10 +566,13 @@
     const bar = $('capture-bar');
     const shown = !!capture && !!state && (state.active === capture.tab || shownPanes().some((p) => p.tab === capture.tab));
     if (capture) {
+      // With nothing found (the site's markup may have changed), Save
+      // keeps the page as it is shown, as for any other page.
       const n = capture.count;
-      $('capture-text').textContent = `Scroll through the conversation to capture it (up for earlier messages). ${n} message${n === 1 ? '' : 's'} captured.`;
+      $('capture-text').textContent = n
+        ? `Scroll through the conversation to capture it (up for earlier messages). ${n} message${n === 1 ? '' : 's'} captured.`
+        : 'No messages found yet. Scroll through the conversation to capture it, or Save to keep the page as shown.';
       $('capture-save').textContent = 'Save';
-      $('capture-save').disabled = !n;
     }
     if (bar.hidden === !shown) return;
     bar.hidden = !shown;
@@ -2490,6 +2493,7 @@
     const input = $('url-input');
     $('url-display').hidden = true;
     $('copy-url').hidden = true;
+    $('share').hidden = true;
     input.hidden = false;
     input.value = tab && tab.url ? tab.url.full : '';
     input.focus();
@@ -2501,6 +2505,7 @@
     $('url-input').hidden = true;
     $('url-display').hidden = false;
     $('copy-url').hidden = false;
+    $('share').hidden = false;
   }
 
   // ---- layout -----------------------------------------------------------

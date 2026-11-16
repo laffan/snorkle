@@ -418,13 +418,19 @@ body.narrow #omnibox { flex: 1 1 auto; width: auto; }
   width: 100%; height: 38px; border-radius: 19px; background: var(--field);
   padding: 0 12px; font-size: 16px;
 }
-/* Room for the copy and share buttons on the right, and as much on the
-   left so the address stays centred in the field. */
+/* Room for the share button on the left and the copy button on the
+   right; the address stays centred between them. */
 #url-display { display: flex; align-items: center; justify-content: center; gap: 2px; overflow: hidden; padding: 0 38px; }
-body.narrow #url-display { padding-left: 12px; }
 #toolbar .omni-share { position: absolute; right: 3px; top: 3px; min-width: 32px; width: 32px; height: 32px; border-radius: 16px; color: var(--muted); }
 #toolbar .omni-share:hover { color: var(--fg); }
-#toolbar .omni-copy { right: 3px; }
+#toolbar .omni-share-left { right: auto; left: 3px; }
+/* A field too narrow for both buttons beside the address keeps the
+   address (Safari 26: container queries). */
+#omnibox { container-type: inline-size; }
+@container (max-width: 210px) {
+  #toolbar .omni-share { display: none; }
+  #url-display { padding: 0 12px; }
+}
 #url-input { border: 2px solid var(--accent); outline: none; }
 .security { font-size: 13px; margin-right: 6px; white-space: nowrap; }
 .security:empty { display: none; }

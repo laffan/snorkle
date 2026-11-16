@@ -297,7 +297,9 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 The address bar is a pill floating over the bottom of the page (pages run the full height of
 the window): back, forward and reload on its left (the sidebar's toggle is a tab on the sidebar's own
 edge); the address (about 400 pt wide; full
-width in narrow windows), with the share button inside its right end (hidden while editing);
+width in narrow windows), with the share button inside its left end and the copy button inside
+its right end (both hidden while editing, and when the field is too narrow for them beside the
+address);
 then a ⋯ button that opens a popup with the page actions (ad blocking,
 bookmark, site scripts, page zoom), the per-tab headers-view button and the chat button.
 The confirmation for closing a bookmark's tab (⌘W) or a site's group of tabs (its ×) sits beside
