@@ -2582,6 +2582,18 @@
       // Something from a page: a quote (target only), or a clip.
       addQuote(target) { whenReady(() => surface.addLink(target)); },
       addClip(image, target) { whenReady(() => placeClip(image, target, null)); },
+      // A clip's text (for search; not shown), when the words read in its
+      // picture come. Set on the clip's target itself: the clip keeps that
+      // object, and may still be on its way into the pad.
+      setClipText(target, text) {
+        if (!target || typeof text !== 'string' || !text.trim()) return;
+        target.text = text.slice(0, 4000);
+        whenReady(() => {
+          if (!pad.links.some((l) => l.target === target)) return;
+          saveSoon();
+          if (!searchRow.hidden && searchInput.value.trim()) showCount(surface.search(searchInput.value));
+        });
+      },
       shown() {
         whenReady(() => { surface.render(); renderBar(); });
       },

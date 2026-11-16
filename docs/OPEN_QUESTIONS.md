@@ -1039,3 +1039,18 @@ The live sites were not reachable or not signed in from this environment.
 - **[decide] Share in a narrow address field.** When the field is narrower than about 210 pt,
   share and copy are hidden so the address stays readable; share is then not reachable from
   the address bar.
+
+## Round 5: clips not reaching the notebook (2026-11-16)
+
+- **[verify] Clips.** The owner saw the clip stage work but nothing arrive in the notebook. Not
+  reproduced in Chromium (the page, chrome and notebook parts work there); the cause was not
+  found. Round 3 put two steps in front of every clip, neither run on a Mac: reading the page's
+  text in the region (waited for up to 4 s) and on-device text recognition (synchronous, no time
+  limit; a stall there would hold the clip with no message). Now the clip goes to the notebook as
+  soon as the picture is drawn (page text waited for ≤ 1.5 s); recognition runs afterwards on a
+  thread of its own (≤ 20 s) and its words are added to the clip's text when they come. A
+  "Clipping…" notice shows if a clip takes longer than 0.6 s, the stage's Clip and × also act on
+  a plain click (in case WebKit gives them no pointer release), and each step is logged in the
+  console (Record on): the clip report arriving in the chrome, the region, the page text length,
+  the picture's size or its failure, and recognition's result or time-out.
+

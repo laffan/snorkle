@@ -177,7 +177,8 @@ stage.b=b;place();}
 function button(text,act,primary){var b=document.createElement('div');b.textContent=text;var st={display:'inline-block',padding:'6px 12px',margin:'0','border-radius':'7px',cursor:'pointer',font:'600 13px -apple-system,BlinkMacSystemFont,sans-serif','line-height':'18px',color:primary?'#fff':'#111',background:primary?'#ff3b30':'#eee','user-select':'none','-webkit-user-select':'none'};
 for(var k in st)b.style.setProperty(k,st[k],'important');b.setAttribute('role','button');
 b.addEventListener('pointerdown',function(e){if(!ok(e))return;e.preventDefault();e.stopPropagation();},true);
-b.addEventListener('pointerup',function(e){if(!ok(e))return;e.preventDefault();e.stopPropagation();swallow=Date.now();act();},true);return b;}
+b.addEventListener('pointerup',function(e){if(!ok(e))return;e.preventDefault();e.stopPropagation();swallow=Date.now();act();},true);
+b.addEventListener('click',function(e){if(!ok(e))return;e.preventDefault();e.stopPropagation();act();},true);return b;}
 function bar(){if(stage.bar)return;var b=el({position:'fixed','z-index':Z,display:'flex',gap:'6px',padding:'4px',margin:'0',background:'#fff','border-radius':'10px','box-shadow':'0 4px 16px rgba(0,0,0,.28)'});
 b.appendChild(button('Clip',confirm,true));b.appendChild(button('×',function(){cancel(true);},false));stage.bar=b;place();}
 function clearStage(){if(!stage)return;stage.box.remove();stage.handles.forEach(function(p){p[1].remove();});if(stage.bar)stage.bar.remove();stage=null;}
@@ -207,6 +208,7 @@ if(!ok(e)||e.altKey||nb.clip)return;var t=e.target;if(ov&&(t===ov||(stage&&(t===
 window.addEventListener('scroll',function(){unpick();},{passive:true,capture:true});
 ['click','mousedown','mouseup','dblclick','auxclick','contextmenu'].forEach(function(t){document.addEventListener(t,function(e){if(!ok(e))return;
 var own=swallow&&Date.now()-swallow<400;if(t==='mousedown'&&selPress){e.stopPropagation();return;}
+if(t==='click'&&stage&&stage.bar&&stage.bar.contains(e.target)){e.preventDefault();return;}
 if((e.altKey&&!e.metaKey&&!e.ctrlKey&&t!=='contextmenu')||ours(e.target)||own){e.preventDefault();e.stopPropagation();if(t==='click')swallow=0;}},true);});
 document.addEventListener('selectstart',function(e){if(ov||drag||stage)e.preventDefault();},true);
 document.addEventListener('keydown',function(e){if(!ok(e))return;if(e.key==='Alt'&&!e.metaKey&&!e.ctrlKey){setAlt(true);return;}

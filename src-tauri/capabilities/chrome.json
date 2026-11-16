@@ -126,6 +126,7 @@
     "allow-notebook-link-hover",
     "allow-notebook-clip-mode",
     "allow-notebook-clip",
+    "allow-notebook-clip-words",
     "allow-save-notebook",
     "allow-load-notebook",
     "allow-set-text-editing"

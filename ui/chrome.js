@@ -3608,16 +3608,28 @@
   // Draws a clip of a page's region (the app's own picture of its view)
   // and puts it in the notebook.
   function clipToNotebook(t, r) {
+    // Drawing it (and reading its words) can take a moment: say so.
+    const slow = setTimeout(() => toast('Clipping…'), 600);
     T.core.invoke('notebook_clip', { tab: t.id, x: r.x, y: r.y, w: r.w, h: r.h, vw: r.vw })
+      .finally(() => clearTimeout(slow))
       .then((clip) => {
-        // The clip's text (the page's, and what recognition read in the
-        // picture) goes with it for search; it is not shown.
+        // The clip's text (the page's, then the words recognition reads
+        // in the picture) goes with it for search; it is not shown.
         const target = { kind: 'clip', url: t.url.full, title: t.title || '' };
         if (clip.text) target.text = clip.text;
         notebook.addClip(clip.image, target);
         if (!notebookShown()) toast('Clipped to the notebook.');
+        clipWords(clip, target);
       })
       .catch((e) => toast(String(e)));
+  }
+  // The words on-device recognition reads in a clip's picture, added to
+  // its text when they come (the clip is in the notebook already).
+  function clipWords(clip, target) {
+    if (!clip || !clip.words) return;
+    T.core.invoke('notebook_clip_words', { words: clip.words })
+      .then((text) => { if (text) notebook.setClipText(target, text); })
+      .catch(() => {});
   }
 
   // ⌥-click on text or an image: "Send to Notebook" above it.
@@ -3636,6 +3648,7 @@
     if (kind === 'dend') { if (pageDrag && pageDrag.tab === tab) pageDrag.ended = performance.now(); return; }
     if (kind === 'hide') { if (nbPick && nbPick.tab === tab) hideNbPop(); return; }
     const shown = shownPanes().some((p) => p.tab === tab);
+    if (kind === 'clip') chromeLog('info', `notebook: clip from tab ${tab}${!rect || !shown || modalOpen || panel ? ' (ignored: page not shown, or a sheet open)' : ''}`);
     if (!rect || !shown || modalOpen || panel) return;
     const t = captureTab(tab);
     if (kind === 'clip') {
@@ -3697,7 +3710,11 @@
       const source = { url: t.url.full, title: t.title || '' };
       if (d.kind === 'dimg') {
         return T.core.invoke('notebook_clip', { tab: t.id, x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h, vw: d.rect.vw })
-          .then((clip) => ({ kind: 'clip', image: clip.image, target: { kind: 'clip', ...source, ...(clip.text ? { text: clip.text } : {}) } }))
+          .then((clip) => {
+            const target = { kind: 'clip', ...source, ...(clip.text ? { text: clip.text } : {}) };
+            clipWords(clip, target);
+            return { kind: 'clip', image: clip.image, target };
+          })
           .catch((err) => { toast(String(err)); return null; });
       }
       return T.core.invoke('read_selection', { tab: t.id }).then((sel) => {

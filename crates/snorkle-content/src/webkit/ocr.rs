@@ -34,33 +34,36 @@ pub fn recognize_text(jpeg: &[u8], max_chars: usize) -> Option<String> {
     }
     let request_class = AnyClass::get(c"VNRecognizeTextRequest")?;
     let handler_class = AnyClass::get(c"VNImageRequestHandler")?;
-    let lines = objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
-        let request: Retained<AnyObject> = msg_send![request_class, new];
-        let _: () = msg_send![&*request, setRecognitionLevel: LEVEL_ACCURATE];
-        let _: () = msg_send![&*request, setUsesLanguageCorrection: Bool::YES];
-        let data = NSData::with_bytes(jpeg);
-        let options = NSDictionary::<NSString, AnyObject>::new();
-        let handler: Option<Retained<AnyObject>> =
-            msg_send![msg_send![handler_class, alloc], initWithData: &*data, options: &*options];
-        let handler = handler?;
-        let requests = NSArray::from_slice(&[&*request]);
-        let mut error: *mut NSError = std::ptr::null_mut();
-        let ok: Bool = msg_send![&*handler, performRequests: &*requests, error: &mut error];
-        if !ok.as_bool() {
-            return None;
-        }
-        let results: Option<Retained<NSArray<AnyObject>>> = msg_send![&*request, results];
-        let mut lines = Vec::new();
-        for observation in results?.iter() {
-            let candidates: Option<Retained<NSArray<AnyObject>>> = msg_send![&*observation, topCandidates: 1usize];
-            let Some(best) = candidates.and_then(|c| c.firstObject()) else { continue };
-            let text: Option<Retained<NSString>> = msg_send![&*best, string];
-            if let Some(t) = text {
-                lines.push(t.to_string());
+    // Its own autorelease pool: this runs on a plain thread.
+    let lines = objc2::rc::autoreleasepool(|_| {
+        objc2::exception::catch(std::panic::AssertUnwindSafe(|| unsafe {
+            let request: Retained<AnyObject> = msg_send![request_class, new];
+            let _: () = msg_send![&*request, setRecognitionLevel: LEVEL_ACCURATE];
+            let _: () = msg_send![&*request, setUsesLanguageCorrection: Bool::YES];
+            let data = NSData::with_bytes(jpeg);
+            let options = NSDictionary::<NSString, AnyObject>::new();
+            let handler: Option<Retained<AnyObject>> =
+                msg_send![msg_send![handler_class, alloc], initWithData: &*data, options: &*options];
+            let handler = handler?;
+            let requests = NSArray::from_slice(&[&*request]);
+            let mut error: *mut NSError = std::ptr::null_mut();
+            let ok: Bool = msg_send![&*handler, performRequests: &*requests, error: &mut error];
+            if !ok.as_bool() {
+                return None;
             }
-        }
-        Some(lines)
-    }))
+            let results: Option<Retained<NSArray<AnyObject>>> = msg_send![&*request, results];
+            let mut lines = Vec::new();
+            for observation in results?.iter() {
+                let candidates: Option<Retained<NSArray<AnyObject>>> = msg_send![&*observation, topCandidates: 1usize];
+                let Some(best) = candidates.and_then(|c| c.firstObject()) else { continue };
+                let text: Option<Retained<NSString>> = msg_send![&*best, string];
+                if let Some(t) = text {
+                    lines.push(t.to_string());
+                }
+            }
+            Some(lines)
+        }))
+    })
     .ok()
     .flatten()?;
     let text: String = lines.join("\n").chars().take(max_chars).collect();
