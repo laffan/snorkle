@@ -38,8 +38,8 @@
   // The Notebook (notebook.js; remembered): docked with the right panels.
   let notebookOpen = false;
   let notebook = null;
-  // ⌘⇧\ hides the right panels without closing them (headers mode and
-  // the chat stay on, and come back with the next ⌘⇧\).
+  // ⌘⇧\ hides the right panels without closing them (the summary view
+  // and the chat stay on, and come back with the next ⌘⇧\).
   let rightHidden = false;
   // The sidebar shown as a pop-over from the left-edge tab (sidebar closed).
   let findOpen = false; // ⌘F bar
@@ -50,11 +50,10 @@
   // View modes (session-only, kept in Rust): app-wide on/off, and tabs
   // exempted from a mode ("Disable for this tab").
   let viewModes = {
-    modes: { desaturate: true, hide_media: true, headers: false, dark: false },
+    modes: { desaturate: true, hide_media: true, dark: false },
     launch: { desaturate: true, hide_media: true, dark: false },
     exempt: {},
   };
-  let headingsByTab = new Map();
   let scripts = [];
   let editingDomain = null; // domain of the script open in the editor, or '' for new
   let tabsKey = '';
@@ -1902,7 +1901,7 @@
   $('sidebar-resize').addEventListener('pointerup', endResize);
   $('sidebar-resize').addEventListener('pointercancel', endResize);
 
-  // The right panel's width (headers, chat, site scripts), dragged at its
+  // The right panel's width (summary, chat, notebook, site scripts), dragged at its
   // left edge and remembered.
   const MIN_RIGHT = 260;
   const MAX_RIGHT = 640;
@@ -2203,9 +2202,15 @@
   const AI_USES = [
     { id: 'scripts', label: 'Site script helper', note: 'Drafts CSS and JavaScript in Site Scripts.' },
     { id: 'ask', label: 'Ask Selection', note: 'The page chat and “Ask AI” on selected text.' },
-    { id: 'headers', label: 'Header View Parsing', note: 'Detect Headers in the headers view.' },
+    { id: 'summary', label: 'Summary View', note: 'Summarizes the page in the summary view.' },
   ];
   let aiConfigured = { anthropic: false, openai: false };
+  // The summary view replaced the headers view (2026-11-16): it starts with
+  // the service and model chosen for Header View Parsing.
+  if (!pref('use.summary.provider') && pref('use.headers.provider')) {
+    setPref('use.summary.provider', pref('use.headers.provider'));
+    setPref('use.summary.model', pref('use.headers.model') || '');
+  }
 
   function aiModels(p) {
     try { return JSON.parse(pref('aiModels.' + p) || '[]'); } catch (e) { return []; }
@@ -2493,7 +2498,7 @@
     scriptsOpen = open;
     $('scripts-pop').hidden = !open;
     $('scripts-pop').classList.toggle('dock', open && !narrow);
-    renderOutline();
+    renderSummary();
     applyNotebook();
     if (open) {
       $('script-editor').hidden = true;
@@ -2543,8 +2548,8 @@
     // hole (the pill, its popup, toasts: the page is cut out there), or set
     // `overlay`, which hides the page.
     const overlay = !!panel || modalOpen || !$('edit-modal').hidden || (scriptsOpen && narrow) || (chatShown() && narrow) || (notebookShown() && narrow) || (narrow && sidebarShown);
-    // Docked right panels (site scripts; or the headers outline and the
-    // chat, one above the other when both are open) take the right of the
+    // Docked right panels (site scripts; or the summary, the chat and the
+    // notebook, one above the other when several are open) take the right of the
     // content area, full height, at the width the user dragged.
     const docks = rightPanels();
     const right = docks.length ? clampRight(rightWidth, left) : 0;
@@ -2691,12 +2696,13 @@
   }
 
   // The panels docked on the right of the content area: site scripts while
-  // open; otherwise the headers outline and/or the chat (outline on top).
+  // open; otherwise the summary, the chat and the notebook (in that order
+  // from the top).
   function rightPanels() {
     if (narrow || rightHidden) return [];
     if (scriptsOpen) return [$('scripts-pop')];
     const out = [];
-    if (outlineShown()) out.push($('outline'));
+    if (summaryShown()) out.push($('summary'));
     if (chatShown()) out.push($('chat'));
     if (notebookShown()) out.push($('notebook'));
     return out;
@@ -2760,9 +2766,10 @@
     { id: 'dark', mode: 'dark', name: 'Dark pages' },
   ];
 
-  // The headers view is per tab (its button is in the URL bar).
-  function headersOn(tabId) {
-    return tabId !== null && tabId !== undefined && (viewModes.headers_tabs || []).includes(tabId);
+  // The summary view is per tab (its button is in the URL bar).
+  const summaryTabs = new Set();
+  function summaryOn(tabId) {
+    return tabId !== null && tabId !== undefined && summaryTabs.has(tabId);
   }
 
   function exemptFor(tabId, mode) {
@@ -2791,20 +2798,17 @@
     const launch = viewModes.launch || {};
     document.querySelectorAll('[data-launch-mode]').forEach((b) =>
       b.setAttribute('aria-pressed', String(!!launch[b.dataset.launchMode] === (b.dataset.on === 'true'))));
-    const h = $('headers');
-    const on = headersOn(tab);
+    const h = $('summary-btn');
+    const on = summaryOn(tab);
     h.classList.toggle('on', on);
     h.setAttribute('aria-pressed', String(on));
     $('chat-btn').classList.toggle('on', chatOpen);
     $('chat-btn').setAttribute('aria-pressed', String(chatOpen));
-    renderOutline();
+    renderSummary();
   }
 
-  $('headers').addEventListener('click', withTab((t) => {
-    const on = !headersOn(t.id);
-    if (on && rightHidden) { rightHidden = false; applyChat(); }
-    applyViewModes(T.core.invoke('set_tab_headers', { tab: t.id, on }));
-  }));
+  $('summary-btn').addEventListener('click', withTab((t) => setSummary(t, !summaryOn(t.id))));
+  $('summary-close').addEventListener('click', withTab((t) => setSummary(t, false)));
 
   // Page actions: a popup above the ⋯ button, floating over the page (a
   // hole, like the pill).
@@ -2920,137 +2924,163 @@
     applyViewModes(T.core.invoke('set_tab_view_exempt', { tab, mode: b.mode, exempt: !exemptFor(tab, b.mode) }));
   });
 
-  // ---- headers view (outline) ---------------------------------------------
+  // ---- summary view ---------------------------------------------------------
+  //
+  // Per tab: the button in the URL bar opens a panel docked right of the
+  // page with an AI summary of the page as bullet points. Opening it on a
+  // page without a summary asks for one at once; when the tab moves to
+  // another page the summary goes and the panel asks whether to summarize
+  // the new one. Each point names the parts of the page it came from (block
+  // numbers from the page read, C24): clicking it scrolls the page there.
+  // Summaries are model output (textContent only), kept in memory per tab.
 
-  // Index of the heading each tab's reader has scrolled to.
-  const currentHeading = new Map();
+  // tab id -> { key, title, status: 'ask'|'busy'|'done'|'error', points, msg, req, current, model, cost }
+  const summaries = new Map();
+  let summaryReq = 0;
 
-  function markCurrentHeading(tab) {
-    const cur = currentHeading.get(tab);
-    let shown = null;
-    document.querySelectorAll('#outline-list li[data-index]').forEach((li) => {
-      const on = Number(li.dataset.index) === cur;
-      li.classList.toggle('current', on);
-      if (on) shown = li;
-    });
-    document.querySelectorAll('#outline-list li.section').forEach((sec) =>
-      sec.classList.toggle('has-current', !!shown && sec.contains(shown)));
-    // Keep the current entry in view in the panel (its group's label when folded).
-    if (shown) {
-      const folded = shown.closest('li.section.collapsed');
-      (folded ? folded.querySelector('.sec-row') : shown).scrollIntoView({ block: 'nearest' });
+  // The page a summary belongs to: its address without the fragment (a
+  // jump within the page keeps the summary).
+  function summaryKey(t) {
+    const u = t && t.url ? t.url.full : '';
+    return u.split('#')[0];
+  }
+
+  function summarizable(t) {
+    return !!t && !!t.url && /^https?:/i.test(t.url.full || '');
+  }
+
+  function summaryFor(t) {
+    const key = summaryKey(t);
+    let sm = summaries.get(t.id);
+    if (!sm || sm.key !== key) {
+      // A new page: its summary starts over (a reply still on its way for
+      // the old page is ignored: its request number no longer matches).
+      sm = { key, status: 'ask', points: [], msg: '', req: 0, current: -1, model: '', cost: null };
+      summaries.set(t.id, sm);
     }
+    return sm;
   }
 
-  function outlineMsg(text) {
-    $('outline-msg').hidden = !text;
-    $('outline-msg').textContent = text || '';
+  function summaryShown() {
+    return !!state && !narrow && !scriptsOpen && !rightHidden && summaryOn(state.active);
   }
 
-  const outlineSummaries = new Map();
+  function setSummary(t, on) {
+    if (on) {
+      summaryTabs.add(t.id);
+      rightHidden = false;
+      applyChat();
+      applyNotebook();
+      // Opening the view is the request: a page without a summary gets one.
+      if (summarizable(t) && summaryFor(t).status === 'ask') summarize(t);
+    } else {
+      summaryTabs.delete(t.id);
+    }
+    renderViewMode();
+    reportLayout();
+  }
 
-  // "Detect Headers": the AI picks this site's heading elements.
-  $('detect-headers').addEventListener('click', () => {
-    const tab = state && state.active;
-    const use = useChoice('headers');
-    if (!use) { outlineMsg('Connect an AI service in Settings → AI to detect headers.'); return; }
-    const p = use.p;
-    const model = use.id;
-    const btn = $('detect-headers');
-    btn.disabled = true;
-    outlineMsg(`Asking ${AI_LABEL[p]} to find headers and summarize sections…`);
-    T.core.invoke('detect_headings', { tab, provider: p, model })
-      .then((result) => {
-        outlineSummaries.set(tab, result);
-        outlineMsg('Headers and summaries updated.');
-        renderOutline();
+  function summarize(t) {
+    const sm = summaryFor(t);
+    if (sm.status === 'busy') return;
+    const use = useChoice('summary');
+    if (!use) {
+      sm.status = 'error';
+      sm.msg = 'Connect an AI service in Settings → AI to summarize pages.';
+      renderSummary();
+      return;
+    }
+    const req = ++summaryReq;
+    Object.assign(sm, { status: 'busy', points: [], msg: '', req, current: -1, model: use.name, cost: null });
+    renderSummary();
+    T.core.invoke('ai_summarize', { tab: t.id, provider: use.p, model: use.id })
+      .then((r) => {
+        if (sm.req !== req || summaries.get(t.id) !== sm) return;
+        Object.assign(sm, { status: 'done', points: r.points || [], cost: r.cost_micros });
       })
-      .catch((e) => outlineMsg(String(e)))
-      .finally(() => { btn.disabled = false; });
-  });
-
-  function outlineShown() {
-    return !!state && !narrow && !scriptsOpen && !rightHidden && headersOn(state.active);
+      .catch((e) => {
+        if (sm.req !== req || summaries.get(t.id) !== sm) return;
+        Object.assign(sm, { status: 'error', msg: String(e) });
+      })
+      .finally(() => { if (state && state.active === t.id) renderSummary(); });
   }
 
-  // Folded sections, per tab and section index (session only).
-  const foldedSections = new Set();
+  $('summary-go').addEventListener('click', withTab((t) => summarize(t)));
+  $('summary-again').addEventListener('click', withTab((t) => summarize(t)));
 
-  function renderOutline() {
-    const show = outlineShown();
-    $('outline').hidden = !show;
-    $('outline').classList.toggle('dock', show);
+  function goToPoint(t, sm, i) {
+    const p = sm.points[i];
+    if (!p || !p.blocks || !p.blocks.length) return;
+    sm.current = i;
+    document.querySelectorAll('#summary-list li').forEach((li) => li.classList.toggle('current', Number(li.dataset.i) === i));
+    invoke('scroll_to_summary', { tab: t.id, blocks: p.blocks });
+  }
+
+  function renderSummary() {
+    const show = summaryShown();
+    $('summary').hidden = !show;
+    $('summary').classList.toggle('dock', show);
+    if (!show) $('summary').classList.remove('split-lower');
+    // Tabs that closed take their summaries with them.
+    if (state) {
+      for (const id of summaries.keys()) if (!state.tabs.some((x) => x.id === id)) summaries.delete(id);
+      for (const id of summaryTabs) if (!state.tabs.some((x) => x.id === id)) summaryTabs.delete(id);
+    }
     if (!show) return;
-    const tab = state.active;
-    if (!headingsByTab.has(tab)) {
-      headingsByTab.set(tab, []);
-      T.core.invoke('get_headings', { tab }).then((h) => { headingsByTab.set(tab, h); renderOutline(); }).catch(() => {});
+    const t = activeTab();
+    const list = $('summary-list');
+    const ask = $('summary-ask');
+    const msg = $('summary-msg');
+    const foot = $('summary-foot');
+    if (!summarizable(t)) {
+      list.replaceChildren();
+      list.dataset.key = '';
+      ask.hidden = true;
+      $('summary-again').hidden = true;
+      foot.hidden = true;
+      msg.hidden = false;
+      msg.textContent = 'Open a web page to summarize it.';
+      return;
     }
-    const items = headingsByTab.get(tab) || [];
-    const list = $('outline-list');
+    const sm = summaryFor(t);
+    const key = `${t.id}|${sm.key}|${sm.status}|${sm.req}|${sm.points.length}|${sm.msg}`;
+    $('summary-again').hidden = sm.status !== 'done';
+    ask.hidden = !(sm.status === 'ask' || sm.status === 'error');
+    $('summary-go').textContent = sm.status === 'error' ? 'Try Again' : 'Summarize';
+    $('summary-ask-text').textContent = sm.status === 'error' ? sm.msg
+      : (t.title ? `Summarize “${t.title}”?` : 'Summarize this page?');
+    msg.hidden = sm.status !== 'busy';
+    msg.textContent = sm.status === 'busy' ? `Summarizing with ${sm.model}…` : '';
+    foot.hidden = sm.status !== 'done';
+    if (sm.status === 'done') {
+      const cost = sm.cost === null || sm.cost === undefined ? 'price unknown' : '≈ ' + money(sm.cost);
+      foot.textContent = `${sm.model} · ${cost}`;
+    }
+    if (list.dataset.key === key) return;
+    list.dataset.key = key;
     list.replaceChildren();
-    if (!items.length) {
-      list.appendChild(el('li', 'muted', 'No headings on this page yet.'));
-      return;
-    }
-    const min = Math.min(...items.map((h) => h.level));
-    const saved = outlineSummaries.get(tab);
-    const currentUrl = activeTab()?.url?.full;
-    const summaries = saved && saved.url === currentUrl ? saved.summaries : [];
-    const addSummary = (button, h) => {
-      const match = summaries.find((s) => s.heading === h.text || s.heading === h.text.slice(0, 80));
-      if (match) button.appendChild(el('span', 'summary', match.summary));
-    };
-    const entry = (h, base) => {
-      const li = el('li');
-      li.dataset.index = String(h.index);
-      if (currentHeading.get(tab) === h.index) li.classList.add('current');
-      const b = el('button', 'l' + (h.level - min + 1), h.text);
-      b.style.paddingLeft = 12 + Math.max(0, h.level - base) * 20 + 'px';
-      addSummary(b, h);
-      b.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
-      li.appendChild(b);
-      return li;
-    };
-    // Sections: several top-level entries with headings under them (what
-    // Detect Headers produces for front pages). Otherwise a nested list.
-    const tops = items.filter((h) => h.level === min).length;
-    const sectioned = tops >= 2 && items.some((h) => h.level > min);
-    if (!sectioned) {
-      for (const h of items) list.appendChild(entry(h, min));
-      markCurrentHeading(tab);
-      return;
-    }
-    let group = null;
-    for (const h of items) {
-      if (h.level === min || !group) {
-        const key = `${tab}:${h.index}`;
-        const li = el('li', 'section' + (foldedSections.has(key) ? ' collapsed' : ''));
-        li.dataset.index = String(h.index);
-        const row = el('div', 'sec-row');
-        const toggle = el('button', 'sec-toggle', '\u25BE');
-        toggle.setAttribute('aria-label', `Fold or unfold ${h.text}`);
-        toggle.setAttribute('aria-expanded', String(!foldedSections.has(key)));
-        toggle.addEventListener('click', () => {
-          if (foldedSections.has(key)) foldedSections.delete(key); else foldedSections.add(key);
-          renderOutline();
+    if (sm.status !== 'done') return;
+    sm.points.forEach((p, i) => {
+      const li = el('li', '', p.text);
+      li.dataset.i = String(i);
+      if (i === sm.current) li.classList.add('current');
+      if (p.blocks && p.blocks.length) {
+        li.classList.add('link');
+        li.tabIndex = 0;
+        li.setAttribute('role', 'link');
+        li.title = 'Show this in the page';
+        li.addEventListener('click', () => {
+          // Selecting the point's words (to copy them) is not a click on it.
+          const sel = window.getSelection();
+          if (sel && !sel.isCollapsed && li.contains(sel.anchorNode)) return;
+          goToPoint(t, sm, i);
         });
-        const title = el('button', 'sec-title', h.text);
-        addSummary(title, h);
-        title.addEventListener('click', () => invoke('scroll_to_heading', { tab, index: h.index }));
-        const count = el('span', 'sec-count');
-        row.append(toggle, title, count);
-        const sub = el('ol');
-        li.append(row, sub);
-        list.appendChild(li);
-        group = { sub, count, n: 0 };
-        if (h.level === min) continue;
+        li.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); goToPoint(t, sm, i); }
+        });
       }
-      group.sub.appendChild(entry(h, min + 1));
-      group.n += 1;
-      group.count.textContent = String(group.n);
-    }
-    markCurrentHeading(tab);
+      list.appendChild(li);
+    });
   }
 
   // ---- AI chat about the page ---------------------------------------------
@@ -3485,7 +3515,7 @@
     }
     applyNotebook();
     applyChat();
-    renderOutline();
+    renderSummary();
     reportLayout();
   }
 
@@ -4382,13 +4412,13 @@
   // ⌘⇧\: hide the right panels (keeping them on), or show them again; with
   // none on, open the chat.
   function toggleRight() {
-    const anyOn = scriptsOpen || chatOpen || notebookOpen || (state && headersOn(state.active));
+    const anyOn = scriptsOpen || chatOpen || notebookOpen || (state && summaryOn(state.active));
     if (!anyOn) { setChat(true); return; }
-    if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !notebookOpen && !(state && headersOn(state.active))) return; }
+    if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !notebookOpen && !(state && summaryOn(state.active))) return; }
     rightHidden = !rightHidden;
     applyChat();
     applyNotebook();
-    renderOutline();
+    renderSummary();
     renderViewMode();
     reportLayout();
   }
@@ -5017,12 +5047,4 @@
   loadScripts();
   loadAi();
   T.core.invoke('get_view_mode').then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch(() => {});
-  T.event.listen('heading_current', (e) => {
-    currentHeading.set(e.payload.tab, e.payload.index);
-    if (state && e.payload.tab === state.active) markCurrentHeading(e.payload.tab);
-  });
-  T.event.listen('headings', (e) => {
-    headingsByTab.set(e.payload.tab, e.payload.headings);
-    if (state && e.payload.tab === state.active) renderOutline();
-  });
 })();

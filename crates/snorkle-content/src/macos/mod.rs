@@ -392,12 +392,6 @@ impl ContentHost {
         }
     }
 
-    pub fn sample_headings(&mut self, tab: TabId) {
-        if let Some(v) = self.views.get(&tab) {
-            injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::headings_sample_js());
-        }
-    }
-
     /// Save for Later's thumbnail (2026-11-09): shows the tab's loaded
     /// page in light mode, in colour and with its images (`on`), or as its
     /// view modes say again. Only that page changes: nothing installed for
@@ -779,9 +773,20 @@ impl ContentHost {
         }
     }
 
-    pub fn scroll_to_heading(&mut self, tab: TabId, index: u32) {
+    /// Summary view (C24): reads `tab`'s page as numbered blocks of text
+    /// (constant code, read back like the chat's page text, C17).
+    pub fn read_page_blocks(&mut self, tab: TabId, done: crate::TextDone) {
+        match self.views.get(&tab) {
+            Some(v) => injection::read_now(self.mtm, &v.web, &snorkle_core::summary::blocks_js(), done),
+            None => done(None),
+        }
+    }
+
+    /// Summary view: scrolls `tab`'s page to the blocks a summary point
+    /// was drawn from (constant code taking only their indices).
+    pub fn scroll_to_summary(&mut self, tab: TabId, blocks: &[u32]) {
         if let Some(v) = self.views.get(&tab) {
-            injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::scroll_to_heading_js(index));
+            injection::run_now(self.mtm, &v.web, &snorkle_core::summary::scroll_js(blocks));
         }
     }
 
@@ -789,7 +794,7 @@ impl ContentHost {
         let console = self.console.then_some(&self.events);
         let build = |view: &crate::ViewInjections| {
             let all: Vec<Injection> = self.injections.user.iter().chain(&view.sources).cloned().collect();
-            injection::make_scripts(self.mtm, &all, console, view.headings.then_some(&self.events), Some(&self.events))
+            injection::make_scripts(self.mtm, &all, console, Some(&self.events))
         };
         self.scripts = build(&self.injections.view);
         self.tab_scripts = self.injections.tabs.iter().map(|(t, v)| (*t, build(v))).collect();

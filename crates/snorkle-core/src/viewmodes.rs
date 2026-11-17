@@ -1,27 +1,21 @@
 //! SECURITY-REVIEW: view modes, the browser's own ways of drawing pages:
-//! desaturate (black and white), hide media (images and video) and headers
-//! (an outline of the page's headings). Each is set app-wide and a tab can
-//! be exempted from it ("Disable for this tab").
+//! desaturate (black and white), hide media (images and video) and dark.
+//! Each is set app-wide and a tab can be exempted from it ("Disable for
+//! this tab"). (The headers view, channel C14, was replaced by the summary
+//! view on 2026-11-16: `crate::summary`.)
 //!
 //! This module generates the constant sources the content host injects
-//! (via `webkit/injection.rs`) and parses what the headers extractor reports.
+//! (via `webkit/injection.rs`).
 //!
 //! Security assumptions / design:
-//! - All sources are constant code (no input from pages or the user except
-//!   a heading index, an integer), run in WebKit's isolated client world,
-//!   main frame only.
-//! - Headers (channel C14): the extractor runs in the client world and
-//!   posts the page's headings to a message handler registered in that
-//!   world only, so pages cannot call it; they can only influence which
-//!   headings exist. The text is page-controlled: [`parse_headings`]
-//!   accepts a bounded JSON list, checks every field and sanitises the
-//!   text, and the chrome renders it with `textContent`.
+//! - All sources are constant code (no input from pages or the user), run
+//!   in WebKit's isolated client world, main frame only (hide media: every
+//!   frame).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::text::sanitize_page_text;
 use crate::userscripts::{json_str, InjectAt, Injection};
 
 /// The view modes.
@@ -30,19 +24,18 @@ use crate::userscripts::{json_str, InjectAt, Injection};
 pub enum Kind {
     Desaturate,
     HideMedia,
-    Headers,
     /// Dark pages: light pages are inverted (media kept as they are).
     Dark,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 4] = [Kind::Desaturate, Kind::HideMedia, Kind::Headers, Kind::Dark];
+    pub const ALL: [Kind; 3] = [Kind::Desaturate, Kind::HideMedia, Kind::Dark];
 }
 
 /// The app-wide view modes each launch starts with (Settings → General),
 /// stored. Dark is also remembered when its toolbar button is pressed; the
 /// buttons for black and white and hide media change the current session
-/// only. The headers view is per tab and never starts on.
+/// only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LaunchModes {
@@ -60,16 +53,15 @@ impl Default for LaunchModes {
 impl LaunchModes {
     /// The app-wide modes a launch starts with.
     pub fn modes(self) -> ViewModes {
-        ViewModes { desaturate: self.desaturate, hide_media: self.hide_media, headers: false, dark: self.dark }
+        ViewModes { desaturate: self.desaturate, hide_media: self.hide_media, dark: self.dark }
     }
 
-    /// Sets one default. The headers view has none (ignored).
+    /// Sets one default.
     pub fn set(&mut self, k: Kind, on: bool) {
         match k {
             Kind::Desaturate => self.desaturate = on,
             Kind::HideMedia => self.hide_media = on,
             Kind::Dark => self.dark = on,
-            Kind::Headers => {}
         }
     }
 }
@@ -81,13 +73,12 @@ impl LaunchModes {
 pub struct ViewModes {
     pub desaturate: bool,
     pub hide_media: bool,
-    pub headers: bool,
     pub dark: bool,
 }
 
 impl Default for ViewModes {
     fn default() -> Self {
-        ViewModes { desaturate: true, hide_media: true, headers: false, dark: false }
+        ViewModes { desaturate: true, hide_media: true, dark: false }
     }
 }
 
@@ -96,7 +87,6 @@ impl ViewModes {
         match k {
             Kind::Desaturate => self.desaturate,
             Kind::HideMedia => self.hide_media,
-            Kind::Headers => self.headers,
             Kind::Dark => self.dark,
         }
     }
@@ -105,7 +95,6 @@ impl ViewModes {
         match k {
             Kind::Desaturate => self.desaturate = on,
             Kind::HideMedia => self.hide_media = on,
-            Kind::Headers => self.headers = on,
             Kind::Dark => self.dark = on,
         }
     }
@@ -390,170 +379,8 @@ first();window.addEventListener('load',check);window.addEventListener('pageshow'
 
 const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}if(window.__snorkleDark&&window.__snorkleDark.stop)window.__snorkleDark.stop();delete window.__snorkleDark;})();";
 
-/// Name of the headings message handler (client world only).
-pub const HEADINGS_HANDLER_NAME: &str = "snorkleHeadings";
-/// Headings reported per page, and characters per heading.
-pub const MAX_HEADINGS: usize = 300;
-pub const MAX_HEADING_CHARS: usize = 200;
-/// Largest report accepted from the extractor, in bytes.
-pub const MAX_HEADINGS_REPORT: usize = 96 * 1024;
-
-const HEADING_SELECTOR: &str = "h1,h2,h3,h4,h5,h6";
-
-/// A site-specific heading rule (from "Detect Headers"): elements matching
-/// `selector` are headings of `level`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HeadingRule {
-    pub selector: String,
-    pub level: u8,
-}
-
-/// Heading rules per site (registrable domain; also applies to subdomains).
-pub type HeadingRules = BTreeMap<String, Vec<HeadingRule>>;
-
-pub const MAX_RULES_PER_SITE: usize = 12;
-pub const MAX_SELECTOR_CHARS: usize = 200;
-
-/// Accepts a CSS selector list for `querySelectorAll` only: bounded, one
-/// line, and none of the characters that could end a rule or start markup
-/// (`{ } ; < \ @` and quotes are refused; attribute values must be
-/// unquoted; `>` is the child combinator). An invalid selector only makes the extractor fall back.
-pub fn validate_rule(selector: &str, level: u8) -> Option<HeadingRule> {
-    let sel = selector.trim();
-    let ok_chars =
-        sel.chars().all(|c| c.is_ascii_graphic() || c == ' ') && !sel.chars().any(|c| "{};<\\@\"'`".contains(c));
-    (ok_chars && !sel.is_empty() && sel.len() <= MAX_SELECTOR_CHARS && (1..=6).contains(&level))
-        .then(|| HeadingRule { selector: sel.to_string(), level })
-}
-
-/// Starts the headings extractor (idempotent). It reports `[[level, text,
-/// index], …]` as a JSON string on load and whenever the DOM changes
-/// (debounced), only when the list changed, and `{"c": index}` for the
-/// heading the reader has scrolled to. `index` is the heading's position
-/// among the elements matching the page's heading selector (h1–h6, or the
-/// site's detected rules), used to scroll back to it.
-fn headings_start_js(rules: &HeadingRules) -> String {
-    let rules_json = json_str(&serde_json::to_string(rules).unwrap_or_else(|_| "{}".into()));
-    format!(
-        r#"(function(){{
-var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.{HEADINGS_HANDLER_NAME};
-if(!h||window.__snorkleHeadings)return;
-var all=JSON.parse({rules_json}),host=location.hostname.toLowerCase(),rules=null;
-for(var d in all){{if(host===d||host.endsWith('.'+d)){{rules=all[d];break;}}}}
-var sel={default_sel};
-if(rules&&rules.length){{try{{var u=rules.map(function(r){{return r.selector;}}).join(',');document.querySelector(u);sel=u;}}catch(e){{rules=null;}}}}else{{rules=null;}}
-function level(e){{if(!rules)return +e.tagName.charAt(1)||1;for(var i=0;i<rules.length;i++){{try{{if(e.matches(rules[i].selector))return rules[i].level;}}catch(x){{}}}}return 1;}}
-var last='',timer=0,list=[],cur=-1,stimer=0;
-function collect(){{timer=0;var out=[],els=document.querySelectorAll(sel);list=[];
-for(var i=0;i<els.length&&out.length<{MAX_HEADINGS};i++){{var e=els[i];if(!e.getClientRects().length)continue;
-var t=(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim().slice(0,{MAX_HEADING_CHARS});if(!t)continue;
-out.push([level(e),t,i]);list.push([e,i]);}}
-var s=JSON.stringify(out);if(s!==last){{last=s;h.postMessage(s);cur=-1;}}position();}}
-function position(){{stimer=0;var c=-1;for(var k=0;k<list.length;k++){{if(list[k][0].getBoundingClientRect().top<=96)c=list[k][1];else break;}}
-if(c<0&&list.length)c=list[0][1];if(c!==cur){{cur=c;h.postMessage(JSON.stringify({{c:c}}));}}}}
-function schedule(){{if(!timer)timer=setTimeout(collect,400);}}
-function onScroll(){{if(!stimer)stimer=setTimeout(position,150);}}
-var obs=new MutationObserver(schedule);
-obs.observe(document.documentElement,{{childList:true,subtree:true,characterData:true}});
-window.addEventListener('scroll',onScroll,{{passive:true,capture:true}});
-window.__snorkleHeadings={{obs:obs,sel:sel,cancel:function(){{clearTimeout(timer);clearTimeout(stimer);window.removeEventListener('scroll',onScroll,true);}}}};
-collect();
-}})();"#,
-        default_sel = json_str(HEADING_SELECTOR)
-    )
-}
-
-const HEADINGS_STOP_JS: &str =
-    "(function(){var s=window.__snorkleHeadings;if(!s)return;s.obs.disconnect();s.cancel();delete window.__snorkleHeadings;})();";
-
-/// Candidates sent to "Detect Headers".
-pub const MAX_SAMPLE: usize = 200;
-/// Largest sample accepted from a page, in bytes.
-pub const MAX_SAMPLE_REPORT: usize = 96 * 1024;
-
-/// Collects a compact sample of the page's heading-like elements for
-/// "Detect Headers" and posts `{"sample": [...]}`: for each candidate (in
-/// document order) its tag, id, first classes, font size and weight,
-/// whether it is uppercase (section labels often are), the parent's tag and
-/// classes, its enclosing section element (`section`, `article`, `aside`,
-/// … with classes and `aria-label`), and the start of its text. Constant code; run
-/// only when the user presses the button.
-pub fn headings_sample_js() -> String {
-    format!(
-        r#"(function(){{
-var w=window.webkit,h=w&&w.messageHandlers&&w.messageHandlers.{HEADINGS_HANDLER_NAME};if(!h)return;
-function cls(e){{return (e.className&&e.className.baseVal===undefined?String(e.className):'').split(/\s+/).filter(Boolean).slice(0,4).map(function(c){{return c.slice(0,40);}});}}
-function sec(e){{var a=e.parentElement;while(a&&a!==document.body){{var t=a.tagName.toLowerCase();
-if(/^(section|article|aside|nav|main|header|footer)$/.test(t)||a.getAttribute('role')==='region'){{
-var l=(a.getAttribute('aria-label')||'').replace(/\s+/g,' ').trim().slice(0,30);return t+(cls(a).length?'.'+cls(a).join('.'):'')+(l?' ['+l+']':'');}}
-a=a.parentElement;}}return '';}}
-var ps=[].slice.call(document.querySelectorAll('p')).slice(0,40).map(function(p){{return parseFloat(getComputedStyle(p).fontSize)||16;}}).sort(function(a,b){{return a-b;}});
-var base=ps.length?ps[ps.length>>1]:16,out=[],els=document.body?document.body.getElementsByTagName('*'):[];
-for(var i=0;i<els.length&&i<8000&&out.length<{MAX_SAMPLE};i++){{var e=els[i],tag=e.tagName.toLowerCase();
-if(/^(script|style|noscript|svg|path|img|video|canvas|iframe|button|input|select|textarea|option)$/.test(tag))continue;
-var own='';for(var n=e.firstChild;n;n=n.nextSibling)if(n.nodeType===3)own+=n.nodeValue;own=own.replace(/\s+/g,' ').trim();
-var text=own.length>=3?own:'';if(!text&&e.children.length===1&&!e.children[0].children.length)text=(e.textContent||'').replace(/\s+/g,' ').trim();
-if(text.length<3||text.length>160)continue;if(!e.getClientRects().length)continue;
-var cs=getComputedStyle(e),fs=parseFloat(cs.fontSize)||0,fw=parseInt(cs.fontWeight,10)||400;
-var isH=/^h[1-6]$/.test(tag)||e.getAttribute('role')==='heading';
-var label=cs.textTransform==='uppercase'&&fw>=500&&text.length<=40;
-if(!isH&&!label&&fs<base*1.15&&!(fw>=600&&fs>=base*1.05))continue;
-var p=e.parentElement;
-out.push({{tag:tag,id:(e.id||'').slice(0,40),cls:cls(e),fs:Math.round(fs),fw:fw,up:cs.textTransform==='uppercase',parent:p?p.tagName.toLowerCase():'',pcls:p?cls(p):[],sec:sec(e),text:text.slice(0,80)}});}}
-h.postMessage(JSON.stringify({{sample:out,base:Math.round(base)}}));
-}})();"#
-    )
-}
-
-/// What the headings extractor reported.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum HeadingsReport {
-    Outline(Vec<Heading>),
-    /// Index of the heading the reader has scrolled to.
-    Current(u32),
-    /// A "Detect Headers" sample (validated JSON, re-serialised).
-    Sample(String),
-}
-
-/// Parses any report from the extractor (see [`parse_headings`]).
-pub fn parse_report(body: &str) -> Option<HeadingsReport> {
-    if body.starts_with('[') {
-        return parse_headings(body).map(HeadingsReport::Outline);
-    }
-    if body.len() > MAX_SAMPLE_REPORT {
-        return None;
-    }
-    let v: serde_json::Value = serde_json::from_str(body).ok()?;
-    if let Some(c) = v.get("c") {
-        return u32::try_from(c.as_u64()?).ok().map(HeadingsReport::Current);
-    }
-    let sample = v.get("sample")?.as_array()?;
-    if sample.len() > MAX_SAMPLE {
-        return None;
-    }
-    // Keep only the expected fields, sanitising every string.
-    let s = |x: &serde_json::Value, max: usize| sanitize_page_text(x.as_str().unwrap_or(""), max);
-    let list = |x: &serde_json::Value| -> Vec<String> {
-        x.as_array().map(|a| a.iter().take(4).map(|c| s(c, 40)).collect()).unwrap_or_default()
-    };
-    let clean: Vec<serde_json::Value> = sample
-        .iter()
-        .map(|e| {
-            serde_json::json!({
-                "tag": s(&e["tag"], 16), "id": s(&e["id"], 40), "cls": list(&e["cls"]),
-                "fs": e["fs"].as_u64().unwrap_or(0).min(400), "fw": e["fw"].as_u64().unwrap_or(400).min(1000),
-                "up": e["up"].as_bool().unwrap_or(false),
-                "parent": s(&e["parent"], 16), "pcls": list(&e["pcls"]), "sec": s(&e["sec"], 80),
-                "text": s(&e["text"], 80),
-            })
-        })
-        .collect();
-    let base = v.get("base").and_then(|b| b.as_u64()).unwrap_or(16).min(200);
-    Some(HeadingsReport::Sample(serde_json::json!({ "base_font_px": base, "candidates": clean }).to_string()))
-}
-
 /// Injected sources for the modes in `modes` (constant code).
-pub fn injections(modes: ViewModes, rules: &HeadingRules) -> Vec<Injection> {
+pub fn injections(modes: ViewModes) -> Vec<Injection> {
     let mut out = Vec::new();
     if modes.desaturate {
         out.push(Injection {
@@ -570,9 +397,6 @@ pub fn injections(modes: ViewModes, rules: &HeadingRules) -> Vec<Injection> {
             all_frames: true,
         });
     }
-    if modes.headers {
-        out.push(Injection { source: headings_start_js(rules), at: InjectAt::DocumentEnd, all_frames: false });
-    }
     if modes.dark {
         out.push(Injection {
             source: style_js("__snorkle_dark", DARK_CSS, true, false),
@@ -585,20 +409,13 @@ pub fn injections(modes: ViewModes, rules: &HeadingRules) -> Vec<Injection> {
 }
 
 /// Brings an already-loaded page in line with `modes` (adds or removes the
-/// styles, starts or stops the headings extractor). Constant code.
-/// The headings extractor restarts, so new heading rules take effect.
-pub fn apply_js(modes: ViewModes, rules: &HeadingRules) -> String {
-    let headers = if modes.headers {
-        HEADINGS_STOP_JS.to_string() + &headings_start_js(rules)
-    } else {
-        HEADINGS_STOP_JS.to_string()
-    };
+/// styles). Constant code.
+pub fn apply_js(modes: ViewModes) -> String {
     let dark = if modes.dark { DARK_DETECT_JS } else { DARK_STOP_JS };
     style_js("__snorkle_grayscale", GRAYSCALE_CSS, modes.desaturate, false)
         + &style_js("__snorkle_no_images", NO_MEDIA_CSS, modes.hide_media, true)
         + &style_js("__snorkle_dark", DARK_CSS, modes.dark, false)
         + dark
-        + &headers
 }
 
 /// Save for Later's thumbnail (2026-11-09): takes black and white, hidden
@@ -610,21 +427,6 @@ pub fn plain_js() -> String {
         + &style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true)
         + &style_js("__snorkle_dark", DARK_CSS, false, false)
         + DARK_STOP_JS
-}
-
-/// Scrolls the page to the heading at `index` among the elements matching
-/// the extractor's heading selector, then highlights it briefly (an
-/// outline and a gray wash that fade out; Web Animations, so the page's own
-/// styles are untouched). The only input is an integer.
-pub fn scroll_to_heading_js(index: u32) -> String {
-    format!(
-        "(function(){{var s=window.__snorkleHeadings,sel=s?s.sel:{};var e=document.querySelectorAll(sel)[{index}];\
-         if(!e)return;e.scrollIntoView({{block:'start',behavior:'smooth'}});if(!e.animate)return;\
-         var k=function(a,o){{return {{outlineStyle:'solid',outlineWidth:'3px',outlineOffset:'4px',\
-         outlineColor:'rgba(110,110,110,'+a+')',backgroundColor:'rgba(128,128,128,'+(a*.22)+')',offset:o}};}};\
-         e.animate([k(0,0),k(1,.15),k(1,.65),k(0,1)],{{duration:2200,delay:300,easing:'ease-in-out'}});}})();",
-        json_str(HEADING_SELECTOR)
-    )
 }
 
 /// Hide media's video frames (2026-11-09; the same search as dark mode's
@@ -760,34 +562,6 @@ fn style_js(id: &str, css: &str, on: bool, pause_media: bool) -> String {
     )
 }
 
-/// One heading of the page outline.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Heading {
-    /// 1–6.
-    pub level: u8,
-    pub text: String,
-    /// Position among the page's h1–h6 elements (for scrolling).
-    pub index: u32,
-}
-
-/// Parses an extractor report. Fails closed: anything but a bounded list of
-/// `[level 1–6, non-empty string, index]` entries is rejected.
-pub fn parse_headings(body: &str) -> Option<Vec<Heading>> {
-    if body.len() > MAX_HEADINGS_REPORT {
-        return None;
-    }
-    let raw: Vec<(u8, String, u32)> = serde_json::from_str(body).ok()?;
-    if raw.len() > MAX_HEADINGS {
-        return None;
-    }
-    raw.into_iter()
-        .map(|(level, text, index)| {
-            let text = sanitize_page_text(&text, MAX_HEADING_CHARS);
-            ((1..=6).contains(&level) && !text.is_empty()).then_some(Heading { level, text, index })
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -795,90 +569,35 @@ mod tests {
     #[test]
     fn defaults_and_exemptions() {
         let m = ViewModes::default();
-        assert!(m.desaturate && m.hide_media && !m.headers);
+        assert!(m.desaturate && m.hide_media && !m.dark);
         let exempt: BTreeSet<Kind> = [Kind::Desaturate].into();
         let t = m.for_tab(&exempt);
         assert!(!t.desaturate && t.hide_media);
-        assert_eq!(injections(t, &HeadingRules::new()).len(), 1);
+        assert_eq!(injections(t).len(), 1);
     }
 
     #[test]
     fn injections_per_mode() {
-        let all = ViewModes { desaturate: true, hide_media: true, headers: true, dark: false };
-        let inj = injections(all, &HeadingRules::new());
-        assert_eq!(inj.len(), 3);
+        let all = ViewModes { desaturate: true, hide_media: true, dark: false };
+        let inj = injections(all);
+        assert_eq!(inj.len(), 2);
         assert!(inj[0].source.contains("grayscale(1)"));
         assert!(inj[1].source.contains("video,"));
-        assert!(inj[2].source.contains(&format!("messageHandlers.{HEADINGS_HANDLER_NAME}")));
-        assert_eq!(inj[2].at, InjectAt::DocumentEnd);
-        assert!(injections(ViewModes { desaturate: false, hide_media: false, headers: false, dark: false }, &HeadingRules::new())
-            .is_empty());
-        let off = apply_js(ViewModes { desaturate: false, hide_media: false, headers: false, dark: false }, &HeadingRules::new());
+        assert!(injections(ViewModes { desaturate: false, hide_media: false, dark: false }).is_empty());
+        let off = apply_js(ViewModes { desaturate: false, hide_media: false, dark: false });
         assert!(off.contains("window[\"__snorkle_grayscale_state\"];if(!s)return;s.obs.disconnect();s.st.remove()"));
         assert!(inj[1].all_frames, "hide media also covers iframes");
-        assert!(!inj[0].all_frames && !inj[2].all_frames);
+        assert!(!inj[0].all_frames);
+        let with_dark = injections(ViewModes { dark: true, ..all });
+        assert!(!inj.iter().chain(&with_dark).any(|i| i.source.contains("messageHandlers")), "nothing posts back");
         assert!(inj[1].source.contains("addEventListener('play'"));
         assert!(off.contains("obs.disconnect()"));
     }
 
     #[test]
-    fn headings_are_validated() {
-        let h = parse_headings("[[1,\"Intro \\u202e evil\",0],[3,\"Deep\",4]]").unwrap();
-        assert_eq!(
-            h,
-            vec![
-                Heading { level: 1, text: "Intro evil".into(), index: 0 },
-                Heading { level: 3, text: "Deep".into(), index: 4 },
-            ]
-        );
-        assert!(parse_headings(r#"[[7,"x",0]]"#).is_none(), "level out of range");
-        assert!(parse_headings(r#"[[1,"",0]]"#).is_none(), "empty text");
-        assert!(parse_headings(r#"[[1,"x",-1]]"#).is_none());
-        assert!(parse_headings(r#"{"a":1}"#).is_none());
-        assert!(parse_headings(&"x".repeat(MAX_HEADINGS_REPORT + 1)).is_none());
-        let many = format!("[{}]", vec![r#"[2,"x",1]"#; MAX_HEADINGS + 1].join(","));
-        assert!(parse_headings(&many).is_none());
-        assert_eq!(parse_headings("[]").unwrap(), vec![]);
-    }
-
-    #[test]
-    fn heading_rules_are_validated_and_embedded_safely() {
-        assert!(validate_rule("h2.story-heading", 2).is_some());
-        assert!(validate_rule("div[data-testid=headline] > span", 1).is_some());
-        for bad in ["h2{color:red}", "h2;x", "</script>", "h2[a='x']", "@import", "a\\62", "", "h2\nh3"] {
-            assert!(validate_rule(bad, 1).is_none(), "{bad}");
-        }
-        assert!(validate_rule("h2", 0).is_none() && validate_rule("h2", 7).is_none());
-        assert!(validate_rule(&"a".repeat(MAX_SELECTOR_CHARS + 1), 1).is_none());
-        let mut rules = HeadingRules::new();
-        rules.insert("nytimes.com".into(), vec![validate_rule("h2.story-heading", 1).unwrap()]);
-        let js = &injections(ViewModes { desaturate: false, hide_media: false, headers: true, dark: false }, &rules)[0].source;
-        assert!(js.contains("story-heading"));
-        assert!(!js.contains("</"), "rules are embedded as an escaped JSON literal");
-        let apply = apply_js(ViewModes { desaturate: false, hide_media: false, headers: true, dark: false }, &rules);
-        let stop = apply.find(HEADINGS_STOP_JS).expect("stops the running extractor");
-        assert!(apply[stop..].contains("story-heading"), "then restarts it with the new rules");
-    }
-
-    #[test]
-    fn reports() {
-        assert_eq!(parse_report("{\"c\":4}"), Some(HeadingsReport::Current(4)));
-        assert!(matches!(parse_report("[[2,\"A\",0]]"), Some(HeadingsReport::Outline(v)) if v.len() == 1));
-        let sample = r#"{"sample":[{"tag":"div","id":"x","cls":["headline","a","b","c","d"],"fs":28,"fw":700,"parent":"article","pcls":[],"text":"Big \u202e news","extra":"dropped"}],"base":17}"#;
-        let Some(HeadingsReport::Sample(clean)) = parse_report(sample) else { panic!("sample") };
-        let v: serde_json::Value = serde_json::from_str(&clean).unwrap();
-        assert_eq!(v["base_font_px"], 17);
-        assert_eq!(v["candidates"][0]["cls"].as_array().unwrap().len(), 4);
-        assert_eq!(v["candidates"][0]["text"], "Big news");
-        assert!(v["candidates"][0].get("extra").is_none());
-        assert!(parse_report("{\"c\":-1}").is_none());
-        assert!(parse_report("{\"nope\":1}").is_none());
-    }
-
-    #[test]
     fn dark_mode() {
-        let m = ViewModes { desaturate: true, hide_media: true, headers: false, dark: true };
-        let inj = injections(m, &HeadingRules::new());
+        let m = ViewModes { desaturate: true, hide_media: true, dark: true };
+        let inj = injections(m);
         assert_eq!(inj.len(), 4, "grayscale, media, dark style, dark detector");
         assert!(inj[2].source.contains("snorkle-dark") && inj[2].at == InjectAt::DocumentStart);
         assert!(inj[3].source.contains("classList.toggle('snorkle-dark'") && inj[3].at == InjectAt::DocumentEnd);
@@ -886,18 +605,10 @@ mod tests {
         assert!(DARK_CSS.contains("html:not(.snorkle-dark-checked){filter:brightness(.2)"), "dim while loading");
         assert!(DARK_DETECT_JS.contains("classList.add('snorkle-dark-checked')"), "the check ends the dim");
         assert!(!DARK_CSS.contains("picture"), "img inside picture would be filtered twice");
-        let off = apply_js(ViewModes { dark: false, ..m }, &HeadingRules::new());
+        let off = apply_js(ViewModes { dark: false, ..m });
         assert!(off.contains(DARK_STOP_JS));
         assert!(!ViewModes::default().dark);
         assert!(DARK_DETECT_JS.contains("prefers-color-scheme: dark"));
-    }
-
-    #[test]
-    fn scroll_takes_only_an_index() {
-        let js = scroll_to_heading_js(12);
-        assert!(js.contains("[12]"));
-        assert!(js.contains("scrollIntoView"));
-        assert!(js.contains("e.animate("), "the heading is highlighted after scrolling");
     }
 
     #[test]
@@ -990,16 +701,6 @@ mod tests {
         assert_eq!(DARK_CSS.matches(&one).count(), 5, "media under one flip get the dark-page filters");
         // The frame rule (two ids) still wins over them: it stays last.
         assert!(DARK_CSS.ends_with("{filter:none!important}"));
-    }
-
-    #[test]
-    fn sample_reports_sections() {
-        let sample = r#"{"sample":[{"tag":"span","cls":[],"fs":13,"fw":700,"up":true,"parent":"div","pcls":[],"sec":"section.opinion [Opinion]","text":"Opinion"}],"base":16}"#;
-        let Some(HeadingsReport::Sample(clean)) = parse_report(sample) else { panic!("sample") };
-        let v: serde_json::Value = serde_json::from_str(&clean).unwrap();
-        assert_eq!(v["candidates"][0]["sec"], "section.opinion [Opinion]");
-        assert_eq!(v["candidates"][0]["up"], true);
-        assert!(headings_sample_js().contains("function sec(e)"));
     }
 
     #[test]

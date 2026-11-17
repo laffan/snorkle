@@ -218,7 +218,7 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     popups share their opener's content controller); the clipboard copy works in the chrome
     webview. **[decide]** Release builds record nothing until the user turns Record on; pages can
     detect the hook while it is on.
-45. **[verify] View modes per tab and headers view.** Check: a popup shares its opener's content
+45. **[verify] View modes per tab and headers view.** (The headers view was removed 2026-11-16; the popup and controller points still apply to view modes.) Check: a popup shares its opener's content
     controller, so installing per-tab scripts for one rewrites the other's (exemptions are copied
     to popups to keep them consistent); the client-world handler is not visible to page scripts
     (`window.webkit.messageHandlers.snorkleHeadings` undefined in the page world); the extractor
@@ -233,7 +233,7 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     beta `server-side-fallback-2026-07-01`). **[decide]** Keys are device-only (no iCloud
     Keychain sync); the domain, script and prompt are sent to the provider under the user's own
     account terms.
-47. **[verify] Detect Headers.** The sample is collected in the client world (computed styles of
+47. **[superseded 2026-11-16: the summary view replaced Detect Headers]** **Detect Headers.** The sample is collected in the client world (computed styles of
     up to 8,000 elements, once per press); check the cost on very large pages. Rules are keyed by
     registrable domain and apply to its subdomains; a site whose layouts differ by section may
     need re-detecting. **[decide]** Pressing the button sends up to 200 short text snippets from
@@ -273,7 +273,7 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     `transition: … !important`, which overrides the page's own transitions on media elements.
     The pointer tracker uses `pointermove` (not touch) and `elementsFromPoint`; check its cost on
     image-heavy pages and that iPad trackpad hover produces pointer events in WKWebView.
-53. **[verify] Detect Headers sections.** The prompt asks for section labels at level 1 and
+53. **[superseded 2026-11-16]** **Detect Headers sections.** The prompt asks for section labels at level 1 and
     stories at 2–3; the panel groups whenever there are at least two top-level entries with
     deeper ones under them, which also applies to ordinary pages with several h1s. Rules stored
     before this change keep their old levels until Detect Headers is pressed again.
@@ -318,7 +318,7 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     that punctuation keys other than `\` match on non-US layouts.
     **[decide]** "Google This" always uses Google (the address bar's default is DuckDuckGo).
     Settings → AI now has Authentication and Uses (Site script helper, Ask Selection, Header View
-    Parsing), each with its own service and model; earlier per-provider model choices are used
+    Parsing; since 2026-11-16 Summary View in its place), each with its own service and model; earlier per-provider model choices are used
     as the defaults.
 58. **[verify] Round 5 (2026-11-01).**
     (a) Animated sidebar: content frames animate with `UIView.animateWithDuration(0.25)` while the
@@ -1073,3 +1073,37 @@ The live sites were not reachable or not signed in from this environment.
 - **[verify] Try Again.** The failed address is loaded as if typed (it goes through the policy
   again); a certificate failure still reloads the way it did. Only checked in the core's tests.
 
+## Summary view; ⌥ with ⇧; ⌥ dims only while dragging (2026-11-16)
+
+- **[decide] Opening the summary view asks the AI at once.** Pressing the button on a page without
+  a summary sends the page's text (as numbered blocks, ≤ 40,000 characters) to the Summary View
+  service right away, as pressing Send does for the chat; after the tab moves to another page the
+  panel asks first ("Summarize “title”?"). If opening should also ask first, `setSummary` in
+  `ui/chrome.js` is the one place to change. Private tabs are summarized like any other (nothing
+  is stored), as with the page chat.
+- **[decide] What counts as a new page.** The summary is dropped when the tab's address changes,
+  ignoring the fragment (`#…`), so jumps within a page keep it. A reload of the same address keeps
+  it too; single-page apps that change content without changing the address keep a stale summary
+  until Summarize again (the sparkle button).
+- **[verify] Block reading in WebKit.** `summary::blocks_js` relies on `checkVisibility`
+  (Safari 17.4+; falls back to `getClientRects`), `getComputedStyle(…).display` per ancestor
+  (cached per read) and a `TreeWalker` over at most 200,000 nodes. Checked in Chromium on a test
+  page (navigation, buttons, scripts, SVG, `display:none` and `visibility:hidden` skipped; inline
+  and inline-block text merged into its paragraph); not on long real pages or in WebKit. Text in
+  closed shadow roots and iframes is not read. A page whose text the walk visits in a different
+  order from how it looks (CSS reordering, absolutely placed columns) is summarized in DOM order.
+- **[verify] Anchoring.** Points name the blocks they come from by number; the model may cite a
+  nearby block instead of the exact one. Clicking scrolls to the first named block and highlights
+  each. If the page was reloaded or redrawn (any element gone), it is read into blocks again and
+  the numbers are used against that reading: right when the content is unchanged, off when blocks
+  were added or removed above. The click is fire-and-forget: nothing tells the panel when a block
+  could not be found.
+- **[verify] ⌥⇧ word selection.** The watcher no longer treats ⌥ as the notebook's while ⇧ (or ⌘,
+  ⌃) is down: ⇧ pressed while ⌥ is held removes the cover, ⇧ let go with ⌥ still held brings it
+  back. Checked in Chromium (no cover, a ⇧⌥-drag selects text, ⇧⌥-click sends nothing); the
+  macOS behaviour itself (⌥⇧← / ⌥⇧→ extending by word in WebKit) was not run here. Nothing native
+  intercepts ⌥⇧ arrows (app shortcuts always include ⌘).
+- **[verify] ⌥ dims only once a drag begins.** Holding ⌥ shows the crosshair cover without the
+  grey fade; the page dims when the drag has moved 6 pt (the stage's shade around its box). Clip
+  mode (the scissors) keeps its slight grey fade, since nothing else shows that it is on; say if
+  that should go too.

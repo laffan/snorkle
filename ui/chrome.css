@@ -257,39 +257,30 @@ body.dragging .row-actions { opacity: 0; pointer-events: none; }
 }
 .vm-pop { left: auto; right: 10px; min-width: 220px; }
 .vm-title { font-size: 12px; color: var(--muted); padding: 6px 12px 4px; }
-.outline-list { list-style: none; margin: 0; padding: 0 0 0 16px; }
-.outline-list button { display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: 6px; font-size: 17px; line-height: 1.45; }
-.outline-list button:active { background: var(--field); }
-.outline-list .l1 { font-weight: 400; }
-/* Sections (when the page's outline has several top-level entries with
-   headings under them): a label row with a fold toggle, items indented. */
-.outline-list li.section { margin-top: 10px; }
-.outline-list li.section:first-child { margin-top: 0; }
-.outline-list .sec-row { position: relative; display: flex; align-items: center; gap: 2px; }
-.outline-list .sec-row > .sec-toggle { position: absolute; left: -16px; top: 8px; width: 16px; }
-.outline-list .sec-row > button.sec-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--fg); }
-.outline-list .sec-toggle { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 6px; padding: 0; text-align: center; font-size: 12px; color: var(--muted); transition: transform .15s; }
-.outline-list li.section.collapsed .sec-toggle { transform: rotate(-90deg); }
-.outline-list .sec-count { flex: 0 0 auto; font-size: 11px; color: var(--muted); padding-right: 6px; }
-.outline-list ol { list-style: none; margin: 0; padding: 0 0 0 20px; }
-.outline-list li.section.collapsed > ol { display: none; }
-.outline-list li.section.has-current > .sec-row .sec-title { color: var(--fg); }
-.outline-list .l2 { font-weight: 400; }
-.outline-list .summary { display: block; margin-top: 4px; font-size: 14px; line-height: 1.45; font-weight: 400; color: var(--muted); }
-.outline-list li.muted { padding: 6px 8px; font-size: 13px; }
-#outline .modal-head h1 { flex: 1; }
-#outline.dock { overflow-y: auto; }
-/* Headers and chat both open: the chat takes the lower half. */
+/* Summary view: bullet points; one with a place in the page is a link
+   that scrolls there (the last one followed is marked). Its text can be
+   selected. */
+#summary.dock { overflow-y: auto; }
+#summary .modal-head h1 { flex: 1; }
+.summary-ask { padding: 4px 0 8px; }
+.summary-ask p { margin: 0 0 12px; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+#summary-msg { margin: -4px 0 8px; }
+.summary-list { list-style: none; margin: 0; padding: 0; -webkit-user-select: text; user-select: text; }
+.summary-list li { position: relative; padding: 7px 10px 7px 24px; border-radius: 8px; font-size: 16px; line-height: 1.45; }
+.summary-list li::before {
+  content: ""; position: absolute; left: 10px; top: calc(7px + .725em - 2.5px); width: 5px; height: 5px;
+  border-radius: 50%; background: var(--muted);
+}
+.summary-list li.link { cursor: pointer; }
+.summary-list li.link:hover { background: var(--field); }
+.summary-list li.link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.summary-list li.current { background: var(--field); }
+.summary-list li.current::before { background: var(--fg); }
+.summary-foot { margin: 10px 0 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Two right panels open: the lower one has a line above it. */
 .sheet.dock.split-lower { border-top: 1px solid var(--line); }
 .icon.sparkle { min-width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--line); }
 .icon.sparkle:disabled { opacity: .4; }
-#outline-msg { margin: -4px 0 8px; }
-/* The heading the reader has scrolled to. */
-.outline-list button { position: relative; }
-.outline-list li.current > button::before {
-  content: ""; position: absolute; left: -2px; top: 50%; width: 6px; height: 6px; margin-top: -3px;
-  border-radius: 3px; background: var(--fg);
-}
 /* Resize edges. The grab area is inside the panel (page views are drawn
    over anything outside it); the 3 pt line is the panel's border. */
 .resize-edge { position: absolute; top: 0; bottom: 0; width: 12px; cursor: col-resize; touch-action: none; z-index: 2; }

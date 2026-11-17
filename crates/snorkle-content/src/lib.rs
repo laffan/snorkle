@@ -79,8 +79,6 @@ pub struct ViewInjections {
     pub sources: Vec<Injection>,
     /// Brings an already-loaded page in line with these modes.
     pub apply_js: String,
-    /// Install the headings message handler (headers mode on).
-    pub headings: bool,
     /// Dark mode: the web view prefers a dark appearance, so pages with
     /// their own dark theme (`prefers-color-scheme`) use it.
     pub dark: bool,
@@ -448,10 +446,6 @@ pub trait ContentEvents: 'static {
     /// capture is on). `body` is page-controlled; `tab`, `origin_host` and
     /// `main_frame` come from WebKit.
     fn console_message(&self, tab: Option<TabId>, origin_host: String, main_frame: bool, body: String);
-    /// The headers view's extractor reported the page's headings (a JSON
-    /// string, only while headers mode is on for the tab). `body` is
-    /// derived from page content; `tab` comes from WebKit.
-    fn headings(&self, tab: Option<TabId>, body: String);
     /// The user ⌘-clicked a link to `url` in `opener` (WebKit's modifier
     /// flags on a link activation); the link did not navigate `opener`.
     fn background_tab_requested(&self, opener: TabId, url: Url);

@@ -100,8 +100,12 @@ pub enum Report {
 ///
 /// While ⌥ is held over the page (seen on key events and on the modifier
 /// state of pointer moves), and in clip mode, a cover lies over the page:
-/// a crosshair, a slight fade, and every press goes to it, so nothing on
-/// the page is selected or followed. A drag on it draws a box; let go, the
+/// a crosshair, and every press goes to it, so nothing on the page is
+/// selected or followed. ⌥ with ⇧ (or ⌘, ⌃) is not the notebook's, so ⌥⇧
+/// keys select word by word as usual (owner request 2026-11-16). The cover
+/// is clear while ⌥ is only held (2026-11-16): the page dims once a drag
+/// begins (the stage's shade around its box); in clip mode the cover also
+/// fades the page slightly. A drag on the cover draws a box; let go, the
 /// box stays as a stage (zotero-helper's clip mode): its corners size it,
 /// a press inside moves it, a press outside draws another, and Clip (or
 /// ↩) clips it, × (or Escape) drops it. A click without a drag is ⌥-click.
@@ -122,6 +126,7 @@ const WATCH_JS: &str = r#"(function(){var w=window.webkit,h=w&&w.messageHandlers
 if(!h||window.__snorkleNb)return;var nb=window.__snorkleNb={clip:false},Z='2147483647';
 var css=document.createElement('style');css.textContent='::highlight(snorkle-nb){background-color:rgba(255,95,87,.3)}';(document.head||document.documentElement).appendChild(css);
 function ok(e){return !!(e&&e.isTrusted);}
+function optKey(e){return !!(e.altKey&&!e.shiftKey&&!e.metaKey&&!e.ctrlKey);}
 function vp(){var v=window.visualViewport;return [v?v.offsetLeft:0,v?v.offsetTop:0,Math.round(v?v.width:innerWidth),Math.round(v?v.height:innerHeight)];}
 function report(o){h.postMessage(JSON.stringify(o));}
 function rectOf(kind,r){var o=vp(),x0=Math.max(0,r.left-o[0]),y0=Math.max(0,r.top-o[1]),x1=Math.min(o[2],r.right-o[0]),y1=Math.min(o[3],r.bottom-o[1]);
@@ -154,11 +159,11 @@ var m=mediaAt(x,y);if(m){post('img',m.getBoundingClientRect());return true;}
 var a=linkAt(x,y);if(a){var b=a.getBoundingClientRect(),q=rectOf('link',b.width&&b.height?b:{left:x,top:y,right:x+1,bottom:y+1});if(q){q.url=String(a.href).slice(0,4096);picked=1;report(q);}return true;}
 r=sentenceAt(x,y);if(!r)return false;var s=window.getSelection();s.removeAllRanges();s.addRange(r);post('text',r.getBoundingClientRect());return true;});}
 var alt=false,spent=false,stage=null,drag=null,swallow=0,MIN=12;
-function cover(on){if(on&&!ov){ov=el({position:'fixed',left:'0',top:'0',width:'100vw',height:'100vh',margin:'0',padding:'0',border:'0','z-index':Z,background:'rgba(128,128,128,.14)',cursor:'crosshair','touch-action':'none','-webkit-user-select':'none','user-select':'none'});ov.addEventListener('pointerdown',down,true);}
+function cover(on){if(on&&!ov){ov=el({position:'fixed',left:'0',top:'0',width:'100vw',height:'100vh',margin:'0',padding:'0',border:'0','z-index':Z,background:'transparent',cursor:'crosshair','touch-action':'none','-webkit-user-select':'none','user-select':'none'});ov.addEventListener('pointerdown',down,true);}
 else if(!on&&ov){ov.remove();ov=null;}}
 function noSelect(on){if(on&&!noSel){noSel=document.createElement('style');noSel.textContent='*{-webkit-user-select:none!important;user-select:none!important}';(document.head||document.documentElement).appendChild(noSel);}
 else if(!on&&noSel){noSel.remove();noSel=null;}}
-function sync(){var on=(alt&&!spent)||nb.clip||!!stage||!!drag;cover(on);
+function sync(){var on=(alt&&!spent)||nb.clip||!!stage||!!drag;cover(on);if(ov)at(ov,'background',nb.clip?'rgba(128,128,128,.14)':'transparent');
 pass=!!(on&&alt&&!nb.clip&&!stage&&!drag&&!selPress&&lastX>=0&&inSelection(lastX,lastY))||(!!selPress&&on);if(ov)at(ov,'pointer-events',pass?'none':'auto');noSelect(!!stage||!!drag);}
 function ours(t){return !!t&&(t===ov||(!!stage&&(t===stage.box||(!!stage.bar&&stage.bar.contains(t))||stage.handles.some(function(p){return p[1]===t;}))));}
 function setAlt(v){if(v===alt)return;alt=v;if(!v)spent=false;sync();}
@@ -188,7 +193,7 @@ function cancel(all){clearStage();drag=null;if(all){if(nb.clip){nb.clip=false;re
 function down(e){if(!ok(e)||(e.pointerType==='mouse'&&e.button!==0))return;e.preventDefault();e.stopPropagation();
 drag={id:e.pointerId,kind:'new',x:e.clientX,y:e.clientY,moved:false,alt:alt&&!nb.clip,b0:null};try{ov.setPointerCapture(e.pointerId);}catch(x){}sync();}
 document.addEventListener('pointermove',function(e){if(!ok(e))return;lastX=e.clientX;lastY=e.clientY;
-if(e.pointerType!=='touch'&&!drag&&!selPress){var a=e.altKey&&!e.metaKey&&!e.ctrlKey;if(a!==alt)setAlt(a);else if(alt)sync();}
+if(e.pointerType!=='touch'&&!drag&&!selPress){var a=optKey(e);if(a!==alt)setAlt(a);else if(alt)sync();}
 if(!drag||e.pointerId!==drag.id)return;e.preventDefault();var dx=e.clientX-drag.x,dy=e.clientY-drag.y;
 if(drag.kind==='new'){if(!drag.moved&&Math.abs(dx)+Math.abs(dy)<6)return;drag.moved=true;show(norm([drag.x,drag.y,e.clientX,e.clientY]));return;}
 var b=drag.b0.slice();if(drag.kind==='move')b=[b[0]+dx,b[1]+dy,b[2]+dx,b[3]+dy];
@@ -202,18 +207,18 @@ if(d.kind==='new'){var b=stage&&stage.b;if(e.type!=='pointerup'||!d.moved){if(d.
 if(b&&b[2]-b[0]>=MIN&&b[3]-b[1]>=MIN)bar();else cancel(false);}
 sync();}
 document.addEventListener('pointerup',up,true);document.addEventListener('pointercancel',up,true);
-document.addEventListener('pointerdown',function(e){if(ok(e)&&pass&&e.altKey&&!nb.clip&&!stage){var s=window.getSelection();
+document.addEventListener('pointerdown',function(e){if(ok(e)&&pass&&optKey(e)&&!nb.clip&&!stage){var s=window.getSelection();
 selPress=s&&s.rangeCount?{id:e.pointerId,x:e.clientX,y:e.clientY,r:s.getRangeAt(0).cloneRange(),dragged:false}:null;return;}
-if(!ok(e)||e.altKey||nb.clip)return;var t=e.target;if(ov&&(t===ov||(stage&&(t===stage.box||(stage.bar&&stage.bar.contains(t))))))return;unpick();},true);
+if(!ok(e)||optKey(e)||nb.clip)return;var t=e.target;if(ov&&(t===ov||(stage&&(t===stage.box||(stage.bar&&stage.bar.contains(t))))))return;unpick();},true);
 window.addEventListener('scroll',function(){unpick();},{passive:true,capture:true});
 ['click','mousedown','mouseup','dblclick','auxclick','contextmenu'].forEach(function(t){document.addEventListener(t,function(e){if(!ok(e))return;
 var own=swallow&&Date.now()-swallow<400;if(t==='mousedown'&&selPress){e.stopPropagation();return;}
 if(t==='click'&&stage&&stage.bar&&stage.bar.contains(e.target)){e.preventDefault();return;}
-if((e.altKey&&!e.metaKey&&!e.ctrlKey&&t!=='contextmenu')||ours(e.target)||own){e.preventDefault();e.stopPropagation();if(t==='click')swallow=0;}},true);});
+if((optKey(e)&&t!=='contextmenu')||ours(e.target)||own){e.preventDefault();e.stopPropagation();if(t==='click')swallow=0;}},true);});
 document.addEventListener('selectstart',function(e){if(ov||drag||stage)e.preventDefault();},true);
-document.addEventListener('keydown',function(e){if(!ok(e))return;if(e.key==='Alt'&&!e.metaKey&&!e.ctrlKey){setAlt(true);return;}
+document.addEventListener('keydown',function(e){if(!ok(e))return;if(e.key==='Alt'){if(!e.metaKey&&!e.ctrlKey&&!e.shiftKey)setAlt(true);return;}if(e.key==='Shift'&&alt){setAlt(false);return;}
 if(stage&&stage.bar&&e.key==='Enter'){e.preventDefault();e.stopPropagation();confirm();}else if((stage||nb.clip)&&e.key==='Escape'){e.preventDefault();e.stopPropagation();cancel(true);}},true);
-document.addEventListener('keyup',function(e){if(ok(e)&&e.key==='Alt')setAlt(false);},true);
+document.addEventListener('keyup',function(e){if(!ok(e))return;if(e.key==='Alt')setAlt(false);else if(e.key==='Shift'&&optKey(e))setAlt(true);},true);
 window.addEventListener('blur',function(){setAlt(false);});
 nb.setClip=function(on){nb.clip=!!on;if(!on){clearStage();drag=null;}sync();};
 nb.regionText=function(x,y,wd,ht){var o=vp();x+=o[0];y+=o[1];var x1=x+wd,y1=y+ht,out=[],n=0,len=0,last=null,rg=document.createRange();
@@ -637,6 +642,13 @@ mod tests {
         assert!(w.contains("function quoteAt(x,y){var s=inSelection(x,y);return s?s.cloneRange():sentenceAt(x,y);}"));
         assert!(w.contains("return quoteAt(p[0],p[1]);") && !w.contains("return sentenceAt(p[0],p[1]);"));
         assert!(w.contains("selPress") && w.contains("noSelect(!!stage||!!drag)"));
+        // ⌥ with ⇧ selects by word as usual; holding ⌥ alone does not dim
+        // the page (only clip mode's cover is grey; a drag's stage shades).
+        assert!(w.contains("function optKey(e){return !!(e.altKey&&!e.shiftKey&&!e.metaKey&&!e.ctrlKey);}"));
+        assert!(!w.contains("e.altKey&&!e.metaKey") && !w.contains("||e.altKey||"));
+        assert!(w.contains("if(e.key==='Shift'&&alt){setAlt(false);return;}"));
+        assert!(w.contains("background:'transparent',cursor:'crosshair'"));
+        assert!(w.contains("at(ov,'background',nb.clip?'rgba(128,128,128,.14)':'transparent')"));
         assert_eq!(
             parse_drop(&format!(r#"{{"t":"{}"}}"#, "a".repeat(MAX_QUOTE_CHARS))).map(|t| t.len()),
             Some(MAX_QUOTE_CHARS)

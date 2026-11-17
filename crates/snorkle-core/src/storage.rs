@@ -28,7 +28,6 @@ use url::Url;
 use crate::text::{sanitize_page_text, MAX_PAGE_TEXT_CHARS};
 use crate::userscripts::{self, UserScript, UserScriptError};
 use crate::ai::Provider;
-use crate::viewmodes::{self, HeadingRule, HeadingRules};
 
 pub const MAX_HISTORY: usize = 5_000;
 pub const MAX_BOOKMARKS: usize = 5_000;
@@ -111,7 +110,6 @@ struct Data {
     /// Sites (registrable domains) where the user turned ad blocking off.
     adblock_allowed: BTreeSet<String>,
     user_scripts: Vec<UserScript>,
-    heading_rules: HeadingRules,
     ai_usage: Vec<AiUsageEvent>,
     pins: Vec<Bookmark>,
     chats: Vec<ChatRecord>,
@@ -361,7 +359,9 @@ const BOOKMARKS_FILE: &str = "bookmarks.json";
 const SESSION_FILE: &str = "session.json";
 const ADBLOCK_ALLOW_FILE: &str = "adblock-allow.json";
 const USER_SCRIPTS_FILE: &str = "user-scripts.json";
-const HEADING_RULES_FILE: &str = "heading-rules.json";
+/// Detect Headers' per-site rules (the headers view, replaced by the
+/// summary view on 2026-11-16): deleted when the store opens.
+const OLD_HEADING_RULES_FILE: &str = "heading-rules.json";
 const AI_USAGE_FILE: &str = "ai-usage.json";
 /// View modes each launch starts with (Settings → General).
 const LAUNCH_MODES_FILE: &str = "view-modes.json";
@@ -384,8 +384,6 @@ pub struct AiUsageEvent {
     /// is unknown.
     pub cost_micros: Option<u64>,
 }
-/// Sites with detected heading rules kept.
-pub const MAX_HEADING_RULE_SITES: usize = 500;
 const PINS_FILE: &str = "pins.json";
 /// Emoji chosen for pins ("Use Emoji for Icon"), by pin URL.
 const PIN_EMOJI_FILE: &str = "pin-emoji.json";
@@ -423,6 +421,7 @@ impl Store {
         for old in OLD_ICONS_DIRS {
             let _ = fs::remove_dir_all(dir.join(old));
         }
+        let _ = fs::remove_file(dir.join(OLD_HEADING_RULES_FILE));
         let mut history: Vec<HistoryEntry> = load_or_reset(&dir.join(HISTORY_FILE));
         history.retain_mut(|h| match storable_url(&h.url) {
             Some(u) => {
@@ -463,12 +462,6 @@ impl Store {
             None => false,
         });
         pins.truncate(MAX_PINS);
-        let heading_rules = load_or_reset::<HeadingRules>(&dir.join(HEADING_RULES_FILE))
-            .into_iter()
-            .filter_map(|(site, rules)| Some((crate::blocking::normalise_site(&site)?, valid_rules(&rules))))
-            .filter(|(_, rules)| !rules.is_empty())
-            .take(MAX_HEADING_RULE_SITES)
-            .collect();
         let mut ai_usage: Vec<AiUsageEvent> = load_or_reset::<Vec<AiUsageEvent>>(&dir.join(AI_USAGE_FILE))
             .into_iter()
             .filter(|e| crate::ai::validate_model(&e.model).is_ok())
@@ -499,7 +492,6 @@ impl Store {
                 bookmarks,
                 adblock_allowed,
                 user_scripts,
-                heading_rules,
                 ai_usage,
                 pins,
                 chats,
@@ -1153,7 +1145,6 @@ impl Store {
         atomic_write(&self.dir.join(AI_USAGE_FILE), b"[]")
     }
 
-    /// Detected heading rules per site ("Detect Headers").
     /// The view modes each launch starts with.
     pub fn launch_modes(&self) -> crate::viewmodes::LaunchModes {
         self.data().launch_modes
@@ -1190,29 +1181,6 @@ impl Store {
             serde_json::to_vec(&d.blocked)?
         };
         atomic_write(&self.dir.join(BLOCKED_FILE), &snapshot)
-    }
-
-    pub fn heading_rules(&self) -> HeadingRules {
-        self.data().heading_rules.clone()
-    }
-
-    /// Stores (validated) heading rules for `site`; empty rules remove it.
-    pub fn set_heading_rules(&self, site: &str, rules: &[HeadingRule]) -> std::io::Result<bool> {
-        let Some(site) = crate::blocking::normalise_site(site) else { return Ok(false) };
-        let rules = valid_rules(rules);
-        let snapshot = {
-            let mut d = self.data();
-            if rules.is_empty() {
-                d.heading_rules.remove(&site);
-            } else if d.heading_rules.len() < MAX_HEADING_RULE_SITES || d.heading_rules.contains_key(&site) {
-                d.heading_rules.insert(site, rules);
-            } else {
-                return Ok(false);
-            }
-            serde_json::to_vec(&d.heading_rules)?
-        };
-        atomic_write(&self.dir.join(HEADING_RULES_FILE), &snapshot)?;
-        Ok(true)
     }
 
     pub fn delete_user_script(&self, domain: &str) -> std::io::Result<()> {
@@ -1313,14 +1281,6 @@ pub fn favicon_host(url: &str) -> Option<String> {
 /// 8 bits per channel, RGB or RGBA, not interlaced (what the favicon
 /// fetcher produces). Anything else is refused rather than handed to the
 /// chrome.
-fn valid_rules(rules: &[HeadingRule]) -> Vec<HeadingRule> {
-    rules
-        .iter()
-        .filter_map(|r| viewmodes::validate_rule(&r.selector, r.level))
-        .take(viewmodes::MAX_RULES_PER_SITE)
-        .collect()
-}
-
 fn is_png(bytes: &[u8]) -> bool {
     if bytes.len() > MAX_ICON_BYTES || bytes.len() < 33 || !bytes.starts_with(PNG_SIGNATURE) {
         return false;
@@ -1851,12 +1811,9 @@ mod tests {
             assert_eq!(s.launch_modes(), LaunchModes::default());
             s.set_launch_mode(Kind::Dark, true).unwrap();
             s.set_launch_mode(Kind::HideMedia, false).unwrap();
-            // The headers view has no launch default.
-            assert_eq!(s.set_launch_mode(Kind::Headers, true).unwrap().modes().headers, false);
         }
         let s = Store::open(&dir).unwrap();
         assert_eq!(s.launch_modes(), LaunchModes { desaturate: true, hide_media: false, dark: true });
-        assert!(!s.launch_modes().modes().headers);
         // A partial file keeps the defaults for what it lacks.
         fs::write(dir.join(LAUNCH_MODES_FILE), br#"{"dark":true}"#).unwrap();
         let s = Store::open(&dir).unwrap();
@@ -2021,34 +1978,15 @@ mod tests {
     }
 
     #[test]
-    fn heading_rules_roundtrip_and_are_revalidated() {
-        let dir = tmpdir("hrules");
-        let s = Store::open(&dir).unwrap();
-        let ok = HeadingRule { selector: "h2.hed".into(), level: 2 };
-        assert!(s.set_heading_rules("www.NYTimes.com", std::slice::from_ref(&ok)).unwrap());
-        assert!(!s.set_heading_rules("not a site", std::slice::from_ref(&ok)).unwrap());
-        drop(s);
-        fs::write(
-            dir.join(HEADING_RULES_FILE),
-            r#"{"nytimes.com":[{"selector":"h2.hed","level":2},{"selector":"x{y}","level":1}],"bad site":[{"selector":"h1","level":1}]}"#,
-        )
-        .unwrap();
-        let s = Store::open(&dir).unwrap();
-        let rules = s.heading_rules();
-        assert_eq!(rules.len(), 1);
-        assert_eq!(rules["nytimes.com"], vec![ok]);
-        assert!(s.set_heading_rules("nytimes.com", &[]).unwrap());
-        assert!(s.heading_rules().is_empty());
-    }
-
-    #[test]
     fn old_icon_cache_is_removed() {
         let dir = tmpdir("oldicons");
         fs::create_dir_all(dir.join("icons")).unwrap();
         fs::write(dir.join("icons/www.example.com.png"), test_png(64, 8, 6)).unwrap();
+        fs::write(dir.join(OLD_HEADING_RULES_FILE), br#"{"nytimes.com":[{"selector":"h2","level":2}]}"#).unwrap();
         let s = Store::open(&dir).unwrap();
         assert!(s.icon("www.example.com").is_none(), "refetched in the new format");
         assert!(!dir.join("icons").exists());
+        assert!(!dir.join(OLD_HEADING_RULES_FILE).exists(), "the headers view's rules are gone");
     }
 
     #[test]

@@ -95,7 +95,7 @@ processes as for Safari.
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews inside the content area (between the status bar, the sidebar and any docked panel; down to the bottom of the window), `clipsToBounds`. The URL pill, its popup and toasts float over the content area as **holes**: every container is masked there and does not take touches there, so the chrome below shows through and a page can never draw over or under them (§5f). Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Other chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs` (`apply_mask`), `ios/keys.rs` (`pointInside`), `snorkle_content::sanitize_holes`, `Browser::sync_visibility`, `browser_invariants.rs` |
 | B5 | App ↔ disk | native → storage | JSON files in the app container, written atomically off the main thread. Only http(s) URLs are stored, and only from non-private tabs. Data protection `NSFileProtectionComplete` (entitlement). | `storage.rs` tests, `browser_invariants.rs::private_tabs_never_reach_storage`, fuzz `browser_events` |
-| B6 | App ↔ network | content → internet | WebKit for pages. The app itself makes no telemetry or update requests; its own requests are favicon fetches for pins (sandboxed web view) and, only when the user has connected an AI account, HTTPS calls to `api.openai.com` / `api.anthropic.com` (`snorkle_core::ai::is_allowed_url`, ephemeral `NSURLSession`): site-script drafts, Detect Headers, and page chat (which sends the page's text, §5g). ATS stays on for the app; `NSAllowsArbitraryLoadsInWebContent` is set only so HTTP can load after explicit user consent. TLS: system validation, `PerformDefaultHandling` for every auth challenge, deprecated TLS refused. | `delegates.rs`, `config_hardening.rs` |
+| B6 | App ↔ network | content → internet | WebKit for pages. The app itself makes no telemetry or update requests; its own requests are favicon fetches for pins (sandboxed web view) and, only when the user has connected an AI account, HTTPS calls to `api.openai.com` / `api.anthropic.com` (`snorkle_core::ai::is_allowed_url`, ephemeral `NSURLSession`): site-script drafts, page summaries and page chat (which send the page's text, §5g, §5j). ATS stays on for the app; `NSAllowsArbitraryLoadsInWebContent` is set only so HTTP can load after explicit user consent. TLS: system validation, `PerformDefaultHandling` for every auth challenge, deprecated TLS refused. | `delegates.rs`, `config_hardening.rs` |
 | B7 | Profiles | site data | Default profile → `WKWebsiteDataStore(forIdentifier:)` with a fixed UUID. Private → one non-persistent store per private session, wiped and released when the last private tab closes. The chrome's own webview uses the default store, which is separate from both. | `ios/mod.rs::store_for`, `release_private_store` |
 
 ## 3. Threat model
@@ -195,18 +195,13 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   are the one owner-approved exception to "no scripts in content". They are installed as
   main-frame `WKUserScript`s in WebKit's isolated client world and guarded by
   `location.hostname`. There is no native bridge. See SECURITY_REVIEW I1/I2.
-- **View modes** (`snorkle_core::viewmodes`): desaturate, hide media, dark and headers. Each is on or
+- **View modes** (`snorkle_core::viewmodes`): desaturate, hide media and dark. Each is on or
   off app-wide; a long press on its button offers "Disable for this tab", which exempts that
   tab (popups inherit their opener's exemptions, since they share its content controller). The
-  host compiles the injected scripts once for the app-wide modes and once per exempted tab. The
-  **headers** mode runs a constant extractor in the client world that reports the page's h1–h6
-  (or the site's detected rules) to a client-world message handler (C14); the chrome shows them,
-  nested by level, in a panel docked right of the page, and a click scrolls to the heading and
-  briefly highlights it on the page. When the outline has several top-level entries with
-  headings under them (what Detect Headers produces: section labels at level 1, stories at 2),
-  the panel shows them as foldable sections. Detect Headers sends each candidate's enclosing
-  section element and whether it is uppercase, and asks the model for section labels first. The style modes use the same
-  mechanism with constant styles, plus one `evaluateJavaScript` to update already-loaded pages.
+  host compiles the injected scripts once for the app-wide modes and once per exempted tab. (The
+  headers view, a per-tab outline mode with Detect Headers, was replaced on 2026-11-16 by the
+  summary view, §5j, which installs nothing in pages.) The modes are constant styles installed as
+  user scripts, plus one `evaluateJavaScript` to update already-loaded pages.
   **Dark** (off by default; moon button; remembered across launches) makes content web views prefer a dark appearance
   (`overrideUserInterfaceStyle`), so sites with their own dark theme use it (without the mode a content view is
   always light over white, whatever the app's appearance; 2026-11-15); a constant detector
@@ -301,7 +296,7 @@ width in narrow windows), with the share button inside its left end and the copy
 its right end (both hidden while editing, and when the field is too narrow for them beside the
 address);
 then a ⋯ button that opens a popup with the page actions (ad blocking,
-bookmark, site scripts, page zoom), the per-tab headers-view button and the chat button.
+bookmark, site scripts, page zoom), the per-tab summary button and the chat button.
 The confirmation for closing a bookmark's tab (⌘W) or a site's group of tabs (its ×) sits beside
 that row, just right of the sidebar, pointing at it, when the sidebar shows (2026-11-15; a flyout
 stays open meanwhile); otherwise above the pill. It is a hole either way. Toasts and banners
@@ -555,7 +550,7 @@ record (interrupted downloads, earlier private ones) are deleted when the app st
 Native page views sit above the chrome's webview, so the chrome cannot draw over a page except
 in holes (§5f). Panels that should leave the page visible dock beside it instead: the chrome
 reports `right` and `bottom` insets and the host shrinks the content area. Site scripts dock on
-the right, full height; otherwise the headers outline, the page chat and the Notebook (§5i) do,
+the right, full height; otherwise the summary (§5j), the page chat and the Notebook (§5i) do,
 in that order from the top, sharing the height when several are open (in narrow windows site scripts and chat overlay and hide
 the page). The right panels' width is dragged at their left edge (260–640 pt, at most 60% of the
 area, remembered); ⌘⇧\ hides them without turning them off and shows them again. The console
@@ -566,7 +561,7 @@ kept from the narrower layout) and zooms it to fill the width.
 
 ## 5g. Page chat
 
-The chat button beside the headers button opens a panel docked right of the page: a model menu
+The chat button beside the summary button opens a panel docked right of the page: a model menu
 (the models of every connected provider, as listed by Settings → AI → Test; it sets the "Ask
 Selection" use), the conversation,
 and an estimate of what it has cost so far (provider-reported tokens × published prices,
@@ -735,8 +730,11 @@ Bringing things in (C23): a constant watcher in every page's client world report
   a clip of its box;
 - ⌥-drag, or a drag while the scissors are on (clip mode, which then ends): while ⌥ is held over
   a page (key events, or the modifier state of pointer moves), and in clip mode, a cover lies over
-  the page: a crosshair, a slight grey fade, and every press goes to it, so no text is selected and
-  nothing is followed (2026-11-16). A drag draws a dashed box that stays as a stage, as
+  the page: a crosshair, and every press goes to it, so no text is selected and nothing is
+  followed (2026-11-16). Holding ⌥ alone does not dim the page; it dims once a drag begins (the
+  stage's shade around its box), and in clip mode the cover also fades it slightly (2026-11-16,
+  replacing a fade whenever ⌥ was held). ⌥ with ⇧ (or ⌘, ⌃) is not the notebook's: no cover,
+  no ⌥-click, no clip, so ⌥⇧ arrows select word by word as usual. A drag draws a dashed box that stays as a stage, as
   zotero-helper's clip mode: its corners size it, a press inside moves it, a press outside draws
   another; Clip (or ↩) makes the clip, × (or Escape) drops it. Every handler takes only real input
   (`isTrusted`). A clip carries the text it shows, for search, not shown: the page's text laid out
@@ -768,14 +766,49 @@ command refuses them) and notes written while one is shown keep no address. The 
 file, `notebook.json` (≤ 64 MB), written a moment after each change once the pen pauses, and
 rebuilt field by field in Rust on every write and read (`snorkle_core::notebook::clean`).
 
+## 5j. Summary view (2026-11-16)
+
+Replaces the headers view (its outline, Detect Headers and the per-site heading rules; channel
+C14 is retired and `heading-rules.json` is deleted when the store opens). The same URL-bar
+button, per tab, opens a panel docked right of the page (with the chat and the Notebook, on top).
+Opening it on a page that has no summary yet asks for one at once; the panel then shows the
+summary as bullet points, the model and an estimate of the cost, and a sparkle button to
+summarize again. When the tab moves to another page (its address without the fragment changes),
+the summary is dropped and the panel asks "Summarize “title”?" with a Summarize button; a reply
+still on its way for the old page is ignored. Summaries are kept in the chrome's memory only, one
+per tab, and nothing is stored, in private tabs or otherwise. The service and model are Settings →
+AI → Uses → Summary View (it starts from the old Header View Parsing choice).
+
+Reading the page (C24): only when a summary is asked for, the host runs constant code in the
+page's client world, main frame (`summary::blocks_js`) and reads back its string result, as the
+page chat does (C17). It walks the visible text in document order and gives each text node to its
+nearest ancestor that is not laid out inline (paragraph, list item, heading, cell); navigation,
+controls, scripts, SVG, media and hidden elements are skipped; at most 800 blocks, 1,200
+characters each, 40,000 in all. The blocks' elements stay in the client world
+(`window.__snorkleSum`). `summary::parse_blocks` checks and sanitises the result; Rust sends the
+tab's committed URL (from the core), the title and the non-empty blocks as `[n] text` lines to
+the provider (`ai::summary_request`), with a system prompt that says the page is data. The reply
+(`ai::parse_summary`) keeps at most 12 points of at most 400 characters, each with at most four
+block numbers below the number of blocks read; the chrome shows them with `textContent`. If the
+tab's committed URL changed meanwhile, the reply is discarded.
+
+Following a point (a click, or ↩ / space when focused; its words can still be selected and
+copied): `scroll_to_summary` runs constant code whose only input is the block numbers
+(`summary::scroll_js`). It scrolls the first block into view (centred, or its top when it is
+taller than 60% of the view) and highlights each block briefly, as the headers view did. If any
+of the elements is gone (the page was reloaded, or a script redrew it), the page is read into
+blocks again the same way and those are used, so a reload of the same content still lands on
+the same text. Points the model gave no valid block are shown without a link.
+
 ## 6. Credentials
 
 The only credentials the app stores are the user's own AI API keys (Settings → AI): iOS Keychain
 generic passwords, service `app.snorkle.ai-keys`, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
 (`snorkle-content/src/webkit/keychain.rs`). They are read only to send a request to the provider and
 are never returned to the chrome. Site-script requests carry the site's domain, its site script
-and the user's prompt; Detect Headers sends short snippets of headline-like text; page chat sends
-the page's URL, title, visible text and selection with the conversation (§5g). The model's
+and the user's prompt; the summary view sends the page's URL, title and visible text as numbered
+blocks (§5j); page chat sends the page's URL, title, visible text and selection with the
+conversation (§5g). The model's
 CSS/JS lands in the editor and runs only if the user saves it; chat replies are only displayed. The app stores no passwords, tokens or cookies otherwise. Cookies live in WebKit's data stores.
 Password AutoFill in WKWebView uses the system (iCloud Keychain / Passwords app). Any future
 credential feature must use the iOS Keychain (`kSecClassGenericPassword` /

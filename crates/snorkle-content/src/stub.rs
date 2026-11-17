@@ -54,9 +54,12 @@ impl ContentHost {
 
     pub fn set_injections(&mut self, _injections: crate::Injections, _run_now: bool) {}
 
-    pub fn scroll_to_heading(&mut self, _tab: snorkle_core::tabs::TabId, _index: u32) {}
+    pub fn scroll_to_summary(&mut self, _tab: snorkle_core::tabs::TabId, _blocks: &[u32]) {}
 
-    pub fn sample_headings(&mut self, _tab: snorkle_core::tabs::TabId) {}
+    /// No pages render off iOS.
+    pub fn read_page_blocks(&mut self, _tab: snorkle_core::tabs::TabId, done: crate::TextDone) {
+        done(None);
+    }
 
     /// No pages render off iOS.
     pub fn find(

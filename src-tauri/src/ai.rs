@@ -118,63 +118,56 @@ pub async fn ai_test(s: S<'_>, provider: Provider) -> Result<Vec<Model>, String>
     ai::parse_models(provider, status, &body)
 }
 
+/// A page summary (the summary view) and what it cost.
 #[derive(Serialize)]
-pub struct DetectedHeadings {
-    rules: usize,
+pub struct SummaryReply {
+    /// The page summarised: the tab's committed address (from the core)
+    /// when the page was read. The chrome drops the summary when the tab's
+    /// page changes.
     url: String,
-    summaries: Vec<ai::HeadingSummary>,
+    points: Vec<snorkle_core::summary::SummaryPoint>,
+    /// Estimated cost in millionths of a dollar; `None` for a model without
+    /// a known price.
+    cost_micros: Option<u64>,
 }
 
-/// "Detect Headers": samples the tab's heading-like elements (headers view
-/// on), asks the model which are headings on this site, stores the rules
-/// for the site and restarts the outline with them. Returns the rule count
-/// and page-specific summaries. Sends the sample and bounded page text to
-/// the provider only when the user presses the button.
+/// The summary view (channel C24): reads the tab's page as numbered blocks
+/// of text (`summary::blocks_js`, only now, because the user asked) and
+/// asks the model for a bullet-point summary whose points name the blocks
+/// they come from. The URL comes from the core. Nothing is stored (also
+/// in private tabs, like the page chat, which sends the same text).
 #[tauri::command]
-pub async fn detect_headings(s: S<'_>, tab: u64, provider: Provider, model: String) -> Result<DetectedHeadings, String> {
+pub async fn ai_summarize(s: S<'_>, tab: u64, provider: Provider, model: String) -> Result<SummaryReply, String> {
     let tab = snorkle_core::tabs::TabId(tab);
-    let site = s
+    let url = s
         .browser()
-        .view()
-        .tabs
-        .into_iter()
-        .find(|t| t.id == tab)
-        .and_then(|t| t.adblock)
-        .map(|a| a.site)
+        .tab(tab)
+        .and_then(|t| t.committed_url.clone())
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
         .ok_or("Open a web page first.")?;
-    let url = s.browser().tab(tab).and_then(|t| t.committed_url.clone()).ok_or("Open a web page first.")?;
     let key = key(provider)?;
     let (tx, rx) = mpsc::channel();
-    s.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).insert(tab, tx);
-    snorkle_content::dispatch_main(move || crate::state::with_host(|h| h.sample_headings(tab)));
-    let sample = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
+    snorkle_content::dispatch_main(move || {
+        crate::state::with_host(|h| h.read_page_blocks(tab, Box::new(move |t| drop(tx.send(t)))))
+    });
+    let read = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
         .await
         .map_err(|_| "Request failed.".to_string())?;
-    s.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).remove(&tab);
-    let sample = sample.map_err(|_| "The page didn't answer. Reload it with the headers view on and try again.")?;
-    let (tx, rx) = mpsc::channel();
-    snorkle_content::dispatch_main(move || {
-        crate::state::with_host(|h| h.read_page_text(tab, Box::new(move |t| drop(tx.send(t)))))
-    });
-    let text = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
-        .await.map_err(|_| "Request failed.")?;
-    let page = text.ok().flatten().and_then(|t| ai::parse_page_text(&t, url.as_str()))
+    let page = read
+        .ok()
+        .flatten()
+        .and_then(|t| snorkle_core::summary::parse_blocks(&t))
         .ok_or("The page didn't answer. Wait for it to load and try again.")?;
-    let mut sample: serde_json::Value = serde_json::from_str(&sample).map_err(|_| "Invalid heading sample")?;
-    sample["page_text"] = serde_json::Value::String(page.text);
-    let req = ai::headings_request(provider, &key, &model, &site, &sample.to_string())?;
-    let (status, body) =
-        send(&s, provider, Some(&model), &format!("detect headings for {site} ({model})"), req).await?;
-    let rules = ai::parse_headings_reply(provider, status, &body)?;
-    let summaries = ai::parse_heading_summaries(provider, status, &body)?;
+    let req = ai::summary_request(provider, &key, &model, url.as_str(), &page)?;
+    let host = url.host_str().unwrap_or_default().to_string();
+    let (status, body) = send(&s, provider, Some(&model), &format!("summary of {host} ({model})"), req).await?;
+    let points = ai::parse_summary(provider, status, &body, page.blocks.len())?;
     if s.browser().tab(tab).and_then(|t| t.committed_url.as_ref()) != Some(&url) {
-        return Err("The page changed. Detect headers again on the new page.".into());
+        return Err("The page changed while it was being summarized.".into());
     }
-    if let Some(store) = s.store.clone() {
-        store.set_heading_rules(&site, &rules).map_err(|e| e.to_string())?;
-    }
-    crate::scripts::apply(&s, true);
-    Ok(DetectedHeadings { rules: rules.len(), url: url.to_string(), summaries })
+    let usage = ai::parse_usage(provider, &body).unwrap_or(ai::Usage { input: 0, output: 0 });
+    let cost_micros = ai::estimate_cost_micros(provider, &model, usage);
+    Ok(SummaryReply { url: url.to_string(), points, cost_micros })
 }
 
 /// A page-chat answer, with what the request used.

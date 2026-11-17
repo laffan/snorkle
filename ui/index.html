@@ -184,7 +184,7 @@
           <button id="attach-bar" role="menuitemcheckbox" aria-checked="false"><span class="label">Attach URL Bar</span><span class="state">Off</span></button>
         </div>
       </div>
-      <button id="headers" class="icon mode" aria-label="Headers view for this tab" title="Headers view (this tab)" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><rect x="3" y="4.5" width="18" height="3.2" rx="1.6"/><rect x="7" y="10.4" width="14" height="3.2" rx="1.6"/><rect x="11" y="16.3" width="10" height="3.2" rx="1.6"/></svg></button>
+      <button id="summary-btn" class="icon mode" aria-label="Summary of this page" title="Summary of this page (this tab)" aria-pressed="false" aria-controls="summary"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><rect x="3" y="4.5" width="18" height="3.2" rx="1.6"/><rect x="7" y="10.4" width="14" height="3.2" rx="1.6"/><rect x="11" y="16.3" width="10" height="3.2" rx="1.6"/></svg></button>
       <button id="chat-btn" class="icon mode" aria-label="Chat about this page" title="AI chat about this page" aria-pressed="false" aria-controls="chat"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-11.1 6.6L4 19.5l1.4-4.4A7.5 7.5 0 1 1 20 11.5z"/></svg></button>
       <!-- The Notebook, with the other right-panel modes. -->
       <button id="notebook-btn" class="icon mode" aria-label="Notebook" title="Notebook (for every page)" aria-pressed="false" aria-controls="notebook"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v18M12.5 8h3.5M12.5 11.5h3.5"/></svg></button>
@@ -603,15 +603,22 @@
     <ol id="console-list" class="console-list"></ol>
   </section>
 
-  <!-- Headers view: the page's outline, docked right of the page.
-       Heading text is page-controlled: textContent only. -->
-  <aside id="outline" class="sheet" aria-labelledby="outline-title" hidden>
+  <!-- Summary view (per tab): an AI summary of the page as bullet points,
+       docked right of the page. A point scrolls the page to the text it
+       came from. Points are model output: textContent only. -->
+  <aside id="summary" class="sheet" aria-labelledby="summary-title" hidden>
     <div class="modal-head">
-      <h1 id="outline-title">Headers</h1>
-      <button id="detect-headers" class="icon sparkle" aria-label="Detect headers with AI" title="Detect headers with AI: asks your AI provider which elements are section labels and headings on this site (sends a short sample of the page's headline-like elements)"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M11 2.5c.5 3.9 2.6 6 6.5 6.5-3.9.5-6 2.6-6.5 6.5-.5-3.9-2.6-6-6.5-6.5 3.9-.5 6-2.6 6.5-6.5z"/><path d="M18.5 13.5c.3 2 1.2 2.9 3.2 3.2-2 .3-2.9 1.2-3.2 3.2-.3-2-1.2-2.9-3.2-3.2 2-.3 2.9-1.2 3.2-3.2z"/><path d="M6 15.5c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3z"/></svg></button>
+      <h1 id="summary-title">Summary</h1>
+      <button id="summary-again" class="icon sparkle" aria-label="Summarize again" title="Summarize this page again (sends its text to your AI service)" hidden><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M11 2.5c.5 3.9 2.6 6 6.5 6.5-3.9.5-6 2.6-6.5 6.5-.5-3.9-2.6-6-6.5-6.5 3.9-.5 6-2.6 6.5-6.5z"/><path d="M18.5 13.5c.3 2 1.2 2.9 3.2 3.2-2 .3-2.9 1.2-3.2 3.2-.3-2-1.2-2.9-3.2-3.2 2-.3 2.9-1.2 3.2-3.2z"/><path d="M6 15.5c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3z"/></svg></button>
+      <button id="summary-close" class="icon" aria-label="Close summary">&#x00D7;</button>
     </div>
-    <p id="outline-msg" class="muted small" role="status" hidden></p>
-    <ol id="outline-list" class="outline-list"></ol>
+    <div id="summary-ask" class="summary-ask" hidden>
+      <p id="summary-ask-text"></p>
+      <button id="summary-go" class="button primary">Summarize</button>
+    </div>
+    <p id="summary-msg" class="muted small" role="status" hidden></p>
+    <ul id="summary-list" class="summary-list" aria-label="Summary points"></ul>
+    <p id="summary-foot" class="summary-foot" hidden></p>
   </aside>
 
   <!-- The Notebook (notebook.js), docked right of the page with the other

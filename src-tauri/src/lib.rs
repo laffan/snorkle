@@ -72,9 +72,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::set_view_mode,
         commands::set_launch_mode,
         commands::set_tab_view_exempt,
-        commands::set_tab_headers,
-        commands::get_headings,
-        commands::scroll_to_heading,
+        commands::scroll_to_summary,
         commands::find_in_page,
         commands::end_find,
         commands::focus_chrome,
@@ -95,7 +93,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         ai::ai_delete_key,
         ai::ai_test,
         ai::ai_write_script,
-        ai::detect_headings,
+        ai::ai_summarize,
         ai::ai_chat,
         ai::ai_efforts,
         ai::list_chats,
@@ -258,12 +256,6 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
                 "download_prompt",
                 serde_json::json!({ "ask": ask, "tab": tab, "from": from }),
             ),
-            ChromeEvent::HeadingCurrent(tab, index) => {
-                handle.emit_to(CHROME_LABEL, "heading_current", serde_json::json!({ "tab": tab, "index": index }))
-            }
-            ChromeEvent::Headings(tab, list) => {
-                handle.emit_to(CHROME_LABEL, "headings", serde_json::json!({ "tab": tab, "headings": list }))
-            }
             ChromeEvent::NotebookPick(tab, report) => {
                 use snorkle_core::notebook::Report;
                 let mut url = None;

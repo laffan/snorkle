@@ -24,7 +24,7 @@ use snorkle_core::console::{self, ConsoleLog};
 use snorkle_core::policy::Frame;
 use snorkle_core::storage::{Session, Store};
 use snorkle_core::tabs::TabId;
-use snorkle_core::viewmodes::{self, Heading, ViewModes};
+use snorkle_core::viewmodes::{self, ViewModes};
 use snorkle_core::Url;
 
 /// Monotonic milliseconds since app start (for tab LRU/TTL bookkeeping).
@@ -75,10 +75,6 @@ pub enum ChromeEvent<'a> {
     IconsChanged,
     /// A new console entry.
     Console(&'a console::Entry),
-    /// A tab's page outline changed (headers view).
-    Headings(TabId, &'a [Heading]),
-    /// The heading a tab's reader has scrolled to (index into its outline).
-    HeadingCurrent(TabId, u32),
     /// Where a tab's text selection is (`None`: nothing selected).
     Selection(TabId, Option<snorkle_core::selection::SelectionRect>),
     /// The image menu for an image in a tab's page (its URL, and where).
@@ -171,16 +167,10 @@ pub struct Shared {
     /// Tabs exempted from view modes ("Disable for this tab"). Mirrors the
     /// core's `Tab::view_exempt`, which is saved with the session.
     pub view_exempt: Mutex<HashMap<TabId, BTreeSet<viewmodes::Kind>>>,
-    /// Latest outline per tab (headers view).
-    pub headings: Mutex<HashMap<TabId, Vec<Heading>>>,
-    /// Tabs with the headers view on (it is a per-tab mode).
-    pub headers_tabs: Mutex<HashSet<TabId>>,
     /// Effective keyboard shortcut bindings (one per `SHORTCUTS` entry).
     pub shortcuts: Mutex<Vec<snorkle_content::KeyBinding>>,
     /// Makes archived chat ids unique within one millisecond.
     pub chat_seq: std::sync::atomic::AtomicU64,
-    /// "Detect Headers" requests waiting for their page's sample.
-    pub pending_samples: Mutex<HashMap<TabId, mpsc::Sender<String>>>,
     /// In-app console (in memory only).
     pub console: Mutex<ConsoleLog>,
     /// Whether the console records (and pages get the console hook). On by
@@ -211,9 +201,6 @@ impl Shared {
             emit,
             view_modes: Mutex::new(modes),
             view_exempt: Mutex::default(),
-            headings: Mutex::default(),
-            headers_tabs: Mutex::default(),
-            pending_samples: Mutex::default(),
             chat_seq: std::sync::atomic::AtomicU64::new(0),
             shortcuts: Mutex::new(snorkle_content::effective_bindings(&[]).unwrap_or_default()),
             console: Mutex::default(),
@@ -282,26 +269,11 @@ impl Shared {
         self.view_exempt.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub fn headers_tabs(&self) -> MutexGuard<'_, HashSet<TabId>> {
-        self.headers_tabs.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
     /// The view modes in effect for `tab`: the app-wide ones minus the
-    /// tab's exemptions, plus the headers view where the tab has it on.
+    /// tab's exemptions.
     pub fn modes_for(&self, tab: TabId) -> ViewModes {
         let exempt = self.exempt().get(&tab).cloned().unwrap_or_default();
-        let mut m = self.view_modes().for_tab(&exempt);
-        m.headers = self.headers_tabs().contains(&tab);
-        m
-    }
-
-    pub fn headings_of(&self) -> MutexGuard<'_, HashMap<TabId, Vec<Heading>>> {
-        self.headings.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn set_headings(&self, tab: TabId, list: Vec<Heading>) {
-        (self.emit)(ChromeEvent::Headings(tab, &list));
-        self.headings_of().insert(tab, list);
+        self.view_modes().for_tab(&exempt)
     }
 
     pub fn view(&self) -> ChromeState {
@@ -698,10 +670,6 @@ impl ContentEvents for Events {
         self.apply(|b| b.on_provisional_start(tab));
     }
     fn commit(&self, tab: TabId, url: Url) {
-        // A new document: its outline comes from its own extractor.
-        if self.shared.headings_of().contains_key(&tab) {
-            self.shared.set_headings(tab, Vec::new());
-        }
         self.apply(|b| b.on_commit(tab, url));
     }
     fn finish(&self, tab: TabId) {
@@ -783,20 +751,6 @@ impl ContentEvents for Events {
     }
     fn console_message(&self, tab: Option<TabId>, origin_host: String, main_frame: bool, body: String) {
         self.shared.page_log(tab, &origin_host, main_frame, &body);
-    }
-    fn headings(&self, tab: Option<TabId>, body: String) {
-        let Some(tab) = tab else { return };
-        match viewmodes::parse_report(&body) {
-            Some(viewmodes::HeadingsReport::Outline(list)) => self.shared.set_headings(tab, list),
-            Some(viewmodes::HeadingsReport::Current(i)) => (self.shared.emit)(ChromeEvent::HeadingCurrent(tab, i)),
-            Some(viewmodes::HeadingsReport::Sample(sample)) => {
-                let waiting = self.shared.pending_samples.lock().unwrap_or_else(|e| e.into_inner()).remove(&tab);
-                if let Some(tx) = waiting {
-                    let _ = tx.send(sample);
-                }
-            }
-            None => self.shared.log(console::Level::Warn, Some(tab), "headers view: malformed report ignored"),
-        }
     }
     fn reload_requested(&self, tab: TabId) {
         self.apply(|b| b.reload_by_user(tab, now_ms()));

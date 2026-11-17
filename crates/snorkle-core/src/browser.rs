@@ -2026,10 +2026,9 @@ fn clean_tab_name(name: &str) -> Option<String> {
     (!n.trim().is_empty()).then(|| n.trim().to_string())
 }
 
-/// Exemptions as stored: sorted, unique, and only for app-wide modes (the
-/// headers view is its own per-tab switch).
+/// Exemptions as stored: sorted and unique.
 fn clean_exempt(kinds: &[crate::viewmodes::Kind]) -> Vec<crate::viewmodes::Kind> {
-    let mut v: Vec<_> = kinds.iter().copied().filter(|k| *k != crate::viewmodes::Kind::Headers).collect();
+    let mut v: Vec<_> = kinds.to_vec();
     v.sort();
     v.dedup();
     v

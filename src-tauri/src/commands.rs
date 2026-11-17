@@ -14,7 +14,7 @@ use snorkle_core::browser::ChromeState;
 use snorkle_core::input::InputError;
 use snorkle_core::tabs::{Profile, TabId};
 use snorkle_core::url_display::{self, DisplayUrl};
-use snorkle_core::viewmodes::{self, Heading, ViewModes};
+use snorkle_core::viewmodes::{self, ViewModes};
 use snorkle_core::Url;
 
 use crate::state::{now_ms, with_host, Shared};
@@ -507,27 +507,17 @@ pub struct ViewModesState {
     launch: viewmodes::LaunchModes,
     /// Tab id → modes that tab is exempted from.
     exempt: std::collections::HashMap<u64, Vec<viewmodes::Kind>>,
-    /// Tabs with the headers view on.
-    headers_tabs: Vec<u64>,
 }
 
 fn view_modes_state(s: &S<'_>) -> ViewModesState {
     let exempt =
         s.exempt().iter().filter(|(_, k)| !k.is_empty()).map(|(t, k)| (t.0, k.iter().copied().collect())).collect();
-    let headers_tabs = s.headers_tabs().iter().map(|t| t.0).collect();
     let launch = s.store.as_ref().map(|st| st.launch_modes()).unwrap_or_default();
-    ViewModesState { modes: s.view_modes(), launch, exempt, headers_tabs }
+    ViewModesState { modes: s.view_modes(), launch, exempt }
 }
 
-/// Applies view-mode changes to every page at once, and drops outlines of
-/// tabs whose headers view is now off.
+/// Applies view-mode changes to every page at once.
 fn apply_view_modes(s: &S<'_>) {
-    let tabs: Vec<TabId> = s.headings_of().keys().copied().collect();
-    let cleared: Vec<TabId> = tabs.into_iter().filter(|t| !s.modes_for(*t).headers).collect();
-    for t in cleared {
-        s.headings_of().remove(&t);
-        (s.emit)(crate::state::ChromeEvent::Headings(t, &[]));
-    }
     crate::scripts::apply(s, true);
 }
 
@@ -552,11 +542,9 @@ pub fn set_view_mode(s: S<'_>, mode: viewmodes::Kind, on: bool) -> ViewModesStat
 /// applied now, app-wide, so the setting takes effect when it is changed.
 #[tauri::command]
 pub fn set_launch_mode(s: S<'_>, mode: viewmodes::Kind, on: bool) -> ViewModesState {
-    if mode != viewmodes::Kind::Headers {
-        store_launch_mode(&s, mode, on);
-        s.view_modes.lock().unwrap_or_else(|e| e.into_inner()).set(mode, on);
-        apply_view_modes(&s);
-    }
+    store_launch_mode(&s, mode, on);
+    s.view_modes.lock().unwrap_or_else(|e| e.into_inner()).set(mode, on);
+    apply_view_modes(&s);
     view_modes_state(&s)
 }
 
@@ -585,21 +573,6 @@ pub fn set_tab_view_exempt(s: S<'_>, tab: u64, mode: viewmodes::Kind, exempt: bo
             set.iter().copied().collect()
         };
         with_browser(&s, |b| b.set_view_exempt(tab, &kinds));
-    }
-    apply_view_modes(&s);
-    view_modes_state(&s)
-}
-
-/// Turns the headers view on or off for one tab.
-#[tauri::command]
-pub fn set_tab_headers(s: S<'_>, tab: u64, on: bool) -> ViewModesState {
-    let tab = TabId(tab);
-    if s.browser().tab(tab).is_some() {
-        if on {
-            s.headers_tabs().insert(tab);
-        } else {
-            s.headers_tabs().remove(&tab);
-        }
     }
     apply_view_modes(&s);
     view_modes_state(&s)
@@ -1070,16 +1043,21 @@ pub fn end_find(tab: u64) {
     snorkle_content::dispatch_main(move || with_host(|h| h.end_find(TabId(tab))));
 }
 
-/// The latest outline of a tab's page (headers view).
+/// Summary view: scrolls a tab's page to the blocks a summary point was
+/// drawn from and highlights them (channel C24; constant code taking only
+/// these integers, `summary::scroll_js`). At most four, each below the
+/// most blocks a page is read as.
 #[tauri::command]
-pub fn get_headings(s: S<'_>, tab: u64) -> Vec<Heading> {
-    s.headings_of().get(&TabId(tab)).cloned().unwrap_or_default()
-}
-
-/// Scrolls a tab's page to one of its headings (headers view).
-#[tauri::command]
-pub fn scroll_to_heading(tab: u64, index: u32) {
-    snorkle_content::dispatch_main(move || with_host(|h| h.scroll_to_heading(TabId(tab), index)));
+pub fn scroll_to_summary(tab: u64, blocks: Vec<u32>) {
+    let blocks: Vec<u32> = blocks
+        .into_iter()
+        .filter(|b| (*b as usize) < snorkle_core::summary::MAX_BLOCKS)
+        .take(snorkle_core::summary::MAX_POINT_BLOCKS)
+        .collect();
+    if blocks.is_empty() {
+        return;
+    }
+    snorkle_content::dispatch_main(move || with_host(|h| h.scroll_to_summary(TabId(tab), &blocks)));
 }
 
 #[derive(Serialize)]

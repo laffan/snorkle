@@ -308,10 +308,10 @@ fn view_exemptions_are_saved_with_the_session() {
     let (t, _) = b.new_tab(Profile::Default, 0);
     b.navigate_input(t, "https://a.example/", 0).unwrap();
     webkit_load(&mut b, t, "https://a.example/");
-    let out = b.set_view_exempt(t, &[Kind::HideMedia, Kind::Desaturate, Kind::HideMedia, Kind::Headers]);
+    let out = b.set_view_exempt(t, &[Kind::HideMedia, Kind::Desaturate, Kind::HideMedia]);
     assert!(out.iter().any(|e| matches!(e, Effect::PersistSession(_))));
     let session = b.session();
-    assert_eq!(session.tabs[0].exempt, vec![Kind::Desaturate, Kind::HideMedia], "sorted, unique, no headers");
+    assert_eq!(session.tabs[0].exempt, vec![Kind::Desaturate, Kind::HideMedia], "sorted, unique");
     let mut b2 = browser(4);
     b2.restore_session(&session, 0);
     let ex = b2.view_exemptions();

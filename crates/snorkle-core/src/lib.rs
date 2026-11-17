@@ -28,6 +28,7 @@ pub mod os;
 pub mod policy;
 pub mod selection;
 pub mod storage;
+pub mod summary;
 pub mod tabs;
 pub mod text;
 pub mod url_display;

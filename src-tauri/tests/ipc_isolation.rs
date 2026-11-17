@@ -59,7 +59,7 @@ fn args(cmd: &str) -> serde_json::Value {
         "clear_website_data" => json!({ "kind": "cache" }),
         "ai_set_key" => json!({ "provider": "openai", "key": "sk-test" }),
         "ai_delete_key" | "ai_test" => json!({ "provider": "anthropic" }),
-        "detect_headings" => json!({ "tab": 1, "provider": "anthropic", "model": "claude-opus-5-5" }),
+        "ai_summarize" => json!({ "tab": 1, "provider": "anthropic", "model": "claude-opus-5-5" }),
         "ai_write_script" => {
             json!({ "provider": "anthropic", "model": "claude-opus-5-5", "domain": "example.com", "css": "", "js": "", "prompt": "x" })
         }
@@ -72,8 +72,8 @@ fn args(cmd: &str) -> serde_json::Value {
         "split_new" => json!({ "orientation": "rows" }),
         "set_split_ratio" => json!({ "permille": 600 }),
         "set_view_mode" | "set_launch_mode" => json!({ "mode": "desaturate", "on": true }),
-        "set_tab_view_exempt" => json!({ "tab": 1, "mode": "headers", "exempt": true }),
-        "scroll_to_heading" => json!({ "tab": 1, "index": 0 }),
+        "set_tab_view_exempt" => json!({ "tab": 1, "mode": "dark", "exempt": true }),
+        "scroll_to_summary" => json!({ "tab": 1, "blocks": [0, 3] }),
         "find_in_page" => json!({ "tab": 1, "query": "x", "step": "start" }),
         "share_page" => json!({ "tab": 1, "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0 }),
         "image_action" => {
@@ -84,7 +84,6 @@ fn args(cmd: &str) -> serde_json::Value {
         "search_google" => json!({ "query": "x", "private": false }),
         "focus_chrome" | "get_shortcuts" => json!({}),
         "set_appearance" => json!({ "mode": "dark" }),
-        "set_tab_headers" => json!({ "tab": 1, "on": true }),
         "set_url_bar_attached" => json!({"tab":1,"attached":true}),
         "zoom_page" => json!({ "tab": 1, "step": "in" }),
         "delete_user_script" => json!({ "domain": "example.com" }),
