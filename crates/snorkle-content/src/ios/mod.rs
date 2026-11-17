@@ -385,7 +385,8 @@ impl ContentHost {
         self.compile_scripts();
         for (tab, v) in &self.views {
             injection::install(self.mtm, &v.controller, self.scripts_on(*tab, &v.controller));
-            set_dark(&v.web, self.injections.view_for(*tab).dark);
+            let view = self.injections.view_for(*tab);
+            set_dark(&v.web, view.dark, view.night);
             if run_now {
                 injection::run_now(self.mtm, &v.web, &self.injections.view_for(*tab).apply_js);
             }
@@ -411,11 +412,13 @@ impl ContentHost {
         let Some(v) = self.views.get(&tab) else { return };
         if on {
             injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::plain_js());
-            set_light(&v.web);
+            // Night vision stays on (`plain_js` leaves it): the page is on
+            // screen meanwhile.
+            set_light(&v.web, self.injections.view_for(tab).night);
         } else {
             let view = self.injections.view_for(tab);
             injection::run_now(self.mtm, &v.web, &view.apply_js);
-            set_dark(&v.web, view.dark);
+            set_dark(&v.web, view.dark, view.night);
         }
     }
 
@@ -1037,7 +1040,8 @@ impl ContentHost {
 
         container.addSubview(&web);
         apply_mask(&container, &self.holes.borrow(), None);
-        set_dark(&web, self.injections.view_for(tab).dark);
+        let view = self.injections.view_for(tab);
+        set_dark(&web, view.dark, view.night);
         self.root.addSubview(&container);
         injection::install(mtm, &controller, self.scripts_on(tab, &controller));
         rules::register(tab, controller.clone());
@@ -1305,17 +1309,22 @@ const GLIDE_SECONDS: f64 = 0.25;
 /// (Until 2026-11-15 a view without the mode followed the window, so with
 /// the app dark, pages declaring both schemes turned dark and pages with
 /// no background of their own were drawn on the system's black.)
-fn set_light(web: &WKWebView) {
-    let color = UIColor::whiteColor();
+///
+/// With night vision (2026-11-17) the canvas is drawn as night vision
+/// draws white: pure red, no green or blue (`viewmodes::NIGHT_CSS` covers
+/// the page but not the view's own canvas, which shows before a page
+/// paints and past its edges when it is pulled). Black stays black.
+fn set_light(web: &WKWebView, night: bool) {
+    let color = if night { UIColor::colorWithRed_green_blue_alpha(1.0, 0.0, 0.0, 1.0) } else { UIColor::whiteColor() };
     web.setOpaque(false);
     web.setBackgroundColor(Some(&color));
     unsafe { web.scrollView() }.setBackgroundColor(Some(&color));
     web.setOverrideUserInterfaceStyle(UIUserInterfaceStyle::Light);
 }
 
-fn set_dark(web: &WKWebView, dark: bool) {
+fn set_dark(web: &WKWebView, dark: bool, night: bool) {
     if !dark {
-        set_light(web);
+        set_light(web, night);
         return;
     }
     // Set the native canvas before navigation can create its first document.

@@ -13,7 +13,12 @@ use snorkle_core::viewmodes::{self, ViewModes};
 use crate::state::{with_host, Shared};
 
 fn view(modes: ViewModes) -> ViewInjections {
-    ViewInjections { sources: viewmodes::injections(modes), apply_js: viewmodes::apply_js(modes), dark: modes.dark }
+    ViewInjections {
+        sources: viewmodes::injections(modes),
+        apply_js: viewmodes::apply_js(modes),
+        dark: modes.dark,
+        night: modes.night,
+    }
 }
 
 /// Rebuilds the injected scripts for every content view. With `run_now`,

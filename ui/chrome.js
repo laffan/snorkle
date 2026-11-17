@@ -48,10 +48,13 @@
   let pins = [];
   const MAX_PINS = 12; // three rows of four (storage::MAX_PINS)
   // View modes (session-only, kept in Rust): app-wide on/off, and tabs
-  // exempted from a mode ("Disable for this tab").
+  // exempted from a mode ("Disable for this tab"). Night vision starts
+  // from the chrome's own copy of the setting until Rust answers, so a
+  // render before then doesn't take it off (applyNightVisionChrome).
+  const nightAtLaunch = pref('nightVision') === '1';
   let viewModes = {
-    modes: { desaturate: true, hide_media: true, dark: false },
-    launch: { desaturate: true, hide_media: true, dark: false },
+    modes: { desaturate: true, hide_media: true, dark: false, night: nightAtLaunch },
+    launch: { desaturate: true, hide_media: true, dark: false, night: nightAtLaunch },
     exempt: {},
   };
   let scripts = [];
@@ -1728,6 +1731,36 @@
     applyAppearance($('appearance').value);
   });
 
+  // Settings → General → Appearance → Night vision (2026-11-17): the
+  // browser and its pages in shades of red only, for the dark. Pages get
+  // it from Rust (a launch mode, `viewmodes::NIGHT_CSS`, stored, so the
+  // first page of a launch already has it); the chrome draws its own two
+  // layers (chrome.css). The choice is mirrored here so the chrome is red
+  // from its first frame, before Rust has answered `get_view_mode`.
+  function applyNightVisionChrome(on) {
+    const have = $('night-vision-grey');
+    if (on && !have) {
+      for (const id of ['night-vision-grey', 'night-vision-red']) {
+        const d = document.createElement('div');
+        d.id = id;
+        d.className = 'night-vision-layer';
+        d.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(d);
+      }
+    } else if (!on && have) {
+      have.remove();
+      $('night-vision-red')?.remove();
+    }
+    $('night-vision').checked = on;
+    setPref('nightVision', on ? '1' : '0');
+  }
+  applyNightVisionChrome(pref('nightVision') === '1');
+  $('night-vision').addEventListener('change', () => {
+    const on = $('night-vision').checked;
+    applyNightVisionChrome(on);
+    applyViewModes(T.core.invoke('set_launch_mode', { mode: 'night', on }));
+  });
+
   function loadSidebarPrefs() {
     sidebarMode = pref('sidebarMode') === 'flyout' ? 'flyout' : 'attached';
     sidebarShown = !narrow && sidebarMode === 'attached' && pref('sidebarOpen') !== '0';
@@ -2798,6 +2831,7 @@
     const launch = viewModes.launch || {};
     document.querySelectorAll('[data-launch-mode]').forEach((b) =>
       b.setAttribute('aria-pressed', String(!!launch[b.dataset.launchMode] === (b.dataset.on === 'true'))));
+    applyNightVisionChrome(!!viewModes.modes.night);
     const h = $('summary-btn');
     const on = summaryOn(tab);
     h.classList.toggle('on', on);
