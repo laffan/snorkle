@@ -59,8 +59,8 @@ Xcode's command-line tools and Rust 1.90+; Safari 26 or later (Safari 27 runs on
   window (double-click zooms). Inspect the chrome and the pages from Safari → Develop → *this Mac*
   (Safari → Settings → Advanced → "Show features for web developers"); the terminal prints
   `[snorkle] policy …` / `effect …` lines for every navigation decision.
-- `npm run tauri build`: an app bundle in `target/release/bundle/macos/`. Set the bundle
-  identifier (`tauri.conf.json`, a placeholder) and, to sign, `APPLE_SIGNING_IDENTITY`.
+- `npm run tauri build`: an app bundle in `target/release/bundle/macos/`. The bundle
+  identifier is `com.laffan.snorkle` (`tauri.conf.json`); to sign, set `APPLE_SIGNING_IDENTITY`.
   Unsigned and ad-hoc-signed builds keep AI keys in the login keychain instead of the
   data-protection keychain (`webkit/keychain.rs`), and macOS may ask to allow access after each
   rebuild.
@@ -105,8 +105,8 @@ can substitute for it. Three things must all hold:
 
 1. **Apple granted it** for the app's real bundle identifier: the developer account holder
    submits Apple's "Default browser entitlement request" form
-   (developer.apple.com/contact/request/default-browser-entitlement). The identifier in
-   `tauri.conf.json` is still the placeholder `com.example.snorkle`, which cannot be granted.
+   (developer.apple.com/contact/request/default-browser-entitlement), for the identifier in
+   `tauri.conf.json`, `com.laffan.snorkle`.
 2. **It is enabled for the App ID**: developer portal → Certificates, Identifiers & Profiles →
    Identifiers → the App ID → Additional Capabilities → Default Web Browser, so new provisioning
    profiles carry it.

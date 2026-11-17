@@ -128,7 +128,8 @@ iOS.** The Rust compiles and clippy-checks for `aarch64-apple-ios` against the o
     **[decide]** Lists refresh only with app updates (`scripts/update-filter-lists.sh`). They
     expire in about 4 days upstream, so ship regularly or add an opt-in updater (an app-initiated
     network request, which needs a review).
-24. **[decide] Bundle identifier** `com.example.snorkle` and the development team are placeholders.
+24. **[decide] Development team** is a placeholder. (Bundle identifier decided 2026-11-17:
+    `com.laffan.snorkle`, replacing the placeholder `com.example.snorkle`.)
 25. **[gap] Multiple windows / Stage Manager scenes.** Only one scene is supported; Tauri's
     `SceneRequested` is not handled.
 26. **[gap] Background media.** A tab playing audio can be discarded by the budget. WKWebView's
