@@ -1,0 +1,118 @@
+name: Release
+
+# Builds the macOS app (Apple silicon + Intel) and attaches the installers to a
+# GitHub Release.
+#
+# Run it from the Actions tab -> Release -> "Run workflow". The release tag
+# comes from the version in src-tauri/tauri.conf.json.
+#
+# The release is created as a draft. Review it on GitHub, then publish it.
+# There is deliberately no tag trigger: publishing a draft creates the tag, and
+# a tag trigger would then build and upload everything a second time.
+#
+# Builds are not signed with an Apple Developer certificate (no
+# APPLE_SIGNING_IDENTITY), so Gatekeeper blocks each new download once.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust-targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust-targets: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      # The Cargo workspace is at the repository root, so target/ is too.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: ${{ matrix.args }}
+
+      # Only the pinned Tauri CLI; the chrome UI (ui/) has no build step.
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # __VERSION__ is replaced with the version in tauri.conf.json.
+          tagName: v__VERSION__
+          releaseName: "Snorkle v__VERSION__"
+          releaseBody: |
+            ## Downloads
+
+            - **macOS:** `AppleSilicon.dmg` for M-series Macs, `MacIntel.dmg` for Intel Macs. Needs macOS 15 or later.
+
+            ## Opening the app on macOS
+
+            These builds are not signed with an Apple Developer certificate, so macOS blocks them the first time. Drag the app to Applications, then run this once in Terminal:
+
+            ```
+            xattr -cr "/Applications/Snorkle.app"
+            ```
+
+            Unsigned builds keep AI keys in the login keychain, and macOS may ask to allow access to them after an update.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  # Gives the release assets plain names and keeps two downloads.
+  rename-assets:
+    needs: release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rename and prune release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE: Snorkle
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          release_id=$(gh api "repos/$REPO/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"v$version\") | .id" | head -n1)
+          gh api "repos/$REPO/releases/$release_id/assets" --paginate \
+            --jq '.[] | [.id, .name] | @tsv' |
+          while IFS="$(printf '\t')" read -r id name; do
+            case "$name" in
+              "$BASE-$version-"*) continue ;;  # already renamed
+              *_aarch64.dmg)    new="$BASE-$version-AppleSilicon.dmg" ;;
+              *_x64.dmg)        new="$BASE-$version-MacIntel.dmg" ;;
+              *)                new="" ;;
+            esac
+            if [ -z "$new" ]; then
+              echo "remove $name"
+              gh api -X DELETE "repos/$REPO/releases/assets/$id"
+            else
+              echo "$name -> $new"
+              gh api -X PATCH "repos/$REPO/releases/assets/$id" -f name="$new" >/dev/null
+            fi
+          done
