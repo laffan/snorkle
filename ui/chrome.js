@@ -1736,7 +1736,9 @@
   // it from Rust (a launch mode, `viewmodes::NIGHT_CSS`, stored, so the
   // first page of a launch already has it); the chrome draws its own two
   // layers (chrome.css). The choice is mirrored here so the chrome is red
-  // from its first frame, before Rust has answered `get_view_mode`.
+  // from its first frame, before Rust has answered `get_view_mode`. The
+  // eye at the sidebar's foot, between the menu and Save for Later, turns
+  // the same setting on and off (pressed while on).
   function applyNightVisionChrome(on) {
     const have = $('night-vision-grey');
     if (on && !have) {
@@ -1752,14 +1754,18 @@
       $('night-vision-red')?.remove();
     }
     $('night-vision').checked = on;
+    const b = $('night-btn');
+    b.setAttribute('aria-pressed', String(on));
+    b.title = on ? 'Night vision is on: press for colour' : 'Night vision: red only, no blue light';
     setPref('nightVision', on ? '1' : '0');
   }
   applyNightVisionChrome(pref('nightVision') === '1');
-  $('night-vision').addEventListener('change', () => {
-    const on = $('night-vision').checked;
+  function setNightVision(on) {
     applyNightVisionChrome(on);
     applyViewModes(T.core.invoke('set_launch_mode', { mode: 'night', on }));
-  });
+  }
+  $('night-vision').addEventListener('change', () => setNightVision($('night-vision').checked));
+  $('night-btn').addEventListener('click', () => setNightVision($('night-btn').getAttribute('aria-pressed') !== 'true'));
 
   function loadSidebarPrefs() {
     sidebarMode = pref('sidebarMode') === 'flyout' ? 'flyout' : 'attached';

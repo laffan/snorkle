@@ -259,7 +259,8 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   paused when they start unless pointed at (their `play` events do not leave the shadow tree, so
   each root is listened to).
   Inverted dark pages keep using dark mode's media box, which also covers the players.
-- **Night vision** (2026-11-17; Settings → General → Appearance, a checkbox): the browser and every
+- **Night vision** (2026-11-17; Settings → General → Appearance, a checkbox, and the eye button at
+  the sidebar's foot between the menu and Save for Later, pressed while on): the browser and every
   page drawn in shades of red only, no blue or green light, for keeping dark-adapted eyes adapted.
   It is `viewmodes::Kind::Night`, stored with the launch modes and set through `set_launch_mode`,
   so a launch's first page already has it; the chrome offers no per-tab exemption. Pages get one
