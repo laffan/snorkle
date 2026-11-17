@@ -640,6 +640,20 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .option { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
 .option > div { flex: 1; }
 .option > .seg { flex: 0 0 auto; }
+.option > .option-check { flex: 0 0 auto; width: 20px; height: 20px; margin: 0; }
+label.option-title { display: block; }
+
+/* Night vision (Settings → General → Appearance; chrome.js): the chrome
+   in red alone. Two click-through layers over everything: the first
+   reduces what is under it to its luminance, the second multiplies that
+   by pure red, leaving no green or blue. Filter functions and a blend
+   mode only (WebKit takes SVG url() filters off its accelerated path and
+   refuses them in backdrop-filter). Pages draw their own pair
+   (viewmodes::NIGHT_CSS); the body's opaque background keeps the red
+   from painting over anything transparent. */
+.night-vision-layer { position: fixed; inset: 0; pointer-events: none; }
+#night-vision-grey { z-index: 2147483646; -webkit-backdrop-filter: grayscale(1); backdrop-filter: grayscale(1); }
+#night-vision-red { z-index: 2147483647; background: #f00; mix-blend-mode: multiply; }
 .option-title { font-weight: 600; }
 .credits { margin-top: 20px; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 13px; color: var(--muted); }

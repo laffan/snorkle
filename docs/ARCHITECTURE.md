@@ -259,6 +259,25 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   paused when they start unless pointed at (their `play` events do not leave the shadow tree, so
   each root is listened to).
   Inverted dark pages keep using dark mode's media box, which also covers the players.
+- **Night vision** (2026-11-17; Settings → General → Appearance, a checkbox): the browser and every
+  page drawn in shades of red only, no blue or green light, for keeping dark-adapted eyes adapted.
+  It is `viewmodes::Kind::Night`, stored with the launch modes and set through `set_launch_mode`,
+  so a launch's first page already has it; the chrome offers no per-tab exemption. Pages get one
+  more constant style (`NIGHT_CSS`, main frame, document start): the root's `::before` is a
+  full-viewport `backdrop-filter: grayscale(1)` and its `::after` pure red with
+  `mix-blend-mode: multiply`, both at the top z-index, so each pixel's luminance lands in the red
+  channel and green and blue are zero (whatever escapes the grey layer is still multiplied). Only
+  filter functions and a blend mode: SVG `url()` filters leave WebKit's accelerated path and
+  `backdrop-filter` refuses them. A root `filter` would apply over the root's pseudo-elements, so
+  with night vision the root's filter is cleared and dark pages' inversion moves into the grey
+  layer (`invert(1) hue-rotate(180deg) grayscale(1)`), which draws the same picture; a dark page
+  with a transparent root is given a black one (the red layer would otherwise paint the
+  transparent canvas); top-layer elements (`:modal`, `:popover-open`, `:fullscreen`) get a red
+  multiply of their own. The content views' native canvas is pure red (light) or black (dark)
+  while it is on (`set_light` / `set_dark`). The chrome draws the same two layers over its own
+  document (`chrome.css`, `applyNightVisionChrome`), keeping a copy of the setting so it is red
+  from its first frame. Save for Later's plain preview leaves it on. Native UI (menus, sheets, the
+  keyboard, selection handles, full-screen video) is not covered. OPEN_QUESTIONS: Night vision.
 - **Shared content controllers** (fixed 2026-11-09): a popup's web view (a `target=_blank` link,
   `window.open`) is built from WebKit's configuration and so shares its opener's
   `WKUserContentController`; one install of the view-mode scripts serves all of them. The host

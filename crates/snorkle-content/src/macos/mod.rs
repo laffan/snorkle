@@ -376,7 +376,8 @@ impl ContentHost {
         self.compile_scripts();
         for (tab, v) in &self.views {
             injection::install(self.mtm, &v.controller, self.scripts_on(*tab, &v.controller));
-            set_dark(&v.web, self.injections.view_for(*tab).dark);
+            let view = self.injections.view_for(*tab);
+            set_dark(&v.web, view.dark, view.night);
             if run_now {
                 injection::run_now(self.mtm, &v.web, &self.injections.view_for(*tab).apply_js);
             }
@@ -401,11 +402,13 @@ impl ContentHost {
         let Some(v) = self.views.get(&tab) else { return };
         if on {
             injection::run_now(self.mtm, &v.web, &snorkle_core::viewmodes::plain_js());
-            set_light(&v.web);
+            // Night vision stays on (`plain_js` leaves it): the page is on
+            // screen meanwhile.
+            set_light(&v.web, self.injections.view_for(tab).night);
         } else {
             let view = self.injections.view_for(tab);
             injection::run_now(self.mtm, &v.web, &view.apply_js);
-            set_dark(&v.web, view.dark);
+            set_dark(&v.web, view.dark, view.night);
         }
     }
 
@@ -972,7 +975,8 @@ impl ContentHost {
             NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
         container.addSubview(&web);
-        set_dark(&web, self.injections.view_for(tab).dark);
+        let view = self.injections.view_for(tab);
+        set_dark(&web, view.dark, view.night);
         injection::install(mtm, &controller, self.scripts_on(tab, &controller));
         rules::register(tab, controller.clone());
         WEB_VIEW_TABS.with(|m| m.borrow_mut().insert(Retained::as_ptr(&web) as usize, tab));
@@ -1095,15 +1099,25 @@ const SPLIT_GAP: f64 = 8.0;
 /// canvas of pages that support a dark scheme) over black. (Until
 /// 2026-11-15 a view without the mode followed the window, and pages with
 /// no background of their own showed the dark window colour.)
-fn set_light(web: &WKWebView) {
-    unsafe { web.setUnderPageBackgroundColor(Some(&NSColor::whiteColor())) };
+///
+/// With night vision (2026-11-17) the colour past the page's edges is
+/// drawn as night vision draws white: pure red in sRGB, no green or blue
+/// (`viewmodes::NIGHT_CSS` covers the page, not what the view draws past
+/// it). Black stays black.
+fn set_light(web: &WKWebView, night: bool) {
+    let color = if night {
+        NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 0.0, 0.0, 1.0)
+    } else {
+        NSColor::whiteColor()
+    };
+    unsafe { web.setUnderPageBackgroundColor(Some(&color)) };
     let a = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua });
     let _: () = unsafe { msg_send![web, setAppearance: a.as_deref()] };
 }
 
-fn set_dark(web: &WKWebView, dark: bool) {
+fn set_dark(web: &WKWebView, dark: bool, night: bool) {
     if !dark {
-        set_light(web);
+        set_light(web, night);
         return;
     }
     unsafe { web.setUnderPageBackgroundColor(Some(&NSColor::blackColor())) };

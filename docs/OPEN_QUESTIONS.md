@@ -1108,3 +1108,32 @@ The live sites were not reachable or not signed in from this environment.
   grey fade; the page dims when the drag has moved 6 pt (the stage's shade around its box). Clip
   mode (the scissors) keeps its slight grey fade, since nothing else shows that it is on; say if
   that should go too.
+
+## Night vision (2026-11-17)
+
+- **[verify] WebKit draws the two layers as Chromium does.** Night vision draws each pixel's
+  luminance in red alone: a full-viewport layer with `backdrop-filter: grayscale(1)` under one of
+  pure red with `mix-blend-mode: multiply` (pages: the root's `::before`/`::after`,
+  `viewmodes::NIGHT_CSS`; the chrome: two fixed `div`s). Checked in Chromium on test pages
+  (plain, black and white, dark pages inverted, a dark page with a transparent root, a modal
+  `<dialog>`): every pixel came out with green and blue at 0 and red at the luminance, and dark
+  pages' inversion moved into the backdrop filter gave the same picture as on the root. Not run
+  in WebKit, on a Mac or an iPad: `backdrop-filter` on the root's pseudo-element, its sampling of
+  video, canvas and cross-origin frames, and its cost on long pages while scrolling are
+  unverified. SVG `url()` filters were ruled out (WebKit's accelerated filter path and
+  `backdrop-filter` do not take them).
+- **[verify] What it cannot reach.** Native UI is drawn outside both web views: context menus,
+  the share sheet, the keyboard, the status bar, text selection handles and the caret (UIKit
+  tint), alerts and full-screen video (AVKit). Top-layer elements in a page (modal dialogs,
+  popovers, full screen) are drawn over the root's layers; each gets its own red multiply, which
+  removes green and blue but does not keep brightness as luminance (pure blue goes black), and a
+  page's `::backdrop` colour is not changed. A page's own `html::before`/`::after` are replaced
+  while it is on.
+- **[decide] Save for Later keeps it.** The 1.5 s plain preview before a Save for Later thumbnail
+  leaves night vision on (so the page does not flash in colour in the dark), so the thumbnail is
+  red. If the thumbnail matters more, `viewmodes::plain_js` is the place to take it off.
+- **[decide] The canvas past a light page is red.** While night vision is on, a content view's own
+  canvas (shown before a page paints, and past its edges when pulled) is pure red over light
+  pages and black with dark pages, as night vision draws white and black. Black for both would
+  give less light at the cost of a mismatch at the edges.
+

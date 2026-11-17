@@ -82,6 +82,11 @@ pub struct ViewInjections {
     /// Dark mode: the web view prefers a dark appearance, so pages with
     /// their own dark theme (`prefers-color-scheme`) use it.
     pub dark: bool,
+    /// Night vision: the web view's own canvas (under the page, and past
+    /// its edges when it is pulled) is drawn as night vision draws it —
+    /// black stays black, white becomes pure red — since the page's
+    /// layers (`viewmodes::NIGHT_CSS`) cannot reach it.
+    pub night: bool,
 }
 
 impl Injections {

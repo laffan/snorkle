@@ -2,7 +2,9 @@
 //! desaturate (black and white), hide media (images and video) and dark.
 //! Each is set app-wide and a tab can be exempted from it ("Disable for
 //! this tab"). (The headers view, channel C14, was replaced by the summary
-//! view on 2026-11-16: `crate::summary`.)
+//! view on 2026-11-16: `crate::summary`.) Night vision (2026-11-17,
+//! [`NIGHT_CSS`]) is drawn the same way but is a setting, not a button:
+//! Settings → General → Appearance, app-wide, stored, never per tab.
 //!
 //! This module generates the constant sources the content host injects
 //! (via `webkit/injection.rs`).
@@ -26,34 +28,40 @@ pub enum Kind {
     HideMedia,
     /// Dark pages: light pages are inverted (media kept as they are).
     Dark,
+    /// Night vision: pages drawn in shades of red only ([`NIGHT_CSS`]).
+    /// A setting (Settings → General → Appearance), stored as a launch
+    /// mode; the chrome offers no per-tab exemption from it.
+    Night,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Desaturate, Kind::HideMedia, Kind::Dark];
+    pub const ALL: [Kind; 4] = [Kind::Desaturate, Kind::HideMedia, Kind::Dark, Kind::Night];
 }
 
 /// The app-wide view modes each launch starts with (Settings → General),
 /// stored. Dark is also remembered when its toolbar button is pressed; the
 /// buttons for black and white and hide media change the current session
-/// only.
+/// only. Night vision is only ever set here, so it is always remembered
+/// (and in effect from the first page a launch loads).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LaunchModes {
     pub desaturate: bool,
     pub hide_media: bool,
     pub dark: bool,
+    pub night: bool,
 }
 
 impl Default for LaunchModes {
     fn default() -> Self {
-        LaunchModes { desaturate: true, hide_media: true, dark: false }
+        LaunchModes { desaturate: true, hide_media: true, dark: false, night: false }
     }
 }
 
 impl LaunchModes {
     /// The app-wide modes a launch starts with.
     pub fn modes(self) -> ViewModes {
-        ViewModes { desaturate: self.desaturate, hide_media: self.hide_media, dark: self.dark }
+        ViewModes { desaturate: self.desaturate, hide_media: self.hide_media, dark: self.dark, night: self.night }
     }
 
     /// Sets one default.
@@ -62,6 +70,7 @@ impl LaunchModes {
             Kind::Desaturate => self.desaturate = on,
             Kind::HideMedia => self.hide_media = on,
             Kind::Dark => self.dark = on,
+            Kind::Night => self.night = on,
         }
     }
 }
@@ -74,11 +83,12 @@ pub struct ViewModes {
     pub desaturate: bool,
     pub hide_media: bool,
     pub dark: bool,
+    pub night: bool,
 }
 
 impl Default for ViewModes {
     fn default() -> Self {
-        ViewModes { desaturate: true, hide_media: true, dark: false }
+        ViewModes { desaturate: true, hide_media: true, dark: false, night: false }
     }
 }
 
@@ -88,6 +98,7 @@ impl ViewModes {
             Kind::Desaturate => self.desaturate,
             Kind::HideMedia => self.hide_media,
             Kind::Dark => self.dark,
+            Kind::Night => self.night,
         }
     }
 
@@ -96,6 +107,7 @@ impl ViewModes {
             Kind::Desaturate => self.desaturate = on,
             Kind::HideMedia => self.hide_media = on,
             Kind::Dark => self.dark = on,
+            Kind::Night => self.night = on,
         }
     }
 
@@ -379,6 +391,63 @@ first();window.addEventListener('load',check);window.addEventListener('pageshow'
 
 const DARK_STOP_JS: &str = "(function(){var d=document.documentElement;if(d){d.classList.remove('snorkle-dark');d.classList.remove('snorkle-dark-bg');d.classList.remove('snorkle-dark-checked');}if(window.__snorkleDark&&window.__snorkleDark.stop)window.__snorkleDark.stop();delete window.__snorkleDark;})();";
 
+/// Night vision (2026-11-17; Settings → General → Appearance): the page
+/// drawn in shades of red only, with no blue or green light, so the eyes
+/// stay adapted to the dark (the rods that see at night are nearly blind
+/// to deep red). Each pixel's luminance goes to the red channel, through
+/// two layers over the viewport, the root's pseudo-elements, at the top
+/// of the page's stacking order:
+/// - `html::before`: `backdrop-filter: grayscale(1)`, everything under it
+///   reduced to its luminance;
+/// - `html::after`: pure red with `mix-blend-mode: multiply`, that grey
+///   times (1, 0, 0). Whatever the first layer misses (a page element at
+///   the same z-index, later in the document) is still multiplied, so no
+///   green or blue is left under it.
+///
+/// Filter functions and a blend mode only: WebKit draws an SVG `url()`
+/// filter off its accelerated path and does not accept one in
+/// `backdrop-filter`.
+///
+/// A root `filter` would apply over these layers (it covers the root's
+/// pseudo-elements) and turn the red grey (black and white) or cyan (dark
+/// pages' inversion). So while night vision is on the root's filter is
+/// cleared (`:has` twice outranks dark mode's
+/// `:has(#__snorkle_grayscale)` rule), and dark pages' inversion moves
+/// into the first layer: a backdrop filter over the whole viewport draws
+/// the same picture as that filter on the root, and the flips and media
+/// counter-filters below it come out as before. Dark mode's `opacity: 0`
+/// while it checks a page is kept.
+/// - A dark page with a transparent root: the red layer would paint the
+///   transparent canvas red, so the root is given black
+///   (`snorkle-dark-bg` without `snorkle-dark`: checked, not inverted).
+/// - Top-layer elements (modal dialogs, popovers, full screen) are drawn
+///   over the root and its layers; each gets a red layer of its own (the
+///   multiply only, so green and blue are gone but brightness is not
+///   kept as luminance).
+///
+/// A page's own `html::before`/`::after` are replaced while it is on.
+/// Not undone for Save for Later's thumbnail ([`plain_js`]): the page
+/// stays red for the 1.5 s it shows plainly, and so does the thumbnail.
+pub const NIGHT_CSS: &str = concat!(
+    "html:has(#__snorkle_night):has(#__snorkle_night){filter:none!important}",
+    "html::before,html::after{content:\"\"!important;display:block!important;position:fixed!important;",
+    "inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:0!important;",
+    "border:0!important;opacity:1!important;visibility:visible!important;transform:none!important;",
+    "filter:none!important;clip-path:none!important;-webkit-mask:none!important;mask:none!important;",
+    "animation:none!important;transition:none!important;pointer-events:none!important;",
+    "z-index:2147483647!important}",
+    "html::before{background:none!important;mix-blend-mode:normal!important;",
+    "-webkit-backdrop-filter:grayscale(1)!important;backdrop-filter:grayscale(1)!important}",
+    "html.snorkle-dark::before{-webkit-backdrop-filter:invert(1) hue-rotate(180deg) grayscale(1)!important;",
+    "backdrop-filter:invert(1) hue-rotate(180deg) grayscale(1)!important}",
+    "html::after{background:#f00!important;-webkit-backdrop-filter:none!important;",
+    "backdrop-filter:none!important;mix-blend-mode:multiply!important}",
+    "html.snorkle-dark-checked.snorkle-dark-bg:not(.snorkle-dark){background-color:#000!important}",
+    ":is(:modal,:popover-open,:fullscreen):not(html)::after{content:\"\"!important;display:block!important;",
+    "position:absolute!important;inset:0!important;background:#f00!important;",
+    "mix-blend-mode:multiply!important;pointer-events:none!important;z-index:2147483647!important}"
+);
+
 /// Injected sources for the modes in `modes` (constant code).
 pub fn injections(modes: ViewModes) -> Vec<Injection> {
     let mut out = Vec::new();
@@ -405,6 +474,14 @@ pub fn injections(modes: ViewModes) -> Vec<Injection> {
         });
         out.push(Injection { source: DARK_DETECT_JS.to_string(), at: InjectAt::DocumentEnd, all_frames: false });
     }
+    if modes.night {
+        // Main frame only: frames are drawn inside it, under its layers.
+        out.push(Injection {
+            source: style_js("__snorkle_night", NIGHT_CSS, true, false),
+            at: InjectAt::DocumentStart,
+            all_frames: false,
+        });
+    }
     out
 }
 
@@ -415,13 +492,14 @@ pub fn apply_js(modes: ViewModes) -> String {
     style_js("__snorkle_grayscale", GRAYSCALE_CSS, modes.desaturate, false)
         + &style_js("__snorkle_no_images", NO_MEDIA_CSS, modes.hide_media, true)
         + &style_js("__snorkle_dark", DARK_CSS, modes.dark, false)
+        + &style_js("__snorkle_night", NIGHT_CSS, modes.night, false)
         + dark
 }
 
 /// Save for Later's thumbnail (2026-11-09): takes black and white, hidden
 /// media and dark pages off an already-loaded page, without changing what
 /// is installed for its later loads (the tab's `apply_js` puts them back).
-/// Constant code.
+/// Night vision is left on: the page is on screen meanwhile. Constant code.
 pub fn plain_js() -> String {
     style_js("__snorkle_grayscale", GRAYSCALE_CSS, false, false)
         + &style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true)
@@ -578,13 +656,13 @@ mod tests {
 
     #[test]
     fn injections_per_mode() {
-        let all = ViewModes { desaturate: true, hide_media: true, dark: false };
+        let all = ViewModes { desaturate: true, hide_media: true, dark: false, night: false };
         let inj = injections(all);
         assert_eq!(inj.len(), 2);
         assert!(inj[0].source.contains("grayscale(1)"));
         assert!(inj[1].source.contains("video,"));
-        assert!(injections(ViewModes { desaturate: false, hide_media: false, dark: false }).is_empty());
-        let off = apply_js(ViewModes { desaturate: false, hide_media: false, dark: false });
+        assert!(injections(ViewModes { desaturate: false, hide_media: false, dark: false, night: false }).is_empty());
+        let off = apply_js(ViewModes { desaturate: false, hide_media: false, dark: false, night: false });
         assert!(off.contains("window[\"__snorkle_grayscale_state\"];if(!s)return;s.obs.disconnect();s.st.remove()"));
         assert!(inj[1].all_frames, "hide media also covers iframes");
         assert!(!inj[0].all_frames);
@@ -596,7 +674,7 @@ mod tests {
 
     #[test]
     fn dark_mode() {
-        let m = ViewModes { desaturate: true, hide_media: true, dark: true };
+        let m = ViewModes { desaturate: true, hide_media: true, dark: true, night: false };
         let inj = injections(m);
         assert_eq!(inj.len(), 4, "grayscale, media, dark style, dark detector");
         assert!(inj[2].source.contains("snorkle-dark") && inj[2].at == InjectAt::DocumentStart);
@@ -609,6 +687,51 @@ mod tests {
         assert!(off.contains(DARK_STOP_JS));
         assert!(!ViewModes::default().dark);
         assert!(DARK_DETECT_JS.contains("prefers-color-scheme: dark"));
+    }
+
+    #[test]
+    fn night_vision() {
+        assert!(!ViewModes::default().night && !LaunchModes::default().night, "off unless chosen");
+        let m = ViewModes { desaturate: true, hide_media: true, dark: true, night: true };
+        let inj = injections(m);
+        assert_eq!(inj.len(), 5, "grayscale, media, dark style, dark detector, night");
+        let night = &inj[4];
+        assert!(night.source.contains("__snorkle_night") && night.at == InjectAt::DocumentStart && !night.all_frames);
+        assert!(!night.source.contains("messageHandlers"), "nothing posts back");
+        // Luminance to red: grey under a pure red multiply, in that order.
+        assert!(NIGHT_CSS.contains("html::before{background:none!important;mix-blend-mode:normal!important;-webkit-backdrop-filter:grayscale(1)!important;backdrop-filter:grayscale(1)!important}"));
+        assert!(
+            NIGHT_CSS.contains("html::after{background:#f00!important;")
+                && NIGHT_CSS.contains("mix-blend-mode:multiply!important}")
+        );
+        assert!(
+            !NIGHT_CSS.contains("url("),
+            "no SVG filters: WebKit's accelerated path and backdrop-filter refuse them"
+        );
+        // The root filters would apply over the layers: cleared, and dark
+        // pages' inversion moves into the grey layer. Two `:has` outrank
+        // dark mode's `.snorkle-dark:has(#__snorkle_grayscale)`.
+        assert!(NIGHT_CSS.starts_with("html:has(#__snorkle_night):has(#__snorkle_night){filter:none!important}"));
+        assert!(DARK_CSS.contains("html.snorkle-dark:has(#__snorkle_grayscale){filter:"), "the rule it must outrank");
+        assert!(NIGHT_CSS.contains(
+            "html.snorkle-dark::before{-webkit-backdrop-filter:invert(1) hue-rotate(180deg) grayscale(1)!important;"
+        ));
+        assert!(NIGHT_CSS
+            .contains("html.snorkle-dark-checked.snorkle-dark-bg:not(.snorkle-dark){background-color:#000!important}"));
+        assert!(
+            NIGHT_CSS.contains(":is(:modal,:popover-open,:fullscreen):not(html)::after{"),
+            "top layer gets its own red"
+        );
+        // A setting, never undone by an exemption the chrome doesn't offer,
+        // and kept through Save for Later's plain preview.
+        assert!(apply_js(m).contains("__snorkle_night"));
+        let off = apply_js(ViewModes { night: false, ..m });
+        assert!(off.contains("window[\"__snorkle_night_state\"];if(!s)return;s.obs.disconnect();s.st.remove()"));
+        assert!(!plain_js().contains("__snorkle_night"));
+        assert!(m.for_tab(&[Kind::Dark].into()).night);
+        let mut l = LaunchModes::default();
+        l.set(Kind::Night, true);
+        assert!(l.modes().night && l.modes().get(Kind::Night));
     }
 
     #[test]
@@ -667,7 +790,11 @@ mod tests {
         // `<meta name="color-scheme">` counts as opting in.
         assert!(DARK_DETECT_JS.contains("meta[name='color-scheme' i]"));
         // Everything it starts, stop ends.
-        for off in ["aobs.disconnect()", "removeEventListener('transitionend',onTr,true)", "removeEventListener('change',onScheme)"] {
+        for off in [
+            "aobs.disconnect()",
+            "removeEventListener('transitionend',onTr,true)",
+            "removeEventListener('change',onScheme)",
+        ] {
             assert!(DARK_DETECT_JS.contains(off), "{off}");
         }
     }
@@ -676,7 +803,10 @@ mod tests {
     fn dark_mode_counter_inverts_video_frames() {
         assert!(DARK_DETECT_JS.contains(&format!("BOX='{MEDIA_BOX_ATTR}'")));
         assert!(DARK_DETECT_JS.contains("shadowRoot") && DARK_DETECT_JS.contains("getRootNode()===document"));
-        assert!(DARK_CSS.contains(&format!("input[type=image],[{MEDIA_BOX_ATTR}],nyt-betamax,")), "frames get the media filters");
+        assert!(
+            DARK_CSS.contains(&format!("input[type=image],[{MEDIA_BOX_ATTR}],nyt-betamax,")),
+            "frames get the media filters"
+        );
         // Media inside a frame get no filter of their own, over every
         // other dark rule (two ids in the selector).
         let none = format!("html:has(#__snorkle_dark):has(#__snorkle_dark) [{MEDIA_BOX_ATTR}] :is(");
@@ -696,7 +826,8 @@ mod tests {
         // inverted state.
         assert!(DARK_DETECT_JS.contains("flips(l>0.5);d.classList.toggle('snorkle-dark'"));
         assert!(DARK_DETECT_JS.contains("removeAttribute(FLIP)"));
-        assert!(DARK_CSS.contains(&format!("html.snorkle-dark [{FLIP_ATTR}]{{filter:invert(1) hue-rotate(180deg)!important}}")));
+        assert!(DARK_CSS
+            .contains(&format!("html.snorkle-dark [{FLIP_ATTR}]{{filter:invert(1) hue-rotate(180deg)!important}}")));
         let one = format!(":not([{FLIP_ATTR}] [{FLIP_ATTR}] *)");
         assert_eq!(DARK_CSS.matches(&one).count(), 5, "media under one flip get the dark-page filters");
         // The frame rule (two ids) still wins over them: it stays last.
@@ -713,22 +844,32 @@ mod tests {
         assert!(!js.contains("createElement('style')"), "adds no style");
     }
 
-
     #[test]
     fn hidden_video_is_grayed_on_its_frame() {
-        assert!(NO_MEDIA_CSS.contains(&format!(":root:not(.snorkle-dark):has(#__snorkle_no_images) [{VIDEO_BOX_ATTR}]{{")));
+        assert!(
+            NO_MEDIA_CSS.contains(&format!(":root:not(.snorkle-dark):has(#__snorkle_no_images) [{VIDEO_BOX_ATTR}]{{"))
+        );
         assert!(NO_MEDIA_CSS.contains(&format!("[{VIDEO_BOX_ATTR}]:is(:hover,[{REVEAL_ATTR}],:has([{REVEAL_ATTR}]))")));
-        assert!(NO_MEDIA_CSS.contains(":has(#__snorkle_no_images):has(#__snorkle_no_images)"), "inner media lose their own filter");
+        assert!(
+            NO_MEDIA_CSS.contains(":has(#__snorkle_no_images):has(#__snorkle_no_images)"),
+            "inner media lose their own filter"
+        );
         assert!(VIDEO_BOX_JS.contains(&format!("var VB='{VIDEO_BOX_ATTR}'")));
         let on = style_js("__snorkle_no_images", NO_MEDIA_CSS, true, true);
         assert!(on.contains("s.boxes=function") && on.contains("if(s.later)s.later();"));
-        assert!(!style_js("__snorkle_grayscale", GRAYSCALE_CSS, true, false).contains("s.boxes"), "only hide media marks frames");
+        assert!(
+            !style_js("__snorkle_grayscale", GRAYSCALE_CSS, true, false).contains("s.boxes"),
+            "only hide media marks frames"
+        );
         let off = style_js("__snorkle_no_images", NO_MEDIA_CSS, false, true);
         assert!(off.contains(&format!("removeAttribute('{VIDEO_BOX_ATTR}')")), "marks removed when turned off");
         // Web-component players (nyt-betamax) are media themselves, and
         // media in nested open shadow roots are found and paused there.
         assert!(MEDIA_SELECTOR.contains("nyt-betamax,") && NO_MEDIA_CSS.contains("nyt-betamax,"));
-        assert!(VIDEO_BOX_JS.contains("if(depth<4)look(") && VIDEO_BOX_JS.contains("r.addEventListener('play',s.onPlay,true)"));
+        assert!(
+            VIDEO_BOX_JS.contains("if(depth<4)look(")
+                && VIDEO_BOX_JS.contains("r.addEventListener('play',s.onPlay,true)")
+        );
         assert!(off.contains("r.removeEventListener('play',s.onPlay,true)"));
         // Shadow roots (NYT's video feed) get the same rules as an adopted
         // sheet, without the document-only switch.
@@ -737,7 +878,9 @@ mod tests {
         assert!(shadow.contains(&format!("[{VIDEO_BOX_ATTR}]{{")) && shadow.contains("nyt-betamax,"));
         assert!(on.contains("adoptedStyleSheets=r.adoptedStyleSheets.concat([s.sheet])"));
         assert!(off.contains("adoptedStyleSheets=r.adoptedStyleSheets.filter("), "sheet removed when turned off");
-        assert!(VIDEO_BOX_JS.contains("if(q.width===0&&q.height===0){e=p;continue;}"), "display:contents wrappers are skipped");
+        assert!(
+            VIDEO_BOX_JS.contains("if(q.width===0&&q.height===0){e=p;continue;}"),
+            "display:contents wrappers are skipped"
+        );
     }
-
 }

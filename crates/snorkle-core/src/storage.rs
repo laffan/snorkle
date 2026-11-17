@@ -1811,13 +1811,15 @@ mod tests {
             assert_eq!(s.launch_modes(), LaunchModes::default());
             s.set_launch_mode(Kind::Dark, true).unwrap();
             s.set_launch_mode(Kind::HideMedia, false).unwrap();
+            s.set_launch_mode(Kind::Night, true).unwrap();
         }
         let s = Store::open(&dir).unwrap();
-        assert_eq!(s.launch_modes(), LaunchModes { desaturate: true, hide_media: false, dark: true });
-        // A partial file keeps the defaults for what it lacks.
+        assert_eq!(s.launch_modes(), LaunchModes { desaturate: true, hide_media: false, dark: true, night: true });
+        // A partial file (one written before night vision, say) keeps the
+        // defaults for what it lacks.
         fs::write(dir.join(LAUNCH_MODES_FILE), br#"{"dark":true}"#).unwrap();
         let s = Store::open(&dir).unwrap();
-        assert_eq!(s.launch_modes(), LaunchModes { desaturate: true, hide_media: true, dark: true });
+        assert_eq!(s.launch_modes(), LaunchModes { desaturate: true, hide_media: true, dark: true, night: false });
         let _ = fs::remove_dir_all(&dir);
     }
 
