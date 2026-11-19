@@ -814,7 +814,7 @@ impl ContentEvents for Events {
         };
         shared.downloads().insert(0, item);
         shared.log(console::Level::Info, Some(tab), &format!("download {id} started: {name}"));
-        shared.toast(&format!("Downloading “{name}”…"));
+        // The chrome shows the progress, and the end, from `downloads`.
         shared.emit_downloads();
         Some((id, path))
     }
@@ -905,11 +905,6 @@ impl ContentEvents for Events {
             }
         }
         shared.log(console::Level::Info, None, &format!("download {id} {}: {}", item.state, item.name));
-        match item.state {
-            "done" => shared.toast(&format!("Downloaded “{}”", item.name)),
-            "failed" => shared.toast(&format!("Download failed: {}", item.name)),
-            _ => {}
-        }
         shared.emit_downloads();
     }
     fn memory_warning(&self) {

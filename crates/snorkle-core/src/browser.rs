@@ -643,6 +643,7 @@ impl Browser {
             }
         }
         self.shown.retain(|(t, _)| *t != id);
+        let partner = self.pair_of(id).map(|s| if s.left == id { s.right } else { s.left });
         self.splits.retain(|s| s.left != id && s.right != id);
         if tab.life == Life::Live {
             out.push(Effect::DestroyView { tab: id, keep_state: false });
@@ -653,10 +654,12 @@ impl Browser {
         }
         if self.active == Some(id) {
             self.active = None;
-            // A closing popup returns to its opener.
-            let opener = tab.opener.and_then(|o| self.tab(o)).map(|t| t.id);
-            let next = opener
-                .and_then(|o| self.tabs.iter().find(|t| t.id == o))
+            // A closing split half leaves the other half on screen (full
+            // width), not the tab after it in the list; a closing popup
+            // returns to its opener.
+            let find = |want: Option<TabId>| want.and_then(|w| self.tabs.iter().find(|t| t.id == w));
+            let next = find(partner)
+                .or_else(|| find(tab.opener))
                 .or_else(|| self.tabs.get(idx))
                 .or_else(|| idx.checked_sub(1).and_then(|i| self.tabs.get(i)));
             match next.map(|t| t.id) {

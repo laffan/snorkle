@@ -801,6 +801,37 @@ fn split_pairs_survive_choosing_another_tab_and_end_when_a_pane_closes() {
 }
 
 #[test]
+fn closing_the_focused_half_shows_the_other_half() {
+    // ⌘S puts the new half right after the active tab; ⌘W on it must show
+    // the tab it was split from, not the tab after it in the list.
+    let mut b = browser(6);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (d, _) = open_and_load(&mut b, "https://d.example/", 1);
+    b.activate(a, 2);
+    let (y, _) = b.split_new(SplitOrientation::Columns, 3);
+    let y = y.unwrap();
+    assert_eq!(b.view().tabs.iter().map(|t| t.id).collect::<Vec<_>>(), vec![a, y, d]);
+    assert_eq!(b.active(), Some(y));
+    let out = b.close(y, 4);
+    assert_eq!(b.active(), Some(a), "the remaining half is shown");
+    assert!(b.view().split.is_none());
+    assert!(out.contains(&Effect::ShowView { tab: a, pane: Pane::Full }));
+    assert!(!out.iter().any(|e| matches!(e, Effect::ShowView { tab, .. } if *tab == d)));
+
+    // The same for a pair made by dragging, closing either half.
+    let (c, _) = open_and_load(&mut b, "https://c.example/", 5);
+    let (e, _) = open_and_load(&mut b, "https://e.example/", 6);
+    b.split(c, a, 7); // a | c, c focused; e follows c in the list
+    b.close(c, 8);
+    assert_eq!(b.active(), Some(a));
+    b.split(e, a, 9);
+    b.activate(a, 10);
+    b.close(a, 11);
+    assert_eq!(b.active(), Some(e));
+    assert!(b.view().splits.is_empty());
+}
+
+#[test]
 fn several_pairs_and_repairing() {
     let mut b = browser(8);
     let (a, _) = open_and_load(&mut b, "https://a.example/", 0);

@@ -1137,3 +1137,34 @@ The live sites were not reachable or not signed in from this environment.
   pages and black with dark pages, as night vision draws white and black. Black for both would
   give less light at the cost of a mismatch at the edges.
 
+
+## Download progress, closing a split half, Done, Save for Later actions (2026-11-19)
+
+- **[verify] Download progress in the toast.** While files download and Downloads is closed, the
+  toast above the pill shows "Downloading “name” 42%" (or "Downloading 3 files"; the received size
+  and a sliding bar when a server sends no length) with a bar along its bottom; when one finishes
+  or fails it says "Downloaded “name”" / "Download failed: name" with **Show in Downloads**, for
+  8 s. Rust no longer sends its own start and end toasts (`state.rs`); the chrome works both out
+  from the `downloads` events (a download is announced only if it was seen running). Another
+  message takes the toast while it shows and hands it back when it hides; Save for Later's
+  progress keeps priority. The toast is a hole over the page for as long as a download runs.
+  Checked in Chromium with a stubbed bridge (start, progress, a plain toast over it, two at once,
+  one finishing, the link, the panel open, a failure); not run in WebKit or with real downloads.
+- **[decide] No link while it runs.** The request was a link once a download completes; the
+  progress toast has none (the menu's Downloads item still works). Say if the running toast should
+  open Downloads too, or offer Cancel.
+- **[verify] ⌘W on a split half shows the other half** (`Browser::close`): the partner becomes the
+  active tab, full width. Before, the tab after the closed one in the list was shown, which after
+  ⌘S (the new half sits right after the tab it split from) was usually an unrelated tab.
+  `closing_the_focused_half_shows_the_other_half` covers both ⌘S and dragged pairs.
+- **[verify] Done on History and Downloads** is solid and high-contrast (`.button.done`: the
+  text colour as its fill), and the heading row with it stays at the top while the list scrolls
+  (sticky, reaching into `#surface`'s 24 px top padding). Escape still closes both. The Done
+  buttons of Settings and Site Scripts are unchanged.
+- **[verify] Save for Later actions only on hover.** A click on a thumbnail left the focus on it
+  (Chromium and WebKitGTK focus a clicked button; Apple's WebKit is not expected to), and
+  `:focus-within` then kept that card's actions up after the pointer left; only keyboard focus
+  shows them now (`:has(:focus-visible)`). On touch-only devices (`any-hover: none`) they showed on
+  every card; now only on the card whose saved copy is open, as tab rows do on the active tab, so
+  a card's actions there need its copy opened first. **[decide]** whether touch should keep them
+  on every card instead.

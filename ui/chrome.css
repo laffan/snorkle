@@ -381,9 +381,17 @@ body.resizing-right, body.resizing { cursor: col-resize; }
   max-width: min(720px, 100%); padding: 6px 14px; font-size: 13px; background: var(--warn-bg);
   border-radius: 12px; border: 1px solid var(--line);
 }
-/* Save for Later's progress: the percentage, and a bar along the bottom. */
+/* Save for Later's and downloads' progress: the percentage, and a bar
+   along the bottom (sliding while a download's size is unknown). */
 .toast.progress { position: relative; overflow: hidden; min-width: 200px; font-variant-numeric: tabular-nums; }
 .toast-bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--fg); transition: width .25s; }
+.toast-bar.indeterminate { width: 30%; transition: none; animation: dl-slide 1.2s ease-in-out infinite; }
+/* Downloads: one line, the file name elided first. */
+.toast.dl { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.toast.dl .toast-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.toast.dl .toast-pct { flex: 0 0 auto; }
+/* A toast's link (a finished download: Show in Downloads). */
+.toast-link { margin-left: 6px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 
 /* The URL pill: navigation on the left, the address (with the share
    button inside its right end), then the page-actions popup button, the
@@ -537,6 +545,16 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .button.danger { background: var(--danger); color: #fff; font-weight: 600; }
 
 .panel-head, .modal-head { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+/* History and Downloads cover the page: their heading row stays in view
+   while the list scrolls, and Done, the way back to the page, is solid and
+   high-contrast (2026-11-19; before, a grey button like the others). */
+/* Sticky positions are inset by #surface's 24px top padding: the row
+   reaches up into it so no list row shows above it. */
+#surface > section > .panel-head {
+  position: sticky; top: -24px; z-index: 1; background: var(--bg);
+  margin: -24px 0 0; padding: 24px 0 12px;
+}
+.button.done { background: var(--fg); color: var(--bg); font-weight: 700; padding: 10px 22px; }
 .modal-head h1 { margin: 0; font-size: 22px; flex: 1; }
 .spacer { flex: 1; }
 
@@ -884,7 +902,7 @@ body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
 /* ---- Save for Later ------------------------------------------------------ */
 /* While open, the list replaces the sidebar's contents (pins, bookmarks,
    tabs). Thumbnails are a snapshot of what each tab showed, cut to 4:3 from
-   the top; the actions appear on hover (always on touch-only devices). */
+   the top; the actions appear on hover (see .later-actions). */
 #later-view { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 12px; }
 body.later-open #side-scroll { display: none; }
 #later-btn[aria-pressed="true"], #notebook-btn[aria-pressed="true"], #night-btn[aria-pressed="true"] { color: var(--fg); background: var(--field); }
@@ -908,6 +926,11 @@ body.later-open #side-scroll { display: none; }
 .later-actions button { width: 24px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg); font-size: 17px; }
 .later-actions button:hover { background: var(--field); }
 .later-actions svg { width: 15px; height: 15px; }
-.later-card:focus-within .later-actions { opacity: 1; pointer-events: auto; }
+/* Only while pointed at (2026-11-19). Keyboard focus shows them too, but
+   not the focus a click leaves on the thumbnail, which kept a card's
+   actions up after the pointer left. Touch-only devices have no hover:
+   there they show on the card whose saved copy is open, as tab rows do
+   on the active tab (before, on every card). */
+.later-card:has(:focus-visible) .later-actions { opacity: 1; pointer-events: auto; }
 @media (any-hover: hover) { .later-card:hover .later-actions { opacity: 1; pointer-events: auto; } }
-@media (any-hover: none) { .later-actions { opacity: 1; pointer-events: auto; } }
+@media (any-hover: none) { .later-card.active .later-actions { opacity: 1; pointer-events: auto; } }

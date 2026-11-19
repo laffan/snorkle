@@ -298,7 +298,8 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   (`Browser::split_new`); in a pair they only change its layout, never adding a third pane. The panes on screen are protected from discard; pairs not on screen can
   be discarded and are restored together when chosen. Choosing a tab outside any pair shows it
   alone and keeps the pairs. Closing a tab, pairing one of its tabs elsewhere, or unsplitting
-  ends a pair. The sidebar shows each pair as one row with a half per tab; dragging a half out
+  ends a pair; closing the focused half (⌘W) shows the other half full width (2026-11-19;
+  before, the tab after it in the list). The sidebar shows each pair as one row with a half per tab; dragging a half out
   of the row unsplits it. Pairs are not saved in the session. A tap in a pane focuses it.
   On iPadOS a tap or click in a page also makes its web view first responder if it is not
   (2026-11-10, `gestures::TapFocus`): WebKit does this itself for a touch tap but not for a
@@ -554,11 +555,16 @@ delegate (`snorkle-content/src/webkit/downloads.rs`) asks the app where to write
 reduced to one cleaned path component, `clean_download_name`). Redirects are followed only to URLs
 the policy accepts; authentication gets the system's default handling. Progress is read twice a
 second (`NSProgress`) and sent to the chrome (`downloads` event); the menu button shows a pulsing
-dot and the menu item a count while downloads run, and a toast says when one starts and ends.
+dot and the menu item a count while downloads run. While Downloads is closed the toast shows the
+running downloads' progress (name or count, percentage or size, a bar), and when one finishes or
+fails it says so with a **Show in Downloads** link (2026-11-19; before, Rust sent plain toasts
+when one started and ended).
 
 Menu → Downloads lists them, newest first: progress while running (Cancel), and for finished files
 Save to Files… (iPadOS, the Files export picker) or Save… (macOS, a save panel; the copy keeps the
 quarantine mark), Share… and × (deletes the file). Clear deletes every finished or failed one.
+Done (solid, high-contrast; also on History) or Escape returns to the page; the heading row with
+Done stays in view while the list scrolls (2026-11-19).
 Finished downloads of non-private tabs are recorded in `downloads.json` and kept until deleted;
 failed and cancelled ones keep a record without a file. Private-tab downloads are listed for the
 session only and deleted (cancelled if running) when the private session ends. Folders without a
@@ -649,7 +655,9 @@ While any are saved, the same icon sits beside the menu and swaps the sidebar's 
 saved pages (thumbnail, title underneath, the number of pages when more than one). A click on the
 thumbnail opens the saved copy in a new tab (it stays in the list; without an archive it opens the
 live page). On hover: Recover (the live page in a new tab), "+" (add pages), Bookmark (added at the
-end of the bookmarks) and Delete; Recover, Bookmark and Delete remove the page from the list.
+end of the bookmarks) and Delete; Recover, Bookmark and Delete remove the page from the list. Only
+hover or keyboard focus shows them, not a click's focus; on touch-only devices, the card whose
+saved copy is open (2026-11-19; before, every card).
 
 *AI conversations* (2026-11-15; `snorkle_core::conversation`, C22b): on chatgpt.com (and
 chat.openai.com), claude.ai and gemini.google.com the archive's page is the conversation itself,

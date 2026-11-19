@@ -61,6 +61,9 @@
   let editingDomain = null; // domain of the script open in the editor, or '' for new
   let tabsKey = '';
   let toastTimer = 0;
+  // What the toast shows: '' (hidden), 'plain' (a message), 'later' (Save
+  // for Later's progress) or 'download' (downloads' progress).
+  let toastKind = '';
   let clearArmed = false;
   let suppressClick = false;
 
@@ -769,9 +772,10 @@
     $('downloads-note').textContent = macOS
       ? 'Downloaded files stay in Snorkle until you save them elsewhere or delete them.'
       : 'Downloaded files stay in Snorkle until you save them to Files or delete them.';
-    T.core.invoke('list_downloads').then((l) => { downloads = l || []; renderDownloads(); }).catch((e) => toast(String(e)));
+    T.core.invoke('list_downloads').then(setDownloads).catch((e) => toast(String(e)));
     if (narrow) setSidebar(false);
     render();
+    downloadProgressToast(); // the panel shows the progress instead
   }
 
   function downloadStatus(d) {
@@ -851,6 +855,65 @@
     });
   }
 
+  // Downloads in the toast (2026-11-19; before, Rust sent "Downloading …"
+  // and "Downloaded …" toasts). While files download and the Downloads
+  // panel is closed, the toast shows how far they are: the name (or how
+  // many), the percentage and a bar (indeterminate without a size). When
+  // one finishes or fails, the toast says so with a link to the panel.
+  let dlSeen = null; // id → state in the previous list; null until the first
+  function setDownloads(list) {
+    downloads = list || [];
+    const prev = dlSeen;
+    dlSeen = new Map(downloads.map((d) => [d.id, d.state]));
+    renderDownloads();
+    if (!prev) return; // the first list (launch) announces nothing
+    // Newly ended: running in the previous list (Rust sends every start).
+    // Cancelling is the user's own doing and needs no message.
+    const ended = downloads.filter((d) => (d.state === 'done' || d.state === 'failed') && prev.get(d.id) === 'active');
+    if (ended.length) downloadEndedToast(ended);
+    else downloadProgressToast();
+  }
+
+  function downloadEndedToast(ended) {
+    const failed = ended.filter((d) => d.state === 'failed').length;
+    let msg;
+    if (ended.length === 1) msg = failed ? `Download failed: ${ended[0].name}` : `Downloaded “${ended[0].name}”`;
+    else msg = failed ? `${ended.length} downloads ended, ${failed} failed` : `${ended.length} downloads finished`;
+    // The panel open already shows them.
+    toast(msg, panel === 'downloads' ? null : { label: 'Show in Downloads', run: openDownloads });
+  }
+
+  // Shows (or updates) the running downloads' progress in the toast, if
+  // the toast is free; clears it when none run or the panel is open.
+  function downloadProgressToast() {
+    const running = downloads.filter((d) => d.state === 'active');
+    if (!running.length || panel === 'downloads') {
+      if (toastKind === 'download') clearToast();
+      return;
+    }
+    if (toastKind && toastKind !== 'download') return; // handed back by hideToast
+    const t = $('toast');
+    let parts = toastKind === 'download' ? t._dl : null;
+    if (!parts) {
+      parts = { name: el('span', 'toast-name'), pct: el('span', 'toast-pct'), bar: el('span', 'toast-bar') };
+      // The spaces are for screen readers; the flex gap spaces them visually.
+      t.replaceChildren(el('span', null, 'Downloading'), ' ', parts.name, ' ', parts.pct, parts.bar);
+      t._dl = parts;
+      t.className = 'toast progress dl';
+      t.hidden = false;
+      toastKind = 'download';
+      clearTimeout(toastTimer);
+    }
+    parts.name.textContent = running.length === 1 ? `“${running[0].name}”` : `${running.length} files`;
+    const expected = running.every((d) => d.expected) ? running.reduce((n, d) => n + d.expected, 0) : 0;
+    const received = running.reduce((n, d) => n + d.received, 0);
+    const pct = expected ? Math.min(100, Math.floor((100 * received) / expected)) : null;
+    parts.pct.textContent = pct === null ? fmtBytes(received) : `${pct}%`;
+    parts.bar.classList.toggle('indeterminate', pct === null);
+    parts.bar.style.width = pct === null ? '' : pct + '%';
+    reportLayout();
+  }
+
   $('downloads-close').addEventListener('click', closePanel);
   $('downloads-clear').addEventListener('click', () => {
     if (!downloads.some((d) => d.state !== 'active')) return;
@@ -859,8 +922,8 @@
     $('downloads-clear').textContent = 'Clear';
     invoke('clear_downloads');
   });
-  T.event.listen('downloads', (e) => { downloads = e.payload || []; renderDownloads(); });
-  T.core.invoke('list_downloads').then((l) => { downloads = l || []; renderDownloads(); }).catch(() => {});
+  T.event.listen('downloads', (e) => setDownloads(e.payload));
+  T.core.invoke('list_downloads').then(setDownloads).catch(() => {});
 
   // ---- history ------------------------------------------------------------
   //
@@ -2049,6 +2112,7 @@
     historySelecting = false;
     historySel.clear();
     render();
+    downloadProgressToast(); // running downloads show in the toast again
   }
 
   function setModal(open, section) {
@@ -3942,19 +4006,36 @@
   document.addEventListener('securitypolicyviolation', (e) =>
     chromeLog('error', `CSP blocked ${e.blockedURI.slice(0, 40)} (${e.violatedDirective})`));
 
+  // Download progress never takes the toast from another message
+  // (`toastKind`); it comes back when that message hides.
+  function clearToast() {
+    clearTimeout(toastTimer);
+    const t = $('toast');
+    t.hidden = true;
+    t.className = 'toast';
+    t.replaceChildren();
+    toastKind = '';
+    reportLayout();
+  }
+  function hideToast() {
+    clearToast();
+    downloadProgressToast();
+  }
+
   // A toast that stays while something runs, with how far it is (Save for
   // Later: Rust's `later_progress` events). A plain toast replaces it.
   function progressToast(label, percent) {
     const p = Math.max(0, Math.min(100, Math.round(percent)));
     const t = $('toast');
+    t.className = 'toast progress';
     t.textContent = `${label} ${p}%`;
     const bar = el('span', 'toast-bar');
     bar.style.width = p + '%';
     t.appendChild(bar);
-    t.classList.add('progress');
     t.hidden = false;
+    toastKind = 'later';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; t.classList.remove('progress'); reportLayout(); }, 120000);
+    toastTimer = setTimeout(hideToast, 120000);
     reportLayout();
   }
   T.event.listen('later_progress', (e) => {
@@ -3963,14 +4044,22 @@
     progressToast(kind === 'add' ? 'Adding pages…' : 'Saving for later…', percent);
   });
 
-  function toast(msg) {
+  // A message for 4 s. With `action` ({ label, run }) it ends in a link
+  // button and stays 8 s.
+  function toast(msg, action) {
     chromeLog('info', 'toast: ' + msg);
     const t = $('toast');
-    t.classList.remove('progress');
+    t.className = 'toast';
     t.textContent = msg;
+    if (action) {
+      const b = el('button', 'toast-link', action.label);
+      b.addEventListener('click', () => { action.run(); hideToast(); });
+      t.append(' ', b);
+    }
     t.hidden = false;
+    toastKind = 'plain';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; reportLayout(); }, 4000);
+    toastTimer = setTimeout(hideToast, action ? 8000 : 4000);
     reportLayout();
   }
 
