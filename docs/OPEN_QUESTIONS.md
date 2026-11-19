@@ -1157,6 +1157,13 @@ The live sites were not reachable or not signed in from this environment.
   active tab, full width. Before, the tab after the closed one in the list was shown, which after
   ⌘S (the new half sits right after the tab it split from) was usually an unrelated tab.
   `closing_the_focused_half_shows_the_other_half` covers both ⌘S and dragged pairs.
+  Reported the same day as still going "to the next bookmark up the chain": that is exactly what
+  the core did *before* this change when the split was made from a bookmark's tab (the new half
+  sits between that bookmark's tab and the next one's);
+  `closing_a_half_split_from_a_bookmark_shows_the_bookmark_not_the_next_one` fails on the old
+  core and passes now. Not yet confirmed on a build that includes it. If it still happens there,
+  Menu → Console shows whether one press arrived twice ("shortcut close_tab via …" twice without
+  "same press, already handled"), which would close the remaining half as well.
 - **[verify] Done on History and Downloads** is solid and high-contrast (`.button.done`: the
   text colour as its fill), and the heading row with it stays at the top while the list scrolls
   (sticky, reaching into `#surface`'s 24 px top padding). Escape still closes both. The Done

@@ -832,6 +832,31 @@ fn closing_the_focused_half_shows_the_other_half() {
 }
 
 #[test]
+fn closing_a_half_split_from_a_bookmark_shows_the_bookmark_not_the_next_one() {
+    // Reported 2026-11-19: ⌘W on the half split from a bookmark's tab went
+    // to the next bookmark's tab (the next tab in the list).
+    let mut b = browser(8);
+    let mut marks = Vec::new();
+    for url in ["https://b1.example/", "https://b2.example/", "https://b3.example/"] {
+        let (id, _) = b.open_launcher(url, u(url), false, 0);
+        webkit_load(&mut b, id, url);
+        marks.push(id);
+    }
+    b.open_launcher("https://b2.example/", u("https://b2.example/"), false, 1);
+    let (y, _) = b.split_new(SplitOrientation::Columns, 2);
+    let y = y.unwrap();
+    b.navigate_input(y, "https://other.example/", 3).unwrap();
+    webkit_load(&mut b, y, "https://other.example/");
+    // The new half sits between b2's tab and b3's.
+    let order: Vec<TabId> = b.view().tabs.iter().map(|t| t.id).collect();
+    assert_eq!(order, vec![marks[0], marks[1], y, marks[2]]);
+    let out = b.close(y, 4);
+    assert_eq!(b.active(), Some(marks[1]));
+    assert!(out.contains(&Effect::ShowView { tab: marks[1], pane: Pane::Full }));
+    assert!(!out.iter().any(|e| matches!(e, Effect::ShowView { tab, .. } if *tab == marks[2])));
+}
+
+#[test]
 fn several_pairs_and_repairing() {
     let mut b = browser(8);
     let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
