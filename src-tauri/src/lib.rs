@@ -154,13 +154,20 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     ])
 }
 
-/// Builds the core with the device's memory budget and OS policy.
+/// Builds the core with the device's memory budget and OS policy. Macs keep
+/// more pages live, for longer (`MemoryBudget::for_mac`).
 pub fn make_browser(os_support: OsSupport, physical_memory: u64) -> Browser {
-    Browser::new(MemoryBudget::for_physical_memory(physical_memory), os_support)
+    let budget = if cfg!(target_os = "macos") {
+        MemoryBudget::for_mac(physical_memory)
+    } else {
+        MemoryBudget::for_physical_memory(physical_memory)
+    };
+    Browser::new(budget, os_support)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    state::timing::launched();
     register(tauri::Builder::default())
         .setup(|app| {
             setup(app)?;
@@ -393,6 +400,8 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     if os_support.allows_browsing() {
         adblock::rebuild(&shared, None);
     }
+
+    state::timing::first(&shared, "setup finished");
 
     // Background-tab TTL discards.
     let ticker = shared.clone();

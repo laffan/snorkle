@@ -192,20 +192,42 @@ impl ContentHost {
         let holes = crate::sanitize_holes(&holes, b.size.width, b.size.height);
         // The cut-outs glide (with the frames) only between sets of the
         // same shape; e.g. the sidebar's pop-over and toggle tab, which the
-        // chrome always reports, on- or off-screen.
+        // chrome always reports, on- or off-screen. Each view is masked only
+        // with the holes over it (`crate::holes_over`, 2026-11-23), so for a
+        // slide every view first gets all the old holes (nothing visible
+        // changes: the extra ones lie beside it), glides to all the new ones,
+        // and is cut back to the holes over it when the slide ends.
         let glide = animate.filter(|_| holes.len() == self.holes.borrow().len());
+        if glide.is_some() {
+            let old = self.holes.borrow().clone();
+            for v in self.views.values() {
+                apply_mask(&v.container, &old, None);
+            }
+        }
         *self.holes.borrow_mut() = holes;
         let grew = self.content_frame().size.width > before + 0.5;
         let moves: Vec<(Retained<UIView>, CGRect, f64)> =
             self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()), v.scale.get())).collect();
         if let Some(lag) = animate {
             let holes = self.holes.borrow().clone();
+            let after = (moves.clone(), holes.clone());
             let block = RcBlock::new(move || {
                 for (view, frame, scale) in &moves {
                     place_view(view, *frame, &holes, glide, *scale);
                 }
             });
-            UIView::animateWithDuration_animations((GLIDE_SECONDS - lag).max(0.05), &block, self.mtm);
+            let done = RcBlock::new(move |_finished: Bool| {
+                let (moves, holes) = &after;
+                for (view, frame, _) in moves {
+                    apply_mask(view, &crate::holes_over(holes, rect_tuple(*frame)), None);
+                }
+            });
+            UIView::animateWithDuration_animations_completion(
+                (GLIDE_SECONDS - lag).max(0.05),
+                &block,
+                Some(&done),
+                self.mtm,
+            );
         } else {
             for (view, frame, scale) in &moves {
                 self.place(view, *frame, *scale);
@@ -223,8 +245,8 @@ impl ContentHost {
     }
 
     /// Sets a container's frame (and its web view's, scaled by `scale`)
-    /// and cuts the holes out of it.
+    /// and cuts the holes over it out of it.
     pub(super) fn place(&self, view: &UIView, frame: CGRect, scale: f64) {
-        place_view(view, frame, &self.holes.borrow(), None, scale);
+        place_view(view, frame, &crate::holes_over(&self.holes.borrow(), rect_tuple(frame)), None, scale);
     }
 }

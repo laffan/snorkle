@@ -46,6 +46,7 @@ impl ContentHost {
         )];
 
         let monitors = keys::install(mtm, &window, &root, events.clone());
+        let pressure = pressure::watch(events.clone());
         let holes = Holes::default();
         let backdrop = Container::new(mtm, None, holes.clone());
         if let Some(layer) = backdrop.layer() {
@@ -81,6 +82,7 @@ impl ContentHost {
             sharing: None,
             z: Cell::new(0),
             _monitors: monitors,
+            _pressure: pressure,
         }
     }
 
@@ -155,9 +157,12 @@ impl ContentHost {
     /// host for their meaning), the holes, and whether to animate (seconds
     /// since the chrome began its slide).
     ///
-    /// The window's close, minimise and zoom buttons sit in a strip at the
-    /// top of the docked sidebar; they are hidden while it is not docked
-    /// (`left` is 0), so they never float over a page.
+    /// Each page view is masked only with the holes over it
+    /// (`crate::holes_over`). A slide animates the mask's path, which needs
+    /// the same set of holes before and after, so for a slide every view
+    /// first gets all the old holes (no visible change: the extra ones lie
+    /// beside it), glides to all the new ones, and is cut back to the holes
+    /// over it once the slide has ended.
     pub fn set_insets(&mut self, top: f64, left: f64, right: f64, bottom: f64, holes: Vec<Hole>, animate: Option<f64>) {
         self.top.set(top);
         self.left.set(left);
@@ -166,6 +171,12 @@ impl ContentHost {
         let b = self.root.bounds().size;
         let holes = crate::sanitize_holes(&holes, b.width, b.height);
         let glide = animate.filter(|_| holes.len() == self.holes.borrow().len());
+        if glide.is_some() {
+            let old = self.holes.borrow().clone();
+            for v in self.views.values() {
+                views::apply_mask(&v.container, &old, None);
+            }
+        }
         *self.holes.borrow_mut() = holes;
         let moves: Vec<(Retained<Container>, Tl)> =
             self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()))).collect();
@@ -173,6 +184,7 @@ impl ContentHost {
         match animate {
             Some(lag) => {
                 let holes = self.holes.borrow().clone();
+                let after = (moves.clone(), holes.clone());
                 let duration = (GLIDE_SECONDS - lag).max(0.05);
                 let changes = RcBlock::new(move |ctx: NonNull<NSAnimationContext>| {
                     let ctx = unsafe { ctx.as_ref() };
@@ -187,7 +199,14 @@ impl ContentHost {
                         views::apply_mask(view, &holes, glide);
                     }
                 });
-                NSAnimationContext::runAnimationGroup_completionHandler(&changes, None);
+                // Once the slide has ended: only the holes over each view.
+                let done = RcBlock::new(move || {
+                    let (moves, holes) = &after;
+                    for (view, frame) in moves {
+                        views::apply_mask(view, &crate::holes_over(holes, (frame.x, frame.y, frame.w, frame.h)), None);
+                    }
+                });
+                NSAnimationContext::runAnimationGroup_completionHandler(&changes, Some(&done));
             }
             None => {
                 for (view, frame) in &moves {
@@ -198,10 +217,10 @@ impl ContentHost {
         self.sync_backdrop();
     }
 
-    /// Sets a container's frame and cuts the holes out of it.
+    /// Sets a container's frame and cuts the holes over it out of it.
     pub(super) fn place(&self, view: &Container, frame: Tl) {
         view.ivars().placed.set(frame);
         view.setFrame(frame.ns(self.height()));
-        views::apply_mask(view, &self.holes.borrow(), None);
+        views::apply_mask(view, &crate::holes_over(&self.holes.borrow(), (frame.x, frame.y, frame.w, frame.h)), None);
     }
 }

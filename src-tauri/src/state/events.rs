@@ -75,9 +75,12 @@ impl ContentEvents for Events {
         self.apply(|b| b.on_close_requested(tab, now_ms()));
     }
     fn provisional_start(&self, tab: TabId) {
+        timing::stage(&self.shared, tab, "load started", false);
         self.apply(|b| b.on_provisional_start(tab));
     }
     fn commit(&self, tab: TabId, url: Url) {
+        timing::first(&self.shared, "first page committed");
+        timing::stage(&self.shared, tab, "committed", false);
         self.apply(|b| b.on_commit(tab, url));
     }
     fn finish(&self, tab: TabId) {
@@ -88,6 +91,7 @@ impl ContentEvents for Events {
             let skip = t.is_none_or(|t| t.is_private() || t.notice.is_some()) || b.shows_offline_copy(tab);
             (b.landing(tab), page, skip)
         };
+        timing::stage(&self.shared, tab, "finished", true);
         self.apply(|b| b.on_finish(tab));
         if !skip {
             self.save_offline_copy(tab, landing, page.clone());
@@ -100,6 +104,7 @@ impl ContentEvents for Events {
         let landing = self.shared.browser().landing(tab);
         let offline = provisional && kind == NavErrorKind::Network;
         let url = failing_url.clone();
+        timing::stage(&self.shared, tab, "failed", true);
         self.apply(|b| b.on_fail(tab, provisional, kind, failing_url, &message));
         if offline {
             if let Some(url) = url {

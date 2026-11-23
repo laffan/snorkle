@@ -30,6 +30,7 @@ use snorkle_core::Url;
 mod events;
 mod host;
 mod shared;
+pub mod timing;
 mod worker;
 
 pub use events::install_host;

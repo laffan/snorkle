@@ -34,6 +34,7 @@ mod favicon;
 mod keys;
 mod layout;
 mod pages;
+mod pressure;
 mod effects;
 mod views;
 
@@ -145,6 +146,8 @@ pub struct ContentHost {
     /// Stacking order of the containers (a higher value is in front).
     z: Cell<u64>,
     _monitors: keys::Monitors,
+    /// Memory pressure (macOS has no memory-warning notification).
+    _pressure: pressure::Pressure,
 }
 
 thread_local! {

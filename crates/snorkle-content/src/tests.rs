@@ -148,6 +148,26 @@ fn arrow_shortcuts_yield_to_text_editing() {
 }
 
 #[test]
+fn only_holes_over_a_view_mask_it() {
+    let hole = |x: f64, y: f64, w: f64, h: f64| Hole { x, y, w, h, r: 0.0, corners: 0 };
+    let pill = hole(400.0, 700.0, 500.0, 50.0);
+    let sidebar = hole(-1.0, -1.0, 265.0, 802.0);
+    let page = (264.0, 0.0, 1016.0, 800.0);
+    // The attached sidebar's hole lies beside the page (touching it at most).
+    assert_eq!(holes_over(&[pill, sidebar], page), vec![pill]);
+    assert!(holes_over(&[sidebar], page).is_empty(), "no mask at all");
+    // A flyout over the page does cut into it.
+    let fly = hole(-1.0, 19.0, 300.0, 762.0);
+    assert_eq!(holes_over(&[fly], page), vec![fly]);
+    // A split pane only gets the holes over its own half.
+    let left = (264.0, 0.0, 504.0, 800.0);
+    let right = (776.0, 0.0, 504.0, 800.0);
+    let toast = hole(300.0, 600.0, 200.0, 30.0);
+    assert_eq!(holes_over(&[toast], left), vec![toast]);
+    assert!(holes_over(&[toast], right).is_empty());
+}
+
+#[test]
 fn clip_rects_are_cut_to_the_view() {
     // A page 1,000 CSS px wide in a view 500 pt wide: half the size.
     assert_eq!(clip_rect((100.0, 50.0, 200.0, 100.0), 1000.0, (500.0, 400.0)), Some((50.0, 25.0, 100.0, 50.0)));

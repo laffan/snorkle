@@ -45,7 +45,7 @@ objc2-web-kit = { version = "=0.3.2", features = [
   "WKFindConfiguration", "WKFindResult", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences",
   "WKSecurityOrigin", "WKUIDelegate", "WKUserContentController", "WKWebViewConfiguration",
   "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
-  "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences", "WKDownload", "WKDownloadDelegate",
+  "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences", "WKDownload", "WKDownloadDelegate", "WKProcessPool",
 ] }
 
 # macOS: the same objc2 crates at the same versions (wry resolves them for
@@ -78,4 +78,5 @@ objc2-web-kit = { version = "=0.3.2", features = [
   "WKSecurityOrigin", "WKUIDelegate", "WKUserContentController", "WKWebViewConfiguration",
   "WKUserScript", "WKContentWorld", "WKScriptMessage", "WKScriptMessageHandler", "WKWebsiteDataRecord", "WKSnapshotConfiguration",
   "WKWebsiteDataStore", "WKWindowFeatures", "WKWebpagePreferences", "WKWebView", "WKDownload", "WKDownloadDelegate",
+  "WKProcessPool",
 ] }

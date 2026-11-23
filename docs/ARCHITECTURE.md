@@ -66,7 +66,7 @@ Platform mapping:
 | `UIRefreshControl` | none (no pull to refresh) |
 | Page scale by view transform | `WKWebView.pageZoom`, which on macOS reflows the page in a wider viewport, as Safari's zoom does |
 | Share sheet, Files export, `UIReferenceLibraryViewController` | `NSSharingServicePicker`, `NSSavePanel` (window sheet), `showDefinitionForAttributedString:atPoint:` (Look Up) |
-| Memory warning, did-enter-background | No memory warning; on resigning active the core ticks and the session is written; on quit (`RunEvent::Exit`) the session is written synchronously (`Shared::flush_blocking`) |
+| Memory warning, did-enter-background | libdispatch's memory-pressure source (warning or critical; 2026-11-23, `macos/pressure.rs`); on resigning active the core ticks and the session is written; on quit (`RunEvent::Exit`) the session is written synchronously (`Shared::flush_blocking`) |
 | OS version gate (`os::check`) | Safari's version (`/Applications/Safari.app`), since WebKit updates with Safari on older macOS too (`os::check_macos_safari`, minimum 26.0, newest known 27.2); it is also the version in the user agent |
 | `overrideUserInterfaceStyle` | `NSAppearance` (window; content views in dark pages mode) |
 | Keychain, `WhenUnlockedThisDeviceOnly` | The data-protection keychain with the same class when the build is signed with an application identifier; otherwise the login keychain (`webkit/keychain.rs`) |
@@ -166,7 +166,8 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 - States are Active, then Background (live, hidden; WebKit `inactiveSchedulingPolicy = .suspend`),
   then Discarded (no view; `interactionState` kept in memory so back/forward and scroll survive).
 - Budget is by physical RAM: <4 GB: 2 live views, <6 GB: 3, <8 GB: 4, <16 GB: 6, otherwise 8.
-  Background views idle for 10 min are discarded. A memory warning leaves only the active view.
+  Background views idle for 10 min are discarded. On a Mac (2026-11-23, `MemoryBudget::for_mac`):
+  <8 GB: 6, <16 GB: 12, <32 GB: 20, otherwise 30, and 30 min, with discards on memory pressure. A memory warning leaves only the active view.
   These are **targets, not measured values** (see `docs/PERFORMANCE.md`).
 - Heavy work stays off the main thread: blocklist parsing and rule JSON on a background thread;
   WebKit compiles the rule list in its own process; disk writes on a storage thread with

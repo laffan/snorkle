@@ -5,6 +5,7 @@
 
 function render() {
   if (!state) return;
+  const started = performance.now();
   const tab = activeTab();
   barAttached = !!(tab && tab.url_bar_attached);
   document.body.classList.toggle('bar-attached', barAttached);
@@ -26,6 +27,9 @@ function render() {
   notebookTrack();
   if (capture) renderCapture();
   reportLayout();
+  // Timing (Menu → Console, 2026-11-23): slow renders only.
+  const ms = performance.now() - started;
+  if (ms >= 4) chromeLog('debug', `timing: chrome render took ${ms.toFixed(1)} ms (${state.tabs.length} tabs)`);
 }
 
 function renderOs() {

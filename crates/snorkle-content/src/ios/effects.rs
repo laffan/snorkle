@@ -153,7 +153,7 @@ impl ContentHost {
         web.setFrame(CGRect::new(CGPoint::new(0.0, 0.0), frame.size));
 
         container.addSubview(&web);
-        apply_mask(&container, &self.holes.borrow(), None);
+        apply_mask(&container, &crate::holes_over(&self.holes.borrow(), rect_tuple(frame)), None);
         let view = self.injections.view_for(tab);
         set_dark(&web, view.dark, view.night);
         self.root.addSubview(&container);

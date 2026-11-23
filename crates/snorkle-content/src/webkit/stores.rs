@@ -16,6 +16,12 @@ use objc2_web_kit::{
 
 use crate::{DataKind, CONTENT_VIEW_SPEC};
 
+thread_local! {
+    /// The process pool all page views share (main thread only).
+    #[allow(deprecated)]
+    static SHARED_POOL: std::cell::OnceCell<Retained<objc2_web_kit::WKProcessPool>> = const { std::cell::OnceCell::new() };
+}
+
 /// A new configuration for a content web view in `store`, set up from
 /// `CONTENT_VIEW_SPEC`. No user scripts, message handlers or URL scheme
 /// handlers: injection (`injection.rs`) and rule lists (`rules.rs`) are
@@ -30,6 +36,20 @@ pub unsafe fn content_configuration(
     let spec = &CONTENT_VIEW_SPEC;
     let config = WKWebViewConfiguration::new(mtm);
     config.setWebsiteDataStore(store);
+    // One process pool for every page view (2026-11-23). Left to itself,
+    // each configuration gets a pool of its own, and each new tab's web
+    // process started cold before its page could begin; a shared pool lets
+    // WebKit have the next process ready. Search (a WebKit browser for the
+    // Mac) measured Return or a bookmark to load start at 41-59 ms without
+    // and 9-10 ms with it on macOS 26. Apple's headers call the class
+    // deprecated ("no longer has any effect"); setting it costs nothing if
+    // so. To be measured (docs/PERFORMANCE.md). Data stores stay separate:
+    // a pool is not a profile.
+    #[allow(deprecated)]
+    SHARED_POOL.with(|pool| {
+        let pool = pool.get_or_init(|| objc2_web_kit::WKProcessPool::new(mtm));
+        config.setProcessPool(pool);
+    });
 
     let prefs = config.preferences();
     prefs.setJavaScriptCanOpenWindowsAutomatically(spec.javascript_can_open_windows_automatically);

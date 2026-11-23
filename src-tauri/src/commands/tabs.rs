@@ -5,11 +5,13 @@ use super::*;
 
 #[tauri::command]
 pub fn get_state(s: S<'_>) -> ChromeState {
+    crate::state::timing::first(&s, "chrome ready (asked for its state)");
     s.view()
 }
 
 #[tauri::command]
 pub fn navigate(s: S<'_>, tab: u64, input: String) -> Result<(), String> {
+    crate::state::timing::request(TabId(tab), "load");
     let result = s.browser().navigate_input(TabId(tab), &input, now_ms());
     match result {
         Ok(effects) => {
@@ -63,7 +65,20 @@ pub fn close_tab(s: S<'_>, tab: u64) {
 
 #[tauri::command]
 pub fn activate_tab(s: S<'_>, tab: u64) {
-    with_browser(&s, |b| b.activate(TabId(tab), now_ms()));
+    use crate::state::timing;
+    let id = TabId(tab);
+    let start = std::time::Instant::now();
+    let live = s.browser().tab(id).map(|t| t.life == snorkle_core::tabs::Life::Live);
+    with_browser(&s, |b| b.activate(id, now_ms()));
+    match live {
+        Some(true) => timing::took(&s, id, "switching to", start),
+        Some(false) => {
+            // A dropped page comes back: its load is timed too.
+            timing::request(id, "restore");
+            timing::took(&s, id, "switching to (restoring)", start);
+        }
+        None => {}
+    }
 }
 
 #[tauri::command]

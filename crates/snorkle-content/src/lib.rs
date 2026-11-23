@@ -454,6 +454,17 @@ impl Hole {
 /// Most holes the chrome may cut at once.
 pub const MAX_HOLES: usize = 8;
 
+/// The holes that cut into a view placed at `frame` (x, y, width, height,
+/// window points from the top left). A page view is masked only where
+/// chrome floats over it (2026-11-23): a hole beside it changes none of its
+/// pixels, and any mask makes Core Animation draw the whole view offscreen
+/// and composite it again on every frame of a scroll. Holes that only
+/// touch its edge do not count.
+pub fn holes_over(holes: &[Hole], frame: (f64, f64, f64, f64)) -> Vec<Hole> {
+    let (x, y, w, h) = frame;
+    holes.iter().filter(|o| o.x < x + w && o.x + o.w > x && o.y < y + h && o.y + o.h > y).copied().collect()
+}
+
 /// Validates holes reported by the chrome: finite, within reach of a
 /// `width` × `height` window (a hole may wait just off-screen, e.g. the
 /// hidden sidebar pop-over's, so it can slide in), non-empty, at most

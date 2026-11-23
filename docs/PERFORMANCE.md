@@ -7,9 +7,12 @@ procedure. Fill in the results tables from real devices; do not quote the target
 
 | Item | Target | Where it is set |
 |---|---|---|
-| Live content web views | by physical RAM: <4 GB 2 · <6 GB 3 · <8 GB 4 · <16 GB 6 · ≥16 GB 8 | `tabs::MemoryBudget::for_physical_memory` |
-| Background live-view TTL | 10 min, then discard | `MemoryBudget::DEFAULT_TTL_MS` |
-| On memory warning | keep only the active view | `Browser::on_memory_warning` |
+| Live content web views (iPad) | by physical RAM: <4 GB 2 · <6 GB 3 · <8 GB 4 · <16 GB 6 · ≥16 GB 8 | `tabs::MemoryBudget::for_physical_memory` |
+| Live content web views (Mac, 2026-11-23) | by physical RAM: <8 GB 6 · <16 GB 12 · <32 GB 20 · ≥32 GB 30 | `MemoryBudget::for_mac` |
+| Background live-view TTL | iPad 10 min, Mac 30 min, then discard | `MemoryBudget::DEFAULT_TTL_MS`, `MAC_TTL_MS` |
+| On memory warning | keep only the active view (Mac: libdispatch's memory-pressure source, warning or critical) | `Browser::on_memory_warning`, `macos/pressure.rs` |
+| Page masks | only the holes over each page view; none when nothing floats over it | `snorkle_content::holes_over` |
+| Web processes | one shared `WKProcessPool` for page views | `webkit/stores.rs` |
 | WebContent crash | auto-reload ≤ 2 per 60 s, then notice | `browser/mod.rs` `MAX_CRASH_RELOADS` |
 | `decidePolicyForNavigationAction` cost | pure function, no I/O; target < 50 µs on device | `policy.rs` |
 | Chrome state pushes | coalesced; progress in 5 % steps | `Browser::on_progress` |
@@ -50,6 +53,20 @@ processes; a sleeping tab waking in 0.2–0.25 s.
 | 8 | Launch: the chrome page loads about 8,000 lines of script (`chrome.js` 5,300, `notebook.js` 2,700) and makes about 20 calls before it is complete; content-blocking lookup and session restore run alongside. Unmeasured. | 320 ms to the first window; its changelog shows launch work moved out of the way (a bookmarks import had held the window 230 ms). | Time to the first usable window. | Load `notebook.js` when the notebook opens; defer downloads, site scripts, AI status and the notebook's data until after the first paint. Measure. |
 | 9 | WebKit's default: page animations near 60 fps on 120 Hz screens. | The same by default; Settings offers 120 Hz always or on power (WebKit's `PreferPageRenderingUpdatesNear60FPSEnabled` flag, through private SPI). | Smoothness of page animations, at about 1.5× the energy on an animated page (Search's note). Not trackpad scrolling. | Optional setting, later. |
 | 10 | Favicons of new sites are fetched with a hidden web view per site (F1). | Native fetch. | A web process per new site at launch. | Low priority; F1 was a security choice. |
+
+### Done (2026-11-23, batch 1; none measured yet)
+
+- Masks only where chrome floats over a page (finding 2, first step): `holes_over`. With the
+  floating pill the page under it is still masked; with the attached bar and the attached sidebar
+  no page is.
+- One shared process pool (finding 4).
+- Mac: memory pressure discards pages (libdispatch), so the Mac keeps 6–30 pages live by RAM and
+  for 30 minutes (finding 1). Not done: a picture of a dropped page shown while it reloads.
+- Timings in Menu → Console (with Record on): `timing: setup finished / chrome ready / first page
+  committed … ms after launch`; `timing: load in tab N: load started / committed / finished after
+  … ms` (from an address typed or chosen); `timing: restore in tab N …` (a dropped page coming
+  back); `timing: switching to tab N took … ms in the app`; `timing: chrome render took … ms`
+  (renders of 4 ms or more).
 
 ### Measuring it (needed before and after each change)
 

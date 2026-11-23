@@ -528,7 +528,8 @@ The WebKit side is the iPadOS code, now shared (`webkit/`), so items 6–7, 9–
     approves can read the key, and rebuilt binaries may trigger an access prompt. Signed builds
     with an application identifier should use the data-protection keychain; check which one is
     used (Keychain Access shows login-keychain items).
-84. **[gap] No memory pressure handling** on macOS (no memory-warning notification is observed;
+84. **[gap → done 2026-11-23] No memory pressure handling** on macOS (now: libdispatch's
+    memory-pressure source, `macos/pressure.rs`, passes warning and critical on as a memory warning) (no memory-warning notification is observed;
     a `DispatchSource` memory-pressure source would be the equivalent). The live-view budget is by
     physical RAM as on the iPad.
 85. **[gap] No pull to refresh** on macOS (no `UIRefreshControl`); back/forward swipes on the
@@ -1253,3 +1254,22 @@ The live sites were not reachable or not signed in from this environment.
   follow-up, ⌘⇧\) leave the summary waiting for its Summarize button. The summary is no longer
   per tab: on another tab the panel asks "Summarize …?" instead of opening only where it was
   turned on. Summarize Again is a circular arrow now (the sparkle is the AI button's).
+
+## Performance batch 1 (2026-11-23)
+
+- **[verify] Masks.** Each page view is masked only with the holes over it (`holes_over`); a slide
+  first restores all the old holes, glides, and cuts back when it ends (both platforms). Not run on
+  a device: check that the sidebar's slide still moves the cut-outs with it, and Instruments'
+  offscreen-rendering count while scrolling with the attached bar (should be none).
+- **[verify] Shared process pool.** Apple's headers say `WKProcessPool` "no longer has any effect";
+  Search measured 41–59 ms → 9–10 ms to load start with one on macOS 26. Compare `timing: load …
+  load started after … ms` with and without.
+- **[verify] Memory pressure on macOS.** `DISPATCH_SOURCE_TYPE_MEMORYPRESSURE` on the main queue;
+  warning and critical both keep only the shown pages live. Try with Xcode's memory pressure
+  simulation (`sudo memory_pressure -l warn`) and watch Menu → Console.
+- **[decide] The Mac's budget**: 6 / 12 / 20 / 30 live pages for < 8 / < 16 / < 32 / ≥ 32 GB, 30
+  minutes in the background. Search has no count limit at all.
+- **[gap] A picture while a dropped page reloads** (as Search shows) is not done: the host would
+  keep a snapshot of each page it hides and cover the reloading view with it until the load
+  commits.
+

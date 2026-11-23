@@ -303,6 +303,11 @@ fn place_view(view: &UIView, frame: CGRect, holes: &[Hole], glide: Option<f64>, 
     apply_mask(view, holes, glide);
 }
 
+/// A frame as `(x, y, width, height)`, for `crate::holes_over`.
+fn rect_tuple(r: CGRect) -> (f64, f64, f64, f64) {
+    (r.origin.x, r.origin.y, r.size.width, r.size.height)
+}
+
 /// Masks `view` (a direct subview of the root view) so the holes are not
 /// drawn; no mask when there are none. Holes never overlap
 /// (`sanitize_holes` merges them), as the even-odd fill requires.

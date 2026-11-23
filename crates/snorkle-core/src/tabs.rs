@@ -68,6 +68,27 @@ impl MemoryBudget {
         };
         MemoryBudget { max_live, background_ttl_ms: Self::DEFAULT_TTL_MS }
     }
+
+    /// How long a Mac keeps a background page live (2026-11-23): half an
+    /// hour, as Search (a WebKit browser for the Mac) does, instead of the
+    /// iPad's ten minutes.
+    pub const MAC_TTL_MS: u64 = 30 * 60 * 1000;
+
+    /// The Mac's budget (2026-11-23): many more live pages than an iPad,
+    /// since macOS swaps and compresses memory instead of ending apps, and
+    /// the host discards on the system's memory-pressure signal
+    /// (`macos/pressure.rs`). Going back to a live page is instant; a
+    /// discarded one reloads. Still a cap, for Macs without much memory.
+    pub fn for_mac(bytes: u64) -> Self {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        let max_live = match bytes {
+            b if b < 8 * GIB => 6,
+            b if b < 16 * GIB => 12,
+            b if b < 32 * GIB => 20,
+            _ => 30,
+        };
+        MemoryBudget { max_live, background_ttl_ms: Self::MAC_TTL_MS }
+    }
 }
 
 /// HTTPS-first bookkeeping for the current main-frame navigation chain.
@@ -307,6 +328,12 @@ mod tests {
         assert_eq!(MemoryBudget::for_physical_memory(3 * GIB).max_live, 2);
         assert_eq!(MemoryBudget::for_physical_memory(8 * GIB).max_live, 6);
         assert_eq!(MemoryBudget::for_physical_memory(16 * GIB).max_live, 8);
+        // The Mac keeps more pages, longer (memory pressure discards).
+        assert_eq!(MemoryBudget::for_mac(8 * GIB).max_live, 12);
+        assert_eq!(MemoryBudget::for_mac(16 * GIB).max_live, 20);
+        assert_eq!(MemoryBudget::for_mac(36 * GIB).max_live, 30);
+        assert_eq!(MemoryBudget::for_mac(16 * GIB).background_ttl_ms, 30 * 60 * 1000);
+        assert!(MemoryBudget::for_mac(4 * GIB).max_live >= MemoryBudget::for_physical_memory(4 * GIB).max_live);
     }
 
     #[test]
