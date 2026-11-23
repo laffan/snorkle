@@ -54,7 +54,7 @@
   background: transparent; color: var(--nb-dim); cursor: pointer;
 }
 .notepad-mode svg { width: 14px; height: 14px; }
-.notepad-mode.on { background: var(--nb-panel); color: var(--nb-text); box-shadow: 0 1px 3px rgb(0 0 0 / 0.18); }
+.notepad-mode.on { background: var(--nb-panel); color: var(--nb-text); }
 .notepad-mode-dot {
   width: 10px; height: 10px; border-radius: 50%; background: var(--swatch, var(--notepad-ink));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--nb-dim) 45%, transparent);
@@ -105,7 +105,7 @@
   position: absolute; display: inline-flex; align-items: flex-start; gap: 5px;
   width: max-content; max-width: 260px; padding: 4px 9px 4px 7px; border: none; border-radius: 6px;
   background: var(--bg); color: var(--nb-text); font-size: 12px; line-height: 1.4; text-align: left;
-  touch-action: none; cursor: pointer; box-shadow: 0 1px 3px rgb(0 0 0 / 0.14);
+  touch-action: none; cursor: pointer;
   -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
 }
 .notepad-link > svg { flex-shrink: 0; margin-top: 2px; color: #ff5f57; }
@@ -131,7 +131,6 @@
 }
 .notepad-selection-menu, .notepad-link-menu {
   padding: 3px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-panel);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 0.22);
 }
 .notepad-selection-menu { position: absolute; bottom: calc(100% + 6px); left: 0; pointer-events: auto; }
 .notepad-link-menu { position: absolute; z-index: 4; }
@@ -159,7 +158,7 @@
 .notepad-confirm {
   position: absolute; z-index: 4; left: 6px; bottom: 42px; display: flex; align-items: center; gap: 6px;
   padding: 6px 6px 6px 10px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-panel);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 0.22); font-size: 12px; white-space: nowrap;
+  font-size: 12px; white-space: nowrap;
 }
 .notepad-main.with-map .notepad-confirm { left: 66px; }
 .notepad-confirm button { padding: 3px 10px; border: none; border-radius: 6px; font-size: 12px; }

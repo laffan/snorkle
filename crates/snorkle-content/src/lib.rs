@@ -46,14 +46,50 @@ pub use platform::{dispatch_main, os_version, physical_memory, webkit_version, C
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 pub use webkit::exclude_from_backup;
 #[cfg(any(target_os = "ios", target_os = "macos"))]
-pub use webkit::{http, keychain, ocr};
+pub use webkit::{http, keychain, ocr, passkeys};
 
 #[cfg(not(any(target_os = "ios", target_os = "macos")))]
 mod stub;
 #[cfg(not(any(target_os = "ios", target_os = "macos")))]
 pub use stub::{
-    dispatch_main, exclude_from_backup, http, keychain, ocr, os_version, physical_memory, webkit_version, ContentHost,
+    dispatch_main, exclude_from_backup, http, keychain, ocr, os_version, passkeys, physical_memory, webkit_version,
+    ContentHost,
 };
+
+/// The person's permission for the app to use their passkeys in web pages
+/// (AuthenticationServices' authorization state for browsers;
+/// `passkeys::permission`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PasskeyPermission {
+    Authorized,
+    Denied,
+    NotDetermined,
+    /// The system has no such permission (older OS, no AuthenticationServices).
+    Unavailable,
+}
+
+impl PasskeyPermission {
+    /// From `ASAuthorizationWebBrowserPublicKeyCredentialManagerAuthorizationState`
+    /// (authorized 0, denied 1, not determined 2).
+    pub fn from_raw(v: isize) -> Self {
+        match v {
+            0 => PasskeyPermission::Authorized,
+            1 => PasskeyPermission::Denied,
+            2 => PasskeyPermission::NotDetermined,
+            _ => PasskeyPermission::Unavailable,
+        }
+    }
+
+    /// Name passed to the chrome.
+    pub fn name(self) -> &'static str {
+        match self {
+            PasskeyPermission::Authorized => "authorized",
+            PasskeyPermission::Denied => "denied",
+            PasskeyPermission::NotDetermined => "not_determined",
+            PasskeyPermission::Unavailable => "unavailable",
+        }
+    }
+}
 
 /// Width of the strip along the window's left edge where the pointer is
 /// reported (the edge tab is 14 pt wide and shows within 100 pt of it).
@@ -170,6 +206,15 @@ pub enum Shortcut {
     /// the bottom of the page (⌘↓), for the current tab.
     DetachUrlBar,
     AttachUrlBar,
+    /// Night vision on or off (⌘⇧R, 2026-11-23): the same setting as
+    /// Settings → General → Appearance and the eye at the sidebar's foot.
+    NightVision,
+    /// Show or hide the history sidebar (⌘⇧H, 2026-11-23).
+    History,
+    /// Quit the app (⌘Q, 2026-11-23; macOS only, see
+    /// [`ShortcutDef::available`]). Handled natively, never sent to the
+    /// chrome.
+    Quit,
 }
 
 /// Arrow keys a binding may use, by name (the other keys are single
@@ -256,7 +301,24 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
     def("forward", ShortcutMenu::View, "Forward", "right", 0, Shortcut::Forward),
     def("detach_bar", ShortcutMenu::View, "Detach URL Bar", "up", 0, Shortcut::DetachUrlBar),
     def("attach_bar", ShortcutMenu::View, "Attach URL Bar", "down", 0, Shortcut::AttachUrlBar),
+    def("night_vision", ShortcutMenu::View, "Night Vision", "r", MOD_SHIFT, Shortcut::NightVision),
+    def("history", ShortcutMenu::View, "Show or Hide History", "h", MOD_SHIFT, Shortcut::History),
+    def("quit", ShortcutMenu::File, "Quit Snorkle", "q", 0, Shortcut::Quit),
 ];
+
+impl ShortcutDef {
+    /// Whether this shortcut exists on the platform the app runs on. Quit
+    /// is macOS only: iPadOS has no way for an app to quit itself (ending
+    /// the process is what Apple's guidance tells apps not to do; owner
+    /// decision 2026-11-23), so ⌘Q is neither offered nor reserved there.
+    pub const fn available(&self) -> bool {
+        available_on(self.action, cfg!(target_os = "macos"))
+    }
+}
+
+const fn available_on(action: Shortcut, macos: bool) -> bool {
+    !matches!(action, Shortcut::Quit) || macos
+}
 
 /// Where a shortcut appears in the iPadOS menu bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -295,6 +357,9 @@ impl Shortcut {
             Shortcut::Forward => "go_forward".into(),
             Shortcut::DetachUrlBar => "detach_bar".into(),
             Shortcut::AttachUrlBar => "attach_bar".into(),
+            Shortcut::NightVision => "night_vision".into(),
+            Shortcut::History => "history".into(),
+            Shortcut::Quit => "quit".into(),
         }
     }
 }
@@ -325,16 +390,25 @@ pub fn validate_binding(key: &str, mods: u8) -> Option<KeyBinding> {
 /// Applies the user's bindings (`id` → binding) over the defaults: every
 /// shortcut's effective binding, in `SHORTCUTS` order. Unknown ids and
 /// invalid keys are ignored; if two shortcuts would share a key, the
-/// later override is refused (the error names both).
+/// later override is refused (the error names both). Shortcuts this
+/// platform does not have ([`ShortcutDef::available`]) keep their place
+/// but reserve no keys.
 pub fn effective_bindings(overrides: &[(String, String, u8)]) -> Result<Vec<KeyBinding>, String> {
+    bindings_for(overrides, |d| d.available())
+}
+
+fn bindings_for(
+    overrides: &[(String, String, u8)],
+    available: impl Fn(&ShortcutDef) -> bool,
+) -> Result<Vec<KeyBinding>, String> {
     let mut out: Vec<KeyBinding> =
         SHORTCUTS.iter().map(|s| KeyBinding { key: s.key.to_string(), mods: s.mods }).collect();
     for (id, key, mods) in overrides {
         let (Some(i), Some(b)) = (shortcut_index(id), validate_binding(key, *mods)) else { continue };
         out[i] = b;
     }
-    for i in 0..out.len() {
-        if let Some(j) = (0..i).find(|j| out[*j] == out[i]) {
+    for i in (0..out.len()).filter(|i| available(&SHORTCUTS[*i])) {
+        if let Some(j) = (0..i).find(|j| available(&SHORTCUTS[*j]) && out[*j] == out[i]) {
             return Err(format!("“{}” and “{}” use the same keys.", SHORTCUTS[j].title, SHORTCUTS[i].title));
         }
     }
@@ -767,6 +841,39 @@ mod tests {
         ]);
         assert_eq!(ignored.unwrap(), defaults, "unknown ids and invalid keys are ignored");
         assert!(validate_binding("\\", MOD_SHIFT).is_some() && validate_binding(" ", 0).is_none());
+    }
+
+    #[test]
+    fn passkey_permission_from_the_system_enum() {
+        assert_eq!(PasskeyPermission::from_raw(0), PasskeyPermission::Authorized);
+        assert_eq!(PasskeyPermission::from_raw(1), PasskeyPermission::Denied);
+        assert_eq!(PasskeyPermission::from_raw(2), PasskeyPermission::NotDetermined);
+        assert_eq!(PasskeyPermission::from_raw(-1), PasskeyPermission::Unavailable);
+        assert_eq!(PasskeyPermission::from_raw(3).name(), "unavailable");
+        assert_eq!(passkeys::entitled(), None, "no entitlement can be read off macOS");
+    }
+
+    #[test]
+    fn night_vision_history_and_quit_shortcuts() {
+        // Owner request 2026-11-23: ⌘⇧R night vision, ⌘⇧H history, ⌘Q quit.
+        let defaults = effective_bindings(&[]).unwrap();
+        for (id, key, mods, name) in [
+            ("night_vision", "r", MOD_SHIFT, "night_vision"),
+            ("history", "h", MOD_SHIFT, "history"),
+            ("quit", "q", 0, "quit"),
+        ] {
+            let i = shortcut_index(id).unwrap();
+            assert_eq!(defaults[i], KeyBinding { key: key.into(), mods }, "{id}");
+            assert_eq!(SHORTCUTS[i].action.name(), name);
+        }
+        // ⌘⇧R is not Reload (⌘R).
+        assert_ne!(defaults[shortcut_index("reload").unwrap()], defaults[shortcut_index("night_vision").unwrap()]);
+        // Quit is macOS only: elsewhere ⌘Q is free for another shortcut.
+        assert!(available_on(Shortcut::Quit, true) && !available_on(Shortcut::Quit, false));
+        assert!(available_on(Shortcut::NewTab, false));
+        let to_q = [("new_tab".to_string(), "q".to_string(), 0)];
+        assert!(bindings_for(&to_q, |d| available_on(d.action, true)).unwrap_err().contains("Quit Snorkle"));
+        assert!(bindings_for(&to_q, |d| available_on(d.action, false)).is_ok());
     }
 
     #[test]

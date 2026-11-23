@@ -48,7 +48,7 @@ use objc2_app_kit::{
     NSAnimationContext, NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
     NSApplicationDidResignActiveNotification, NSAutoresizingMaskOptions, NSColor, NSImage, NSModalResponseOK,
     NSPasteboard, NSSavePanel, NSSharingServicePicker, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow,
-    NSWindowButton, NSWorkspace,
+    NSWorkspace,
 };
 use objc2_foundation::{
     NSArray, NSAttributedString, NSBundle, NSComparisonResult, NSData, NSError, NSKeyValueObservingOptions,
@@ -323,7 +323,6 @@ impl ContentHost {
         let holes = crate::sanitize_holes(&holes, b.width, b.height);
         let glide = animate.filter(|_| holes.len() == self.holes.borrow().len());
         *self.holes.borrow_mut() = holes;
-        self.set_window_buttons(clamp_inset(left, b.width) > 0.5);
         let moves: Vec<(Retained<Container>, Tl)> =
             self.views.values().map(|v| (v.container.clone(), self.pane_frame(v.pane.get()))).collect();
         let height = self.height();
@@ -353,14 +352,6 @@ impl ContentHost {
             }
         }
         self.sync_backdrop();
-    }
-
-    fn set_window_buttons(&self, shown: bool) {
-        for b in [NSWindowButton::CloseButton, NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton] {
-            if let Some(button) = self.window.standardWindowButton(b) {
-                button.setHidden(!shown);
-            }
-        }
     }
 
     /// Sets a container's frame and cuts the holes out of it.

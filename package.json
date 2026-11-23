@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "tauri": "tauri",
-    "ios:build": "sh scripts/ios-build-deploy.sh"
+    "ios:build": "sh scripts/ios-build-deploy.sh",
+    "macos:passkeys": "sh scripts/macos-passkeys.sh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4"

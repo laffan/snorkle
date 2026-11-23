@@ -129,6 +129,24 @@ fn macos_window_and_bundle() {
 }
 
 #[test]
+fn passkey_entitlement_only_in_the_opt_in_build() {
+    // Apple's passkey entitlement for browsers is restricted: a build
+    // signed with it whose profile lacks it does not launch. The ordinary
+    // build never has it (the exact key list above); only
+    // scripts/macos-passkeys.sh adds it, after checking the profile, for
+    // this app's bundle identifier.
+    let c = conf();
+    let script = fs::read_to_string(root().join("../scripts/macos-passkeys.sh")).unwrap();
+    assert!(script.contains("key=com.apple.developer.web-browser.public-key-credential"));
+    assert!(script.contains(&format!("bundle_id={}", c["identifier"].as_str().unwrap())));
+    assert!(script.contains("read_key \"Entitlements:$key\""), "the profile is checked first");
+    let e = fs::read_to_string(root().join(c["bundle"]["macOS"]["entitlements"].as_str().unwrap())).unwrap();
+    assert!(!e.contains("public-key-credential"));
+    let ios = fs::read_to_string(root().join("ios/Entitlements.plist")).unwrap();
+    assert!(!ios.contains("public-key-credential"), "iPadOS: the default-browser entitlement covers passkeys");
+}
+
+#[test]
 fn macos_plist_keeps_ats_for_app() {
     let plist = fs::read_to_string(root().join("Info.plist")).unwrap();
     assert!(plist.contains("<key>NSAllowsArbitraryLoadsInWebContent</key>"));

@@ -30,7 +30,8 @@ src-tauri               Tauri app: chrome window, commands, capabilities, plist/
 ui                      chrome UI (HTML/CSS/JS, no build step, no packages)
 fuzz                    cargo-fuzz targets (separate workspace, nightly)
 tests/device            on-device probes (IPC isolation, rAF/ProMotion)
-scripts                 check-ios.sh / check-macos.sh (type-checks without Xcode), check-deps.sh
+scripts                 check-ios.sh / check-macos.sh (type-checks without Xcode), check-deps.sh,
+                        macos-passkeys.sh (the macOS build with the passkey entitlement)
 ```
 
 ## Test (any OS)
@@ -54,9 +55,9 @@ Xcode's command-line tools and Rust 1.90+; Safari 26 or later (Safari 27 runs on
 27). The app's minimum macOS is 15.0.
 
 - `npm run tauri dev`: **the browser on macOS**, with the same chrome, pages and features as on the
-  iPad. The window has no title bar: the close, minimise and zoom buttons sit in a strip at the top
-  of the docked sidebar (hidden while the sidebar is hidden or flies out), and that strip drags the
-  window (double-click zooms). Inspect the chrome and the pages from Safari → Develop → *this Mac*
+  iPad. The window has no title bar: the close, minimise and zoom buttons appear only while the
+  pointer is in the window's top-left corner, and a thin strip along the top of the docked sidebar
+  drags the window (double-click zooms). ⌘Q quits. Inspect the chrome and the pages from Safari → Develop → *this Mac*
   (Safari → Settings → Advanced → "Show features for web developers"); the terminal prints
   `[snorkle] policy …` / `effect …` lines for every navigation decision.
 - `npm run tauri build`: an app bundle in `target/release/bundle/macos/`. The bundle
@@ -135,21 +136,33 @@ schemes.
 
 Passkeys and security keys fail in Snorkle today (Google reports `passkey_first_auth_factor_error`).
 This is Apple's rule, not a bug in the app: WebKit handles WebAuthn in `WKWebView` by itself, but
-for a third-party browser it only accepts sites that list the app's own App ID, unless the app
-holds a managed entitlement.
+for a browser other than Safari it only accepts sites that list the app's own App ID, unless the
+app is signed with an entitlement Apple grants on request. Everything else is in place; Settings →
+General → Passkeys shows whether the running build has the entitlement and whether you allowed
+Snorkle to use your passkeys.
 
-- **macOS:** `com.apple.developer.web-browser.public-key-credential` (macOS 13.3+). The developer
-  account's *Account Holder* requests it with Apple's "macOS Browsers Passkeys" form; Apple reviews
-  it against its browser criteria (http/https declared, an address field at launch, pages shown as
-  they are), which Snorkle is built to meet. Once granted: enable it for the App ID, add the key to
-  `src-tauri/macos/Entitlements.plist` (and to the expected keys in
-  `src-tauri/tests/config_hardening.rs`), and build a signed bundle whose provisioning profile
-  carries the capability (`npm run tauri build`; `tauri dev` runs an unsigned binary, where
-  passkeys can never work). The person may then be asked once whether Snorkle may use their
-  passkeys.
-- **iPadOS:** Apple documents the same entitlement for macOS and Mac Catalyst only. On iPadOS the
-  path is assumed to be the default-browser entitlement above (`com.apple.developer.web-browser`);
-  unverified (OPEN_QUESTIONS 101).
+**macOS:** `com.apple.developer.web-browser.public-key-credential` (macOS 13.3+). Steps:
+
+1. The **Account Holder** of an **organization** developer account (an individual membership does
+   not qualify) fills in Apple's "macOS Browsers Passkeys" request form
+   (developer.apple.com/contact/request/macos-browsers-passkeys) for `com.laffan.snorkle`. Apple
+   checks it against its browser criteria (http/https declared, an address field at launch, pages
+   shown as they are), which Snorkle is built to meet; it may ask where to download the app.
+2. Once granted: Certificates, Identifiers & Profiles → Identifiers → the App ID → enable the
+   passkey capability; then Profiles → a **Developer ID** provisioning profile for the App ID, saved
+   as `src-tauri/macos/embedded.provisionprofile` (not committed).
+3. `APPLE_SIGNING_IDENTITY="Developer ID Application: …" npm run macos:passkeys` builds a bundle
+   signed with the entitlement and with the profile embedded (`scripts/macos-passkeys.sh`; it checks
+   the profile first and reports what the app was signed with). `npm run tauri build` and
+   `tauri dev` never carry it: a restricted entitlement without a matching profile stops the app
+   from launching.
+4. At its first launch, that build asks once whether Snorkle may use your passkeys (also Settings →
+   General → Passkeys → Allow).
+
+**iPadOS:** Apple documents the entitlement above for macOS and Mac Catalyst only. An Apple engineer
+on the developer forums says an iOS browser needs only the default-browser entitlement
+(`com.apple.developer.web-browser`, below), with which `WKWebView` supports passkeys; unverified
+(OPEN_QUESTIONS 101).
 
 Until then, use the site's other sign-in method (on Google: "Try another way").
 

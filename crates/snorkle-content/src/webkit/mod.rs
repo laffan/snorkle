@@ -10,6 +10,7 @@ pub mod http;
 pub mod injection;
 pub mod keychain;
 pub mod ocr;
+pub mod passkeys;
 pub mod rules;
 pub mod stores;
 

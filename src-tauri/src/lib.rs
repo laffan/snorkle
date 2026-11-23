@@ -148,6 +148,9 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         notebook::notebook_link_hover,
         notebook::notebook_link_drop,
         commands::set_text_editing,
+        commands::save_page_for_later,
+        commands::passkey_status,
+        commands::request_passkeys,
     ])
 }
 
@@ -356,6 +359,34 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     scripts::apply(&shared, false);
     shared.run(effects);
     open_links(&shared, pending);
+
+    // Passkeys (2026-11-23): a macOS build signed with Apple's passkey
+    // entitlement for browsers asks once, at the first launch, whether
+    // Snorkle may use the person's passkeys, so sign-in pages can use them
+    // without a trip to Settings. Builds without it never ask.
+    #[cfg(target_os = "macos")]
+    {
+        let s = shared.clone();
+        snorkle_content::dispatch_main(move || {
+            use snorkle_content::{passkeys, PasskeyPermission};
+            let entitled = passkeys::entitled() == Some(true);
+            let permission = passkeys::permission();
+            s.log(
+                snorkle_core::console::Level::Info,
+                None,
+                &format!(
+                    "passkeys: entitlement {}, permission {}",
+                    if entitled { "present" } else { "absent" },
+                    permission.name()
+                ),
+            );
+            if entitled && permission == PasskeyPermission::NotDetermined {
+                passkeys::request_permission(Box::new(move |p| {
+                    s.log(snorkle_core::console::Level::Info, None, &format!("passkeys: permission {}", p.name()));
+                }));
+            }
+        });
+    }
 
     // Content blocking: reuses WebKit's compiled lists when unchanged,
     // otherwise converts off the main thread.

@@ -37,7 +37,7 @@ use std::rc::Rc;
 
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, ProtocolObject};
+use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_core_foundation::{CGAffineTransform, CGPoint, CGRect, CGSize};
 use objc2_foundation::{
@@ -153,6 +153,18 @@ pub struct ContentHost {
     chrome: Rc<RefCell<Option<Retained<UIView>>>>,
 }
 
+/// No status bar (owner request 2026-11-23: the sidebar and pages reach
+/// the top of the window). The window's root view controller is tao's,
+/// which keeps the preference (`setPrefersStatusBarHidden:`, as tao's
+/// `WindowExtIOS::set_prefers_status_bar_hidden`); asked again when the app
+/// becomes active, in case the window was not set up yet at launch.
+fn hide_status_bar(root: &UIView) {
+    let Some(vc) = root.window().and_then(|w| w.rootViewController()) else { return };
+    if vc.respondsToSelector(sel!(setPrefersStatusBarHidden:)) {
+        let _: () = unsafe { msg_send![&*vc, setPrefersStatusBarHidden: Bool::YES] };
+    }
+}
+
 impl ContentHost {
     /// # Safety
     /// `root_view` must be a valid `UIView*` (the Tauri window's root view,
@@ -189,11 +201,12 @@ impl ContentHost {
         // ⌘T) are not delivered: give the chrome first-responder status in
         // that case (a page or the chrome that still has it keeps it).
         let chrome: Rc<RefCell<Option<Retained<UIView>>>> = Rc::default();
-        let (ev, ch) = (events.clone(), chrome.clone());
+        let (ev, ch, r) = (events.clone(), chrome.clone(), root.clone());
         let active = RcBlock::new(move |_n: NonNull<NSNotification>| {
             let Some(mtm) = MainThreadMarker::new() else { return };
             let note = menu::ensure_responder(mtm, ch.borrow().as_deref());
             ev.note(note);
+            hide_status_bar(&r);
         });
         observers.push(center.addObserverForName_object_queue_usingBlock(
             Some(UIApplicationDidBecomeActiveNotification),
@@ -213,6 +226,7 @@ impl ContentHost {
         root.addGestureRecognizer(&recognizer);
 
         menu::install(mtm, events.clone());
+        hide_status_bar(&root);
         let holes = keys::Holes::default();
         // A container too, so it also leaves the holes (and their touches) out.
         let backdrop = keys::KeyContainer::new_view(mtm, CGRect::ZERO, events.clone(), holes.clone());

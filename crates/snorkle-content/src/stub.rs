@@ -229,6 +229,23 @@ pub mod ocr {
     }
 }
 
+/// No passkeys off iOS and macOS (the desktop preview shows no pages).
+pub mod passkeys {
+    use crate::PasskeyPermission;
+
+    pub fn entitled() -> Option<bool> {
+        None
+    }
+
+    pub fn permission() -> PasskeyPermission {
+        PasskeyPermission::Unavailable
+    }
+
+    pub fn request_permission(done: Box<dyn FnOnce(PasskeyPermission) + Send>) {
+        done(PasskeyPermission::Unavailable);
+    }
+}
+
 /// In-memory stand-in for the Keychain (desktop preview and tests).
 pub mod keychain {
     use std::collections::HashMap;

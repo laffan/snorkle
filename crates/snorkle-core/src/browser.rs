@@ -1451,6 +1451,26 @@ impl Browser {
         (Some(id), out)
     }
 
+    /// Save for Later from the history sidebar (owner request 2026-11-23):
+    /// a new tab of the default profile at the end of the list, never
+    /// shown, that loads `url` as an address typed in the bar would
+    /// (navigation policy, Settings → Blocked, HTTPS-first). It loads in the
+    /// background within the live-view budget, as a ⌘-clicked link's tab
+    /// does; the caller saves it, which closes it. Only http(s) URLs.
+    pub fn open_in_background(&mut self, url: Url, now: u64) -> (Option<TabId>, Vec<Effect>) {
+        let mut out = Vec::new();
+        if !self.os.allows_browsing() || !matches!(url.scheme(), "http" | "https") {
+            return (None, out);
+        }
+        let id = self.alloc_id();
+        self.tabs.push(Tab::new(id, Profile::Default, now));
+        out.extend(self.navigate_trusted(id, url, now));
+        self.enforce_budget(now, &mut out);
+        self.sync_visibility(&mut out);
+        out.push(Effect::NotifyChrome);
+        (Some(id), out)
+    }
+
     pub fn on_new_window_request(&mut self, opener: TabId, url: &Url, now: u64) -> Vec<Effect> {
         let mut out = Vec::new();
         let Some(op) = self.tab(opener) else { return out };

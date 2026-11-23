@@ -72,14 +72,18 @@ Platform mapping:
 | Keychain, `WhenUnlockedThisDeviceOnly` | The data-protection keychain with the same class when the build is signed with an application identifier; otherwise the login keychain (`webkit/keychain.rs`) |
 
 **Window.** No title bar (`titleBarStyle: Overlay`, hidden title): pages run the full height. The
-close, minimise and zoom buttons sit in a 40 pt strip at the top of the docked sidebar
-(`#titlebar`, `trafficLightPosition` 16, 20) and are hidden while the sidebar is not docked
-(`left` inset 0), so they never float over a page. The strip is a `data-tauri-drag-region`: it
-drags the window and a double-click zooms it, through Tauri's own drag script and two window
-permissions granted to the chrome (`core:window:allow-start-dragging`,
-`core:window:allow-internal-toggle-maximize`). With the sidebar hidden there is no drag area;
-⌘\ shows it. The chrome detects macOS by `navigator.maxTouchPoints == 0` with a Macintosh user
-agent (an iPad reports touch points, also in desktop mode).
+close, minimise and zoom buttons (`trafficLightPosition` 16, 20) are hidden except while the pointer
+is in the window's top-left 96 × 44 pt (`keys::BUTTON_CORNER`, 2026-11-23; the mouse monitor that
+reports the edge pointer shows and hides them), where they sit over the top of the sidebar. Until
+2026-11-23 they sat in a 40 pt strip at the top of the docked sidebar. A 12 pt strip there
+(`#titlebar`, invisible) is a `data-tauri-drag-region`: it drags the window and a double-click
+zooms it, through Tauri's own drag script and two window permissions granted to the chrome
+(`core:window:allow-start-dragging`, `core:window:allow-internal-toggle-maximize`). With the sidebar
+hidden there is no drag area; ⌘\ shows it. ⌘Q quits (a shortcut taken by the key monitor before a
+page could swallow it, then `terminate:` as the menu's Quit; macOS only). The chrome detects macOS
+by `navigator.maxTouchPoints == 0` with a Macintosh user agent (an iPad reports touch points, also
+in desktop mode). On iPadOS the status bar is hidden (2026-11-23; tao's root view controller,
+`setPrefersStatusBarHidden:`), so the sidebar and pages reach the top of the window.
 
 **Data at rest.** macOS has no `NSFileProtectionComplete`; the profile and website data are in the
 user's Library (`~/Library/Application Support/<identifier>` and WebKit's stores), protected by
@@ -259,8 +263,8 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   paused when they start unless pointed at (their `play` events do not leave the shadow tree, so
   each root is listened to).
   Inverted dark pages keep using dark mode's media box, which also covers the players.
-- **Night vision** (2026-11-17; Settings → General → Appearance, a checkbox, and the eye button at
-  the sidebar's foot between the menu and Save for Later, pressed while on): the browser and every
+- **Night vision** (2026-11-17; Settings → General → Appearance, a checkbox, the eye button at
+  the sidebar's foot beside the menu, pressed while on, and ⌘⇧R since 2026-11-23): the browser and every
   page drawn in shades of red only, no blue or green light, for keeping dark-adapted eyes adapted.
   It is `viewmodes::Kind::Night`, stored with the launch modes and set through `set_launch_mode`,
   so a launch's first page already has it; the chrome offers no per-tab exemption. Pages get one
@@ -316,9 +320,12 @@ edge); the address (about 400 pt wide; full
 width in narrow windows), with the share button inside its left end and the copy button inside
 its right end (both hidden while editing, and when the field is too narrow for them beside the
 address);
-then a ⋯ button that opens a popup with the page actions (ad blocking,
-bookmark, site scripts, page zoom), the per-tab summary button and the chat button.
-The confirmation for closing a bookmark's tab (⌘W) or a site's group of tabs (its ×) sits beside
+then the AI button (a sparkle: the summary and the chat, §5j, §5g), the Notebook's (§5i) and,
+last, a ⋯ button that opens a popup with the page actions (ad blocking, bookmark, site scripts,
+page zoom); in that order since 2026-11-23. The share and copy buttons show only while the pill is
+pointed at (always on touch-only devices), and an empty address reads "search / url". Nothing in
+the chrome casts a shadow (2026-11-23); floating parts keep a 1 pt border.
+The confirmation for closing a site's group of tabs (its ×) or deleting a saved page sits beside
 that row, just right of the sidebar, pointing at it, when the sidebar shows (2026-11-15; a flyout
 stays open meanwhile); otherwise above the pill. It is a hole either way. Toasts and banners
 appear above the pill. With a pointer device the pill and the sidebar sit at 50% opacity until
@@ -359,9 +366,10 @@ items any more (as menu items they stopped working, apparently from the menu sys
 validation and key-equivalent conflicts, e.g. ⌘I with Format → Italic); the menu bar only loses
 the system's Close and Find. Recording a binding is native too: while recording, the app delegate
 offers every accepted ⌘ combination and Escape and reports the one pressed. Shortcuts: ⌘T new tab, ⌘⇧T reopen the last
-closed tab, ⌘W close tab (a
-pin's tab never; a bookmark's tab after a confirmation, removing the bookmark; if the tab has left the
-bookmark's page, the confirmation offers Return to Original URL first), ⌘F find, ⌘G /
+closed tab, ⌘W close tab (a pin's or bookmark's tab is never closed: ⌘W opens a new tab instead,
+2026-11-23; before, a pin's tab showed a message and a bookmark's asked whether to remove the
+bookmark), ⌘⇧R night vision and ⌘⇧H History (2026-11-23), ⌘Q quit (macOS only, 2026-11-23:
+neither offered nor reserved on iPadOS, `ShortcutDef::available`), ⌘F find, ⌘G /
 ⌘⇧G next / previous match, ⌘\ sidebar, ⌘⇧\ right panels, ⌘S / ⌘⇧S split side by side / top
 and bottom, ⌘D bookmark (on a bookmark's tab: un-bookmark; ⌥⌘D from 2026-11-03 to 2026-11-04,
 when ⌘D split the view), ⌘I images,
@@ -398,18 +406,32 @@ last). ⌘⇧T takes the most recent one whose page is still in history (pages r
 skipped and forgotten) and opens it in a new tab through the navigation policy
 (`reopen_closed_tab`). Back/forward history of the closed tab is not restored.
 
-**History** (2026-11-03): the panel lists visits by day and hour, with a search box. Pointing at a
-visit replaces its time with an × that removes it; Select turns rows into checkboxes (Shift-click
-selects a range) and Remove deletes the selection (`remove_history`, by URL and visit time). The
-text of the 100 most recently visited pages is saved (`storage` `page-text/`, `SavedPageText`): 1.5 s
+**History** (2026-11-03; in the sidebar since 2026-11-23): Menu → History or ⌘⇧H replaces the
+sidebar's contents (pins, bookmarks, tabs) with History, as Save for Later's list did before (× or
+Escape returns; a hidden sidebar is shown and hidden again with it). Its heading row (Select, Clear,
+×) and search box stay at the top; then the pages saved for later (§5b), then the visits by day,
+each with its time. A visit opens in the current tab, and History stays open beside the page.
+Pointing at a visit replaces its time with a tray (Save for Later, below) and an × that removes it;
+a visit of a page already saved shows a tray with a tick instead. Select turns rows into
+checkboxes (Shift-click selects a range) and Remove deletes the selection (`remove_history`, by
+URL and visit time). Clear (pressed twice) clears history; pages saved for later stay. The text of
+the 100 most recently visited pages is saved (`storage` `page-text/`, `SavedPageText`): 1.5 s
 after a non-private page finishes loading, the host runs the constant `ai::PAGE_TEXT_JS` (C17) and
 the title and visible text (`innerText`, ≤ 48,000 characters, cleaned) are written if the tab still
 shows that page. The text is kept only while the page is in history: removing its last visit or
 clearing history deletes it. Rows with saved text show its size beside the address; clicking one
 opens a dialog with the text (paragraphs, `textContent` only, search matches marked) and Open
 Page; other rows open the page as before. Search (`search_history`) matches titles, addresses and
-the saved text (with a snippet). Images are not saved. Settings → Cache does not delete saved text
-(it belongs to history).
+the saved text (with a snippet), and filters the saved pages above by title and address. Images
+are not saved. Settings → Cache does not delete saved text (it belongs to history).
+
+**Save for Later from History** (2026-11-23, `save_page_for_later`): the visit's address (http(s),
+as history stores it) is loaded in a new tab of the default profile that is never shown
+(`Browser::open_in_background`: the navigation policy, Settings → Blocked and HTTPS-first as for a
+typed address; within the live-view budget, as a ⌘-clicked link's tab), and once it has finished
+loading (≤ 40 s, then 1.5 s for late content) it is saved as a tab's own button saves it
+(`saved::save_url` → `saved::save`), which closes it. A page that does not load is not saved and its
+tab is closed. Refused for a page already saved.
 
 **Tab and bookmark favicons** (2026-11-04): each tab and bookmark row shows its site's icon, fetched and stored the same way
 as pins' (F1: a sandboxed, script-free web view loads `https://<host>/favicon.ico`; the app keeps
@@ -587,7 +609,8 @@ kept from the narrower layout) and zooms it to fill the width.
 
 ## 5g. Page chat
 
-The chat button beside the summary button opens a panel docked right of the page: a model menu
+The AI button in the URL bar (2026-11-23; before, a chat button beside the summary button) opens
+the chat docked right of the page, under the summary (§5j): a model menu
 (the models of every connected provider, as listed by Settings → AI → Test; it sets the "Ask
 Selection" use), the conversation,
 and an estimate of what it has cost so far (provider-reported tokens × published prices,
@@ -641,23 +664,25 @@ errors/warnings, this tab only. Copy puts the visible entries on the clipboard.
 Tab rows are one line, the page's title (2026-11-09). A row's buttons (close; Save for Later on
 tabs) and the × of bookmarks and domain headings appear only while the row is pointed at (on
 touch-only devices: on the active tab or bookmark, and always on domain headings).
-**Save for Later** (2026-11-09; `snorkle_core::later`, `later/`): a tab's tray button snapshots what
-its view shows (`takeSnapshotWithConfiguration`, visible bounds, 320 pt wide, JPEG 0.6, drawn by the
-app from its own web view) in light mode, with images and in full colour: 1.5 s before the snapshot
-the view modes are taken off the loaded page only (`viewmodes::plain_js`) and its view drawn light
-(`force_plain`), so the page briefly shows that way before the tab closes (`saved::save`; put back if
-saving fails). The tab's mode settings and the scripts installed for later loads are not touched. It saves the page as an **archive** that works offline (below), stores the
-committed page, title and thumbnail (≤ 200 pages, ≤ 400 KB each, JPEG magic checked), and closes
-the tab; private tabs and empty tabs have no such button. The chrome shows how far it is in a toast
-with a percentage and a bar (`later_progress` events; also while adding pages). A tab without a live view is saved without
-an archive, and one WebKit cannot draw without a thumbnail (the chrome shows the site's letter).
-While any are saved, the same icon sits beside the menu and swaps the sidebar's contents for the
-saved pages (thumbnail, title underneath, the number of pages when more than one). A click on the
-thumbnail opens the saved copy in a new tab (it stays in the list; without an archive it opens the
-live page). On hover: Recover (the live page in a new tab), "+" (add pages), Bookmark (added at the
-end of the bookmarks) and Delete; Recover, Bookmark and Delete remove the page from the list. Only
-hover or keyboard focus shows them, not a click's focus; on touch-only devices, the card whose
-saved copy is open (2026-11-19; before, every card).
+**Save for Later** (2026-11-09; `snorkle_core::later`, `later/`): a tab's tray button (and a
+visit's in History, which loads the page in a hidden tab first, §5f) saves its page. 1.5 s before
+the capture the view modes are taken off the loaded page only (`viewmodes::plain_js`) and its view
+drawn light (`force_plain`), so hidden images and CSS backgrounds load and the archive holds them;
+the page briefly shows that way before the tab closes (`saved::save`; put back if saving fails). The
+tab's mode settings and the scripts installed for later loads are not touched. It saves the page as
+an **archive** that works offline (below), stores the committed page and title (≤ 200 pages), and
+closes the tab; private tabs and empty tabs have no such button. No thumbnail is taken
+(2026-11-23; until then a 320 pt JPEG snapshot, `takeSnapshotWithConfiguration`, was shown as a
+card; stored ones stay on disk with their items). The chrome shows how far it is in a toast with a
+percentage and a bar (`later_progress` events; also while adding pages). A tab without a live view
+is saved without an archive. The saved pages are listed at the top of the History sidebar (§5f;
+until 2026-11-23 an icon beside the menu swapped the sidebar's contents for them): one row each
+with the site's letter (or bundled icon), the title, the site and the number of pages when more
+than one. A click opens the saved copy in a new tab (it stays in the list; without an archive it
+opens the live page). On hover: Recover (the live page in a new tab), "+" (add pages), Bookmark
+(added at the end of the bookmarks) and Delete; Recover, Bookmark and Delete remove the page from
+the list. Only hover or keyboard focus shows them, not a click's focus; on touch-only devices, the
+row whose saved copy is open (2026-11-19).
 
 *AI conversations* (2026-11-15; `snorkle_core::conversation`, C22b): on chatgpt.com (and
 chat.openai.com), claude.ai and gemini.google.com the archive's page is the conversation itself,
@@ -698,7 +723,7 @@ subresources) and loads it with `loadData:MIMEType:@"application/x-webarchive"` 
 own URL with scripts on; WebKit answers the page's requests (scripts, styles, fonts, images,
 `fetch`, XHR) from the archive (`DocumentLoader::scheduleArchiveLoad`), so no URL is rewritten and
 no URL scheme handler exists. A saved copy has its own tab (`Tab::saved`, `Browser::show_saved_copy`), never an
-ordinary one: it is not listed with the tabs (its card in Save for Later is shown as selected, and
+ordinary one: it is not listed with the tabs (its row in the History sidebar's saved pages is shown as selected, and
 opening the card again returns to it), not saved in the session or reopened by ⌘⇧T, not written to
 history, and closed when its item leaves the list; its address bar shows a "Saved copy" pill. A
 link to another page of the archive is cancelled and that page loaded from the archive
@@ -708,7 +733,7 @@ script navigations and redirects out of the archive go nowhere. "+" opens the sa
 a bar above the pill: each link tapped on the page (same host, at most 30 pages) is chosen or
 unchosen in the core instead of navigating; Add loads each chosen page live in that tab, captures
 it the same way into the same archive (resources shared), and shows the saved copy again.
-Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto the middle of another pairs them in split view, onto the top or bottom 30% of a row (or below the last) moves it there (2026-11-09, `Browser::move_tab`; the session keeps the order), and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input. **Define** (single words only, `ai::clean_word`) shows the chat's model's dictionary-style definition in a card above the input (2026-11-09; before, it opened the chat panel), after asking which word was meant if the model thinks it is misspelt (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), colour, and show images and video. The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto the middle of another pairs them in split view, onto the top or bottom 30% of a row (or below the last) moves it there (2026-11-09, `Browser::move_tab`; the session keeps the order), and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input. **Define** (single words only, `ai::clean_word`) shows the chat's model's dictionary-style definition in a card above the input (2026-11-09; before, it opened the chat panel), after asking which word was meant if the model thinks it is misspelt (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), night vision, dark pages, colour, and show images and video; with a pointer its buttons show only while the sidebar is pointed at or has focus (2026-11-23). Pins are bare icons (a dot under the one whose tab is shown); empty pins and bookmarks take no room and show no explainer text, and open up as dashed drop targets while a row is dragged (2026-11-23). The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both
@@ -743,8 +768,8 @@ Handwriting itself is not read. Matches are outlined (handwritten notes framed),
 faded; ↩ / ⇧↩ go through them top to bottom and glide the pad to each. Chrome only: no command,
 nothing stored.
 
-Since 2026-11-16 the notebook's button sits in the URL bar beside the chat button (with the other
-right-panel modes), and the URL bar's share button is its last button, right of the address field.
+Since 2026-11-16 the notebook's button sits in the URL bar (since 2026-11-23 between the AI
+button and ⋯), and the URL bar's share button is its last button, right of the address field.
 **Copy and paste**: ⌘C / ⌘X copy or cut the lasso's selection (strokes with their notes, and
 links), kept in the chrome to paste back in and put on the system clipboard as plain text; ⌘V
 pastes them (moved 24 pt each time, selected), or text from another app as a typed note (a web
@@ -797,11 +822,14 @@ rebuilt field by field in Rust on every write and read (`snorkle_core::notebook:
 ## 5j. Summary view (2026-11-16)
 
 Replaces the headers view (its outline, Detect Headers and the per-site heading rules; channel
-C14 is retired and `heading-rules.json` is deleted when the store opens). The same URL-bar
-button, per tab, opens a panel docked right of the page (with the chat and the Notebook, on top).
-Opening it on a page that has no summary yet asks for one at once; the panel then shows the
-summary as bullet points, the model and an estimate of the cost, and a sparkle button to
-summarize again. When the tab moves to another page (its address without the fragment changes),
+C14 is retired and `heading-rules.json` is deleted when the store opens). The AI button
+in the URL bar (2026-11-23; before, a summary button per tab and a separate chat button) opens the
+summary and the chat together, docked right of the page, the summary on top (the Notebook below
+them when open), with one close button. The summary is no longer per tab: it follows the tab shown.
+Pressing the AI button on a page that has no summary yet asks for one at once (opened another way,
+Ask AI on a selection, a definition's follow-up or ⌘⇧\, or on another tab, it asks "Summarize
+“title”?" first); the panel then shows the summary as bullet points, the model and an estimate of
+the cost, and a circular-arrow button to summarize again. When the tab moves to another page (its address without the fragment changes),
 the summary is dropped and the panel asks "Summarize “title”?" with a Summarize button; a reply
 still on its way for the old page is ignored. Summaries are kept in the chrome's memory only, one
 per tab, and nothing is stored, in private tabs or otherwise. The service and model are Settings →

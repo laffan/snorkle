@@ -128,6 +128,9 @@
     "allow-notebook-clip-words",
     "allow-save-notebook",
     "allow-load-notebook",
-    "allow-set-text-editing"
+    "allow-set-text-editing",
+    "allow-save-page-for-later",
+    "allow-passkey-status",
+    "allow-request-passkeys"
   ]
 }

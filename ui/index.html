@@ -37,19 +37,33 @@
       <div id="private-head" class="side-section" hidden>Private</div>
       <div id="private-tabs" class="tablist" role="tablist" aria-orientation="vertical"></div>
     </div>
-    <!-- Save for Later: replaces the sidebar's contents while open (the
-         button beside the menu). Thumbnails are the app's own snapshots
-         (data: URLs from Rust); titles are set with textContent. -->
-    <div id="later-view" hidden>
-      <div class="later-head">Saved for Later</div>
-      <div id="later-list" class="later-list" role="list"></div>
+    <!-- History (⌘⇧H, Menu → History; 2026-11-23): replaces the sidebar's
+         contents while open. Pages saved for later come first (each row's
+         actions on hover), then every visit by day. A visit's tray button
+         saves it for later (loaded in a hidden tab). Titles and hosts are
+         set with textContent. -->
+    <div id="history-view" hidden>
+      <div class="hv-head">
+        <span id="hv-title" class="hv-title">History</span>
+        <span class="spacer"></span>
+        <button id="hv-remove" class="hv-btn" hidden disabled>Remove</button>
+        <button id="hv-select" class="hv-btn">Select</button>
+        <button id="hv-clear" class="hv-btn" title="Clear history (pages saved for later stay)">Clear</button>
+        <button id="hv-close" class="icon hv-close" aria-label="Close history" title="Close (⇧⌘H)">&#x00D7;</button>
+      </div>
+      <input id="history-search" class="history-search" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+             maxlength="200" placeholder="Search history" aria-label="Search history and saved page text">
+      <section id="later-section" class="later-section" aria-labelledby="later-head" hidden>
+        <div id="later-head" class="hv-section">Saved for Later</div>
+        <div id="later-list" class="later-list" role="list"></div>
+      </section>
+      <ul id="history-list" class="history-list" aria-label="Visits"></ul>
     </div>
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <!-- Night vision (Settings → General → Appearance, the same setting):
            an eye with a small star above it, as in Hush and Zotero Helper. -->
       <button id="night-btn" class="icon" aria-label="Night vision" title="Night vision: red only, no blue light" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 14C4.8 10 8.1 8 12 8s7.2 2 9.5 6c-2.3 4-5.6 6-9.5 6s-7.2-2-9.5-6Z"/><circle cx="12" cy="14" r="2.75"/><path d="M18.5 2.5v4M16.5 4.5h4"/></svg></button>
-      <button id="later-btn" class="icon" aria-label="Saved for later" title="Saved for later" aria-pressed="false" aria-controls="later-view" hidden><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11M8 10l4 4 4-4"/></svg></button>
       <span class="spacer"></span>
       <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><g class="sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g><path class="moon" d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg></button>
       <button id="color" class="icon mode" aria-label="Black and white pages" title="Black and white pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm2.5-4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm5 .5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/><path class="strike-gap" d="M4 3.5l16.5 16.5" fill="none"/><path class="strike" d="M4 3.5l16.5 16.5" fill="none"/></svg></button>
@@ -59,7 +73,7 @@
       <button id="menu-new-tab" role="menuitem">New Tab <span class="kbd">⌘T</span></button>
       <button id="menu-new-private" role="menuitem">New Private Tab</button>
       <div class="menu-sep" role="separator"></div>
-      <button id="menu-history" role="menuitem">History</button>
+      <button id="menu-history" role="menuitem">History <span class="kbd">⇧⌘H</span></button>
       <button id="menu-downloads" role="menuitem">Downloads</button>
       <button id="menu-console" role="menuitem">Console</button>
       <button id="menu-settings" role="menuitem">Settings</button>
@@ -102,7 +116,8 @@
   <header id="chrome">
     <div id="os-banner" class="banner" hidden></div>
     <div id="toast" class="toast" role="status" hidden></div>
-    <!-- ⌘W on a bookmark's tab: closing it removes the bookmark. -->
+    <!-- Confirmations (closing a site's tabs, deleting a saved page, a
+         frame's download), above the pill or beside their sidebar row. -->
     <div id="confirm-pop" class="confirm-pop" role="alertdialog" aria-labelledby="confirm-text" hidden>
       <span id="confirm-text"></span>
       <button id="confirm-cancel" class="pillbtn">Cancel</button>
@@ -154,9 +169,15 @@
           <span id="url-warn" class="warn" hidden title="This address uses characters that look like other letters; shown in its encoded form.">!</span>
         </button>
         <input id="url-input" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
-               enterkeyhint="go" placeholder="Search or enter address" aria-label="Search or enter address" hidden>
+               enterkeyhint="go" placeholder="search / url" aria-label="Search or enter address" hidden>
         <button id="copy-url" class="icon omni-share omni-copy" aria-label="Copy this page’s address" title="Copy address (⌥: send to the notebook)"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/><path class="nb-arrow" d="M11.5 14.5h6M15 12l2.5 2.5L15 17"/></svg></button>
       </div>
+      <!-- AI (2026-11-23): the summary of the page and the chat about it,
+           docked right of the page together (summary above, chat below). -->
+      <button id="ai-btn" class="icon mode" aria-label="AI: summary and chat" title="AI: summary of this page and chat about it" aria-pressed="false" aria-controls="summary chat"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><path d="M11 2.5c.5 3.9 2.6 6 6.5 6.5-3.9.5-6 2.6-6.5 6.5-.5-3.9-2.6-6-6.5-6.5 3.9-.5 6-2.6 6.5-6.5z"/><path d="M18.5 13.5c.3 2 1.2 2.9 3.2 3.2-2 .3-2.9 1.2-3.2 3.2-.3-2-1.2-2.9-3.2-3.2 2-.3 2.9-1.2 3.2-3.2z"/><path d="M6 15.5c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3z"/></svg></button>
+      <!-- The Notebook, with the other right-panel modes; then the page
+           actions (⋯), last (2026-11-23). -->
+      <button id="notebook-btn" class="icon mode" aria-label="Notebook" title="Notebook (for every page)" aria-pressed="false" aria-controls="notebook"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v18M12.5 8h3.5M12.5 11.5h3.5"/></svg></button>
       <div id="actions" class="page-actions">
         <button id="actions-toggle" class="icon" aria-expanded="false" aria-controls="actions-pop" aria-haspopup="menu" aria-label="Page actions" title="Ads, bookmark, site scripts, scale"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
         <!-- Floats over the page (a hole, like the pill). -->
@@ -187,10 +208,6 @@
           <button id="attach-bar" role="menuitemcheckbox" aria-checked="false"><span class="label">Attach URL Bar</span><span class="state">Off</span></button>
         </div>
       </div>
-      <button id="summary-btn" class="icon mode" aria-label="Summary of this page" title="Summary of this page (this tab)" aria-pressed="false" aria-controls="summary"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><rect x="3" y="4.5" width="18" height="3.2" rx="1.6"/><rect x="7" y="10.4" width="14" height="3.2" rx="1.6"/><rect x="11" y="16.3" width="10" height="3.2" rx="1.6"/></svg></button>
-      <button id="chat-btn" class="icon mode" aria-label="Chat about this page" title="AI chat about this page" aria-pressed="false" aria-controls="chat"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a7.5 7.5 0 0 1-11.1 6.6L4 19.5l1.4-4.4A7.5 7.5 0 1 1 20 11.5z"/></svg></button>
-      <!-- The Notebook, with the other right-panel modes. -->
-      <button id="notebook-btn" class="icon mode" aria-label="Notebook" title="Notebook (for every page)" aria-pressed="false" aria-controls="notebook"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v18M12.5 8h3.5M12.5 11.5h3.5"/></svg></button>
       <button id="unsplit" class="pillbtn" hidden title="Close split view">Unsplit</button>
       <button id="sheet-close" class="pillbtn" hidden title="Close this pop-up window and return to the page">Close Pop-up</button>
       <div id="progress"><div id="progress-bar"></div></div>
@@ -200,7 +217,7 @@
   <div id="safe-bottom" aria-hidden="true"></div>
 
   <!-- Shown only where no content view covers it (start page, notices,
-       history). -->
+       downloads). -->
   <main id="surface">
     <!-- A new tab (and each launch): the start page, with the new-tab input
          a little above the middle of the pane and the palette's rows under
@@ -254,20 +271,6 @@
       </div>
       <p id="downloads-note" class="muted small downloads-note"></p>
       <ul id="downloads-list" class="list downloads-list"></ul>
-    </section>
-
-    <section id="panel" hidden>
-      <div class="panel-head">
-        <h1 id="panel-title">History</h1>
-        <span class="spacer"></span>
-        <button id="panel-remove" class="button danger" hidden disabled>Remove</button>
-        <button id="panel-select" class="button">Select</button>
-        <button id="panel-clear" class="button">Clear history</button>
-        <button id="panel-close" class="button done" title="Back to the page (Esc)">Done</button>
-      </div>
-      <input id="history-search" class="history-search" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-             maxlength="200" placeholder="Search history and saved page text" aria-label="Search history">
-      <ul id="panel-list" class="list history-list"></ul>
     </section>
 
     <section id="unsupported" class="notice" hidden>
@@ -355,6 +358,16 @@
               <div class="muted small">The browser and every page in shades of red only, with no blue or green light, so your eyes stay adapted to the dark. Works with any appearance and with dark pages. System menus and the keyboard are not affected.</div>
             </div>
             <input id="night-vision" class="option-check" type="checkbox">
+          </div>
+          <h3 class="settings-sub">Sign-in</h3>
+          <!-- Passkeys (2026-11-23): whether this build can use them and the
+               person's permission (Rust: passkey_status). -->
+          <div class="option" id="passkeys-option">
+            <div>
+              <div class="option-title">Passkeys</div>
+              <div id="passkeys-state" class="muted small"></div>
+            </div>
+            <button id="passkeys-allow" class="button" hidden>Allow</button>
           </div>
           <h3 class="settings-sub">Layout</h3>
           <div class="option">
@@ -619,7 +632,7 @@
   <aside id="summary" class="sheet" aria-labelledby="summary-title" hidden>
     <div class="modal-head">
       <h1 id="summary-title">Summary</h1>
-      <button id="summary-again" class="icon sparkle" aria-label="Summarize again" title="Summarize this page again (sends its text to your AI service)" hidden><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M11 2.5c.5 3.9 2.6 6 6.5 6.5-3.9.5-6 2.6-6.5 6.5-.5-3.9-2.6-6-6.5-6.5 3.9-.5 6-2.6 6.5-6.5z"/><path d="M18.5 13.5c.3 2 1.2 2.9 3.2 3.2-2 .3-2.9 1.2-3.2 3.2-.3-2-1.2-2.9-3.2-3.2 2-.3 2.9-1.2 3.2-3.2z"/><path d="M6 15.5c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3z"/></svg></button>
+      <button id="summary-again" class="icon again" aria-label="Summarize again" title="Summarize this page again (sends its text to your AI service)" hidden><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4.5h-4.5"/></svg></button>
       <button id="summary-close" class="icon" aria-label="Close summary">&#x00D7;</button>
     </div>
     <div id="summary-ask" class="summary-ask" hidden>

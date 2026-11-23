@@ -15,7 +15,7 @@
   /* Docked sidebar width; set from JS while resizing. */
   --sidebar-w: 264px;
   /* Resize edges of the sidebars: a 3 pt line that lights up on hover. */
-  --edge: #d2d2d2; --edge-hot: #8c8c8c; --edge-glow: rgba(0, 0, 0, .18);
+  --edge: #d2d2d2; --edge-hot: #8c8c8c;
   color-scheme: light dark;
 }
 /* Appearance (Settings → General): `data-theme` on the root is light or
@@ -26,7 +26,7 @@
     --bg: #151515; --bar: #1f1f1f; --fg: #efefef; --muted: #a0a0a0; --line: #363636;
     --accent: #efefef; --danger: #efefef; --warn-bg: #333333; --field: #2b2b2b;
     --tab: #262626; --tab-active: #363636; --side: #000000;
-    --edge: #3a3a3a; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
+    --edge: #3a3a3a; --edge-hot: #e6e6e6;
   }
 }
 :root[data-theme="dark"] {
@@ -34,14 +34,14 @@
   --bg: #151515; --bar: #1f1f1f; --fg: #efefef; --muted: #a0a0a0; --line: #363636;
   --accent: #efefef; --danger: #efefef; --warn-bg: #333333; --field: #2b2b2b;
   --tab: #262626; --tab-active: #363636; --side: #000000;
-  --edge: #3a3a3a; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
+  --edge: #3a3a3a; --edge-hot: #e6e6e6;
 }
 /* Private browsing: unmistakably different chrome (always dark). */
 body.private {
   --bar: #0c0c0c; --bg: #000000; --fg: #f5f5f5; --muted: #9a9a9a; --line: #333333;
   --field: #232323; --tab: #1b1b1b; --tab-active: #2e2e2e; --accent: #f5f5f5; --danger: #f5f5f5;
   --warn-bg: #2e2e2e; --side: #000000;
-  --edge: #333333; --edge-hot: #e6e6e6; --edge-glow: rgba(255, 255, 255, .35);
+  --edge: #333333; --edge-hot: #e6e6e6;
 }
 /* All site artwork, including bundled Google icons, desaturates as the
    sidebar recedes and returns to colour while the sidebar is in use. */
@@ -96,21 +96,21 @@ body:not(.sb-docked) #chrome { padding-left: max(12px, env(safe-area-inset-left)
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
   background: var(--side);
   display: flex; flex-direction: column;
-  transform: translateX(0); border-radius: 0; box-shadow: 0 0 0 transparent;
+  transform: translateX(0); border-radius: 0;
   transition: transform .25s ease-in-out, top .25s ease-in-out, bottom .25s ease-in-out,
-    border-radius .25s ease-in-out, box-shadow .25s ease-in-out;
+    border-radius .25s ease-in-out;
 }
 body.sb-hidden #sidebar { transform: translateX(-100%); }
 body.sb-flyout #sidebar {
   top: calc(20px + env(safe-area-inset-top)); bottom: calc(20px + env(safe-area-inset-bottom));
   padding: 0 0 0 env(safe-area-inset-left); border-radius: 0 14px 14px 0;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, .28);
 }
-body.sb-flyout.sb-hidden #sidebar { box-shadow: 0 0 0 transparent; }
+/* No shadows anywhere (owner request 2026-11-23): over the page, the
+   sidebar is set off by a hairline instead. */
+body.sb-flyout #sidebar, body.narrow #sidebar { outline: 1px solid var(--line); }
+body.sb-hidden #sidebar { outline: 0; }
 body.sb-flyout #side-bottom { border-bottom-right-radius: 14px; }
 body.sb-flyout #sidebar-resize { display: none; }
-body.narrow #sidebar { box-shadow: 0 0 24px rgba(0, 0, 0, .25); }
-body.narrow.sb-hidden #sidebar { box-shadow: 0 0 0 transparent; }
 /* The tab reaches 3 pt into the sidebar, above its resize edge (z 2), so
    it reads as part of the sidebar rather than cut off by the edge's line.
    Its visible part is the 14 pt outside the sidebar; marks are centred on
@@ -118,7 +118,7 @@ body.narrow.sb-hidden #sidebar { box-shadow: 0 0 0 transparent; }
 #edge-tab {
   position: absolute; right: -14px; top: 50%; z-index: 3; width: 17px; height: 76px; margin-top: -38px; padding: 0;
   background: var(--bar); border: 1px solid var(--line); border-left: 0; border-radius: 0 10px 10px 0;
-  box-shadow: 2px 0 10px rgba(0, 0, 0, .12); transition: opacity .15s;
+  transition: opacity .15s;
 }
 /* Attached (wide windows): no tab; it shows only in flyout mode (see
    `edgeAway` in chrome.js for the exceptions). */
@@ -144,17 +144,27 @@ body.sb-flyout #edge-tab::after {
    progress (the panel itself and its toggle stay opaque). Touch-only
    devices have no hover, so there they stay fully visible. */
 @media (any-hover: hover) {
-  body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #later-view, #side-bottom) { opacity: .5; transition: opacity .3s ease-in-out; }
+  body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #history-view, #side-bottom) { opacity: .5; transition: opacity .3s ease-in-out; }
+  /* The foot's buttons show only while the sidebar is pointed at, has the
+     focus or one of its menus is open (2026-11-23), in every mode. */
+  #sidebar #side-bottom { opacity: 0; transition: opacity .2s ease-in-out; }
   #toolbar { opacity: .5; transition: opacity .15s; }
-  body:not(.narrow) #sidebar:hover :is(#side-scroll, #later-view, #side-bottom),
-  body:not(.narrow) #sidebar:focus-within :is(#side-scroll, #later-view, #side-bottom),
-  body.dragging :is(#side-scroll, #later-view, #side-bottom), body.resizing :is(#side-scroll, #later-view, #side-bottom),
-  body.menu-open :is(#side-scroll, #later-view, #side-bottom), #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
+  body:not(.narrow) #sidebar:hover :is(#side-scroll, #history-view, #side-bottom),
+  body:not(.narrow) #sidebar:focus-within :is(#side-scroll, #history-view, #side-bottom),
+  body.dragging :is(#side-scroll, #history-view, #side-bottom), body.resizing :is(#side-scroll, #history-view, #side-bottom),
+  body.menu-open :is(#side-scroll, #history-view, #side-bottom), #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
+  #sidebar:is(:hover, :focus-within) #side-bottom, body.menu-open #sidebar #side-bottom { opacity: 1; }
+  /* The address field's share and copy buttons: only while the URL bar
+     is pointed at (2026-11-23), or one of them has keyboard focus. */
+  #toolbar .omni-share { opacity: 0; transition: opacity .15s; }
+  #toolbar:hover .omni-share, #toolbar .omni-share:focus-visible { opacity: 1; }
 }
 body.resizing #sidebar { transition: none; }
-/* macOS: the strip holding the window buttons (they are hidden while the
-   sidebar is not docked, so the flyout needs no strip). */
-#titlebar { display: none; flex: none; height: 40px; }
+/* macOS: a slim, invisible strip at the top of the docked sidebar that
+   drags the window (double-click zooms). The window's buttons show only
+   while the pointer is in the window's top-left corner (host,
+   2026-11-23; before, they sat in a 40 pt strip here). */
+#titlebar { display: none; flex: none; height: 12px; }
 html.macos #titlebar { display: block; }
 html.macos body.sb-flyout #titlebar { display: none; }
 #side-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px 12px; }
@@ -168,19 +178,15 @@ body.dragging #side-scroll { overflow-y: hidden; }
 .tablist, .droplist { display: flex; flex-direction: column; gap: 2px; }
 .droplist { min-height: 44px; border-radius: 10px; padding: 2px 0; }
 .droplist.drop-target { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }
-.drop-zone {
-  display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 4px;
-  border: 2px dashed var(--line); border-radius: 10px; font-size: 13px; color: var(--muted);
-}
+.drop-zone { min-height: 36px; margin-top: 4px; border: 2px dashed var(--line); border-radius: 10px; }
 .drop-zone.hot { border-color: var(--accent); color: var(--accent); background: var(--field); }
-.hint { font-size: 13px; color: var(--muted); padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
 
 .tab, .bm { display: flex; align-items: center; border-radius: 10px; touch-action: manipulation; }
 /* Rows are dragged by our own code, from anywhere on the row: no native
    element drag, callout or tap highlight. */
 .tab, .tab *, .bm, .bm *, .pin, .pin * { -webkit-user-drag: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
 .tab { position: relative; }
-.tab.active, .bm.active { background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; }
+.tab.active, .bm.active { background: var(--tab-active); }
 .bm.active .t { font-weight: 600; }
 .tab.private.active { box-shadow: 0 0 0 1px var(--accent) inset; }
 .tab.drop-target { box-shadow: 0 0 0 2px var(--accent) inset; background: var(--field); }
@@ -279,17 +285,17 @@ body.dragging .row-actions { opacity: 0; pointer-events: none; }
 .summary-foot { margin: 10px 0 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* Two right panels open: the lower one has a line above it. */
 .sheet.dock.split-lower { border-top: 1px solid var(--line); }
-.icon.sparkle { min-width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--line); }
-.icon.sparkle:disabled { opacity: .4; }
+.icon.again { min-width: 32px; height: 32px; border-radius: 16px; color: var(--muted); }
+.icon.again:hover { color: var(--fg); }
 /* Resize edges. The grab area is inside the panel (page views are drawn
    over anything outside it); the 3 pt line is the panel's border. */
 .resize-edge { position: absolute; top: 0; bottom: 0; width: 12px; cursor: col-resize; touch-action: none; z-index: 2; }
 .resize-edge::after {
   content: ""; position: absolute; top: 0; bottom: 0; width: 3px;
-  background: transparent; transition: background-color .15s, box-shadow .15s;
+  background: transparent; transition: background-color .15s;
 }
 .resize-edge:hover::after, body.resizing #sidebar-resize::after, body.resizing-right #right-resize::after {
-  background: var(--edge-hot); box-shadow: 0 0 8px var(--edge-glow);
+  background: var(--edge-hot);
 }
 #sidebar-resize { right: 0; }
 #sidebar-resize::after { right: 0; }
@@ -301,10 +307,10 @@ body.narrow #sidebar-resize { display: none; }
 .split-edge.rows { cursor: row-resize; }
 .split-edge::after {
   content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px;
-  background: transparent; transition: background-color .15s, box-shadow .15s;
+  background: transparent; transition: background-color .15s;
 }
 .split-edge.rows::after { top: 50%; bottom: auto; left: 0; right: 0; width: auto; height: 3px; margin: -1.5px 0 0; }
-.split-edge:hover::after, body.resizing-split .split-edge::after { background: var(--edge-hot); box-shadow: 0 0 8px var(--edge-glow); }
+.split-edge:hover::after, body.resizing-split .split-edge::after { background: var(--edge-hot); }
 body.resizing-split { cursor: col-resize; }
 body.resizing-split.split-rows { cursor: row-resize; }
 #right-resize::after { left: 0; }
@@ -314,7 +320,7 @@ body.resizing-right, body.resizing { cursor: col-resize; }
   position: absolute; left: 10px; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 3;
   min-width: 180px; max-width: calc(100% - 20px);
   background: var(--bar); border: 1px solid var(--line); border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 6px; display: flex; flex-direction: column;
+  padding: 6px; display: flex; flex-direction: column;
 }
 .popup button { text-align: left; padding: 10px 12px; border-radius: 8px; display: flex; justify-content: space-between; gap: 16px; }
 /* Find bar (⌘F): attached to the top of the pill, narrower than its
@@ -328,14 +334,14 @@ body.resizing-right, body.resizing { cursor: col-resize; }
 .find-count { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; padding: 0 6px; }
 .findbar.none .find-count { color: var(--fg); font-weight: 600; }
 .findbar .icon { min-width: 32px; height: 32px; border-radius: 16px; font-size: 20px; }
-/* ⌘W on a bookmark's tab. */
+/* Confirmations (a site's tabs, a saved page, a frame's download). */
 .confirm-pop {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
   max-width: min(560px, 100%); padding: 10px 12px; background: var(--bar); border: 1px solid var(--line);
-  border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); font-size: 14px;
+  border-radius: 14px; font-size: 14px;
 }
 .confirm-pop #confirm-text { flex: 1 1 220px; }
-/* Beside the sidebar row it is about (a bookmark's tab, a site's tabs),
+/* Beside the sidebar row it is about (a site's tabs, a saved page),
    pointing at it. Still a hole over the page. */
 .confirm-pop.anchored { position: fixed; z-index: 21; margin: 0 !important; }
 .confirm-pop.anchored::before {
@@ -365,7 +371,7 @@ body.resizing-right, body.resizing { cursor: col-resize; }
 /* Drag ghost and insertion line. */
 .ghost {
   position: fixed; z-index: 100; pointer-events: none; opacity: .9;
-  background: var(--tab-active); border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, .25);
+  background: var(--tab-active); border-radius: 10px; outline: 1px solid var(--line);
 }
 #drop-line { position: fixed; z-index: 99; height: 2px; background: var(--accent); pointer-events: none; }
 
@@ -399,7 +405,6 @@ body.resizing-right, body.resizing { cursor: col-resize; }
 #toolbar.urlpill {
   position: relative; display: flex; align-items: center; gap: 2px; max-width: 100%;
   padding: 4px 6px; border-radius: 26px; background: var(--bar); border: 1px solid var(--line);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, .12);
 }
 #toolbar .icon { min-width: 38px; height: 38px; border-radius: 19px; }
 .icon { min-width: 40px; height: 40px; border-radius: 10px; font-size: 22px; line-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
@@ -475,36 +480,8 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .list .u { font-size: 13px; color: var(--muted); display: flex; min-width: 0; }
 .list li > button.remove { padding: 8px 12px; color: var(--muted); }
 .list li > input[type=checkbox] { margin: 0 10px; width: 20px; height: 20px; }
-/* History: grouped by day, then hour. */
-.list li.day { display: block; border: 0; padding: 18px 4px 4px; font-weight: 700; font-size: 15px; }
-.list li.hour { display: block; border: 0; padding: 10px 4px 2px; font-size: 12px; color: var(--muted); }
-.list .when { font-size: 12px; color: var(--muted); padding: 0 8px; flex: 0 0 auto; }
-/* History rows: the saved-text size beside the address, a search snippet,
-   and an × in place of the time while pointed at (always shown on
-   touch-only devices). In Select mode a row is a checkbox. */
-.history-search { width: 100%; margin: 0 0 8px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); }
-.history-list .size { flex: 0 0 auto; margin-left: 8px; font-size: 12px; color: var(--muted); }
-.history-list .snip { font-size: 13px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
-.history-list li.visit { position: relative; }
-.history-list .end { flex: 0 0 64px; display: flex; justify-content: flex-end; align-items: center; }
-.history-list .end .x { display: none; width: 30px; height: 30px; border-radius: 8px; color: var(--muted); font-size: 18px; }
-@media (any-hover: hover) {
-  .history-list li.visit:hover .end .when { display: none; }
-  .history-list li.visit:hover .end .x { display: inline-block; }
-  .history-list .end .x:hover { background: var(--field); color: var(--fg); }
-}
-@media (any-hover: none) {
-  .history-list .end { flex-basis: 96px; }
-  .history-list .end .x { display: inline-block; }
-}
-.history-list .check { flex: 0 0 auto; width: 20px; height: 20px; margin: 0 10px 0 4px; border-radius: 6px; border: 1.5px solid var(--muted); display: none; }
-#panel.selecting .history-list .check { display: inline-block; }
-#panel.selecting .history-list .end .x { display: none !important; }
-#panel.selecting .history-list .end .when { display: inline !important; }
-.history-list li.selected { background: var(--field); }
-.history-list li.selected .check { background: var(--fg); border-color: var(--fg); box-shadow: 0 0 0 3px var(--field) inset; }
-.history-list mark, .page-copy-body mark { background: var(--fg); color: var(--bar); border-radius: 2px; }
-#panel.selecting .history-list li.visit { user-select: none; -webkit-user-select: none; }
+.list li.empty { border: 0; padding: 8px 4px; }
+.history-list mark, .page-copy-body mark, .later-list mark { background: var(--fg); color: var(--bar); border-radius: 2px; }
 /* Downloads: one row per file, with a progress bar while it runs. */
 .downloads-note { margin: 0 0 8px; }
 .downloads-list li.dl { padding: 10px 4px; gap: 10px; }
@@ -562,7 +539,7 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .35); display: flex; align-items: center; justify-content: center; padding: 24px; }
 .modal, .sheet {
   background: var(--bar); color: var(--fg); border-radius: 16px; border: 1px solid var(--line);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, .3); padding: 20px;
+  padding: 20px;
 }
 .modal { width: min(520px, 100%); }
 /* Settings: section list on the left, content on the right. */
@@ -719,7 +696,7 @@ label.option-title { display: block; }
   width: min(640px, calc(100% - 48px)); max-height: calc(60% - 57px);
   display: flex; flex-direction: column;
   background: var(--bar); border: 1px solid var(--line); border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, .14); overflow: hidden;
+  overflow: hidden;
 }
 #palette-input {
   flex: none; width: 100%; height: 62px; border: 0; border-bottom: 1px solid var(--line); outline: none; background: transparent;
@@ -741,7 +718,7 @@ label.option-title { display: block; }
   width: min(640px, calc(100% - 48px)); max-height: calc(40% - 55px);
   display: flex; flex-direction: column; gap: 10px; padding: 14px 18px;
   background: var(--bar); border: 1px solid var(--line); border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, .14); overflow: hidden;
+  overflow: hidden;
 }
 .define-head { display: flex; align-items: center; gap: 8px; flex: none; }
 .define-word { flex: 1; min-width: 0; font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -755,11 +732,21 @@ label.option-title { display: block; }
 
 /* ---- pinned grid ------------------------------------------------------- */
 .pingrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-height: 60px; padding: 2px; border-radius: 12px; }
+/* Empty pins and bookmarks take no room and show no explainer text
+   (2026-11-23); while a row is dragged they open up as drop targets. */
+.pingrid:empty, .droplist:empty { min-height: 0; padding: 0; }
+body.dragging .pingrid:empty { min-height: 60px; outline: 2px dashed var(--line); outline-offset: -2px; }
+body.dragging .droplist:empty { min-height: 44px; }
 .pingrid.drop-target { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }
-.pingrid .hint { grid-column: 1 / -1; }
-.pin { position: relative; min-width: 0; aspect-ratio: 1; border-radius: 12px; background: var(--tab-active); box-shadow: 0 0 0 1px var(--line) inset; touch-action: manipulation; }
+.pin { position: relative; min-width: 0; aspect-ratio: 1; border-radius: 12px; touch-action: manipulation; }
 .pin.drag-src { opacity: .35; }
-.pin.active { box-shadow: 0 0 0 2px var(--fg) inset; }
+/* Bare icons (owner request 2026-11-23: no borders or backgrounds); the
+   pin whose tab is shown gets a dot under its icon. */
+.pin.active::after {
+  content: ""; position: absolute; left: 50%; bottom: 6px; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--fg); pointer-events: none;
+}
+@media (any-hover: hover) { .pin:hover { background: var(--field); } }
 /* Unpin appears only while the pointer is over the pin (touch-only
    devices: on the selected pin). */
 .pin > .unpin { opacity: 0; pointer-events: none; transition: opacity .1s; }
@@ -781,14 +768,14 @@ body.dragging .pin > .unpin { opacity: 0; pointer-events: none; }
 .letter { width: 28px; height: 28px; border-radius: 8px; color: #fff; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; }
 .pin > .unpin {
   position: absolute; top: -4px; right: -4px; width: 20px; height: 20px; border-radius: 10px;
-  background: var(--bar); box-shadow: 0 0 0 1px var(--line); color: var(--muted); font-size: 13px; line-height: 20px;
+  background: var(--field); color: var(--muted); font-size: 13px; line-height: 20px;
 }
 
 /* ---- selected-text menu (over the page, cut out of it) ------------------- */
 /* Selection and image menus: one action per row. */
 .sel-pop {
   position: fixed; z-index: 30; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 150px;
-  background: var(--fg); color: var(--bar); border-radius: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, .25);
+  background: var(--fg); color: var(--bar); border-radius: 12px;
 }
 .sel-pop button { padding: 7px 11px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; text-align: left; }
 .sel-pop button:active { background: rgba(127, 127, 127, .35); }
@@ -899,38 +886,81 @@ body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
 #chat-model-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #chat-effort { max-width: 125px; font-size: 12px; padding: 4px; }
 
-/* ---- Save for Later ------------------------------------------------------ */
-/* While open, the list replaces the sidebar's contents (pins, bookmarks,
-   tabs). Thumbnails are a snapshot of what each tab showed, cut to 4:3 from
-   the top; the actions appear on hover (see .later-actions). */
-#later-view { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 12px; }
-body.later-open #side-scroll { display: none; }
-#later-btn[aria-pressed="true"], #notebook-btn[aria-pressed="true"], #night-btn[aria-pressed="true"] { color: var(--fg); background: var(--field); }
-.later-head { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 6px 2px 10px; }
-.later-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 12px 10px; }
-.later-card { position: relative; min-width: 0; }
-.later-card.active .thumb { box-shadow: 0 0 0 2px var(--accent); }
-.later-card .thumb {
-  display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; padding: 0;
-  background: var(--field); box-shadow: 0 0 0 1px var(--line) inset;
+/* ---- History and Save for Later (sidebar) ------------------------------- */
+/* While open, History replaces the sidebar's contents (pins, bookmarks,
+   tabs): its heading row stays in view, then the search field, the pages
+   saved for later and the visits by day. Rows are one title line over a
+   muted site line; their buttons appear on hover (always on touch-only
+   devices), as on tab rows. */
+#history-view { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
+body.history-open #side-scroll { display: none; }
+#ai-btn[aria-pressed="true"], #notebook-btn[aria-pressed="true"], #night-btn[aria-pressed="true"] { color: var(--fg); background: var(--field); }
+/* The AI sidebar (summary above chat) has one close button, the
+   summary's; the chat's shows when the chat is alone (narrow windows). */
+#summary:not([hidden]) ~ #chat #chat-close { display: none; }
+.hv-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 2px;
+  padding: 10px 2px 6px; background: var(--side);
 }
-.later-card .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
-.later-card .thumb .letter { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: var(--muted); }
-.later-card .t { font-size: 12px; line-height: 1.3; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
-.later-card .pages { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.hv-title { font-size: 15px; font-weight: 700; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hv-btn { font-size: 12px; padding: 5px 7px; border-radius: 7px; color: var(--muted); white-space: nowrap; }
+.hv-btn:hover { color: var(--fg); background: var(--field); }
+.hv-btn:disabled:hover { background: none; color: var(--muted); }
+.hv-close { min-width: 28px; height: 28px; font-size: 18px; color: var(--muted); border-radius: 7px; }
+.history-search { width: 100%; margin: 0 0 6px; padding: 7px 10px; border-radius: 8px; border: 0; background: var(--field); font-size: 14px; outline: none; }
+.hv-section { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 12px 6px 4px; }
+.later-section { padding-bottom: 4px; }
+.later-list { display: flex; flex-direction: column; gap: 1px; }
+.later-card { position: relative; border-radius: 8px; }
+.later-card.active { background: var(--tab-active); }
+.later-card > .open, .history-list .open {
+  flex: 1; min-width: 0; width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px; border-radius: 8px;
+}
+.later-card > .open > .tab-icon { flex: 0 0 18px; width: 18px; height: 18px; border-radius: 4px; object-fit: contain; }
+.later-card > .open > span.tab-icon.letter { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; }
+.later-card .text, .history-list .open { flex-direction: column; align-items: stretch; gap: 0; }
+.later-card .text { flex: 1; min-width: 0; display: flex; }
+.later-card .t, .history-list .t { font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.later-card .u, .history-list .u { font-size: 11px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: flex; min-width: 0; }
 .later-actions {
-  position: absolute; top: 4px; right: 4px; display: flex; gap: 0; padding: 2px; border-radius: 8px;
-  background: var(--bar); box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
-  opacity: 0; pointer-events: none; transition: opacity .1s;
+  position: absolute; top: 50%; right: 2px; transform: translateY(-50%); display: flex; gap: 0; border-radius: 7px;
+  background: var(--side); opacity: 0; pointer-events: none; transition: opacity .1s;
 }
-.later-actions button { width: 24px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg); font-size: 17px; }
-.later-actions button:hover { background: var(--field); }
-.later-actions svg { width: 15px; height: 15px; }
-/* Only while pointed at (2026-11-19). Keyboard focus shows them too, but
-   not the focus a click leaves on the thumbnail, which kept a card's
-   actions up after the pointer left. Touch-only devices have no hover:
-   there they show on the card whose saved copy is open, as tab rows do
-   on the active tab (before, on every card). */
+.later-card.active .later-actions { background: var(--tab-active); }
+.later-actions button, .history-list .acts button {
+  width: 26px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); font-size: 17px;
+}
+.later-actions button:hover, .history-list .acts button:hover { color: var(--fg); background: var(--field); }
+.later-actions svg, .history-list .acts svg, .history-list .saved-mark svg { width: 15px; height: 15px; }
+/* Only while pointed at, or with keyboard focus (not the focus a click
+   leaves); touch-only devices: the card whose saved copy is open. */
 .later-card:has(:focus-visible) .later-actions { opacity: 1; pointer-events: auto; }
 @media (any-hover: hover) { .later-card:hover .later-actions { opacity: 1; pointer-events: auto; } }
 @media (any-hover: none) { .later-card.active .later-actions { opacity: 1; pointer-events: auto; } }
+/* Visits: the time at the row's end; on hover, Save for Later and ×
+   in its place. A saved page's visits carry the tray as a mark. */
+.history-list { list-style: none; margin: 0; padding: 0; }
+.history-list li.empty { padding: 8px 6px; font-size: 13px; }
+.history-list li.visit { position: relative; display: flex; align-items: center; border-radius: 8px; }
+.history-list .size { flex: 0 0 auto; margin-left: 6px; }
+.history-list .snip { font-size: 12px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+.history-list .end { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding-right: 2px; }
+.history-list .when { font-size: 11px; color: var(--muted); white-space: nowrap; padding: 0 4px; font-variant-numeric: tabular-nums; }
+.history-list .saved-mark { display: inline-flex; color: var(--muted); padding: 0 2px; }
+.history-list .saved-mark.busy { animation: dl-pulse 1.4s ease-in-out infinite; }
+.history-list .acts { display: none; }
+@media (any-hover: hover) {
+  .history-list li.visit:hover .when { display: none; }
+  .history-list li.visit:hover .acts { display: inline-flex; }
+}
+@media (any-hover: none) {
+  .history-list .when { display: none; }
+  .history-list .acts { display: inline-flex; }
+}
+.history-list .check { flex: 0 0 auto; width: 18px; height: 18px; margin: 0 2px 0 6px; border-radius: 5px; border: 1.5px solid var(--muted); display: none; }
+#history-view.selecting .history-list .check { display: inline-block; }
+#history-view.selecting .history-list .acts { display: none !important; }
+#history-view.selecting .history-list .when { display: inline !important; }
+#history-view.selecting .history-list li.visit { user-select: none; -webkit-user-select: none; }
+.history-list li.selected { background: var(--field); }
+.history-list li.selected .check { background: var(--fg); border-color: var(--fg); box-shadow: 0 0 0 3px var(--field) inset; }

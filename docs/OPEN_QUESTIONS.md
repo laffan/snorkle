@@ -1175,3 +1175,81 @@ The live sites were not reachable or not signed in from this environment.
   every card; now only on the card whose saved copy is open, as tab rows do on the active tab, so
   a card's actions there need its copy opened first. **[decide]** whether touch should keep them
   on every card instead.
+
+
+## Minimal chrome, History sidebar, shortcuts, passkeys (2026-11-23)
+
+- **[blocked] Passkeys on macOS** (item 101). Still Apple's entitlement
+  `com.apple.developer.web-browser.public-key-credential`; not requested yet (owner, 2026-11-23).
+  Apple's entitlement page (read 2026-11-23 through its JSON endpoint) lists macOS 13.3 and Mac
+  Catalyst only, and the request needs the **Account Holder of an organization** developer account.
+  Done in code: `npm run macos:passkeys` (`scripts/macos-passkeys.sh`) builds a bundle signed with
+  it once a Developer ID provisioning profile carrying it sits at
+  `src-tauri/macos/embedded.provisionprofile`; the ordinary build never has it (a restricted
+  entitlement without a matching profile stops the app launching; `config_hardening.rs`). A build
+  that has it asks once at launch for the person's permission
+  (`ASAuthorizationWebBrowserPublicKeyCredentialManager.requestAuthorizationForPublicKeyCredentials`);
+  Settings → General → Passkeys shows whether the build has the entitlement and the permission.
+  **[verify]** whether WebKit needs that permission for `WKWebView` at all (Apple documents it for
+  browsers that run WebAuthn themselves); asking is harmless if not. **[verify]** that PlistBuddy
+  adds the three keys to the entitlements file with its XML comment in place, and that Tauri 2.12
+  embeds `bundle.macOS.files` before signing. The profile's application identifier must be
+  `<team>.com.laffan.snorkle`; the script stops otherwise.
+- **[verify] Passkeys on iPadOS.** An Apple engineer wrote on the developer forums (thread 837755)
+  that an iOS browser needs only `com.apple.developer.web-browser` and that `WKWebView` then
+  supports passkeys; Apple's page for the macOS entitlement does not list iOS. So item 102 (the
+  default-browser grant) is also what passkeys wait for on the iPad. Not tried.
+- **[decide] ⌘Q is macOS only** (owner, 2026-11-23). iPadOS has no API for an app to quit; ending
+  the process is what Apple's guidance tells apps not to do. Quit is in `SHORTCUTS` but neither
+  offered nor reserved on iPadOS (`ShortcutDef::available`), so ⌘Q stays free there and Settings →
+  Keyboard does not list it. On macOS the key monitor takes it before a page can, and calls
+  `terminate:` as the menu's Quit does (the session is still written in `RunEvent::Exit`).
+- **[verify] ⌘⇧R and ⌘⇧H.** New defaults: night vision (⌘⇧R; ⌘R stays Reload) and History
+  (⌘⇧H). Safari uses ⌘⇧R for Reader and ⌘⇧H for Home; Snorkle has neither. A user binding that
+  already used either combination is refused at launch as a clash and the defaults are restored
+  (`applyBindings` falls back to `[]`), which drops the user's other changes too.
+- **[decide] ⌘W on a pin's or bookmark's tab** opens a new tab (owner, 2026-11-23). Before, a pin's
+  tab showed "Pinned tabs stay open…" and a bookmark's asked whether to remove the bookmark; the
+  bookmark is now removed only with its × or ⌘D. The confirmation no longer has a ⌘W variant.
+- **[verify] History in the sidebar.** History replaces the sidebar's contents (as Save for Later
+  did), not the page: Menu → History or ⌘⇧H, × or Escape to leave; with the sidebar hidden, it is
+  shown and hidden again with History. A visit opens in the current tab and History stays open.
+  Saved pages are listed first (filtered by the search), then the visits by day (hour headings
+  dropped for the narrow column; each row keeps its time). Clearing history keeps them
+  (`Store::clear_history` never touched `later/`). The saved page text (the 100 most recent pages)
+  is kept, as before, with its size on the row and its dialog (owner, 2026-11-23).
+- **[verify] Save for Later from History** (`save_page_for_later`, `saved::save_url`): the page is
+  loaded in a hidden tab of the default profile (`Browser::open_in_background`, through the
+  navigation policy), then saved as a tab's own button does and the tab closed. The tab shows in
+  the sidebar while it loads, and its load adds a visit to history. **Unverified:** whether WebKit
+  loads, runs the capture script in and archives a view that was never on screen while its content
+  process may be suspended (`inactiveSchedulingPolicy = .suspend`); if not, the item is saved
+  without an archive (it opens live), or the 40 s wait ends with "The page didn't load". If that is
+  what happens on a device, the fallback is to show the tab for the capture (owner's other option).
+- **[decide] No thumbnails** (owner, 2026-11-23). Save for Later no longer snapshots the page;
+  saved pages are rows (site letter or bundled icon, title, site, page count). Thumbnails already
+  stored stay on disk with their items and are no longer sent to the chrome. The 1.5 s plain
+  preview is kept: it makes hidden images and CSS backgrounds load, so the archive holds them.
+- **[verify] The window's buttons on hover** (macOS): no title strip any more; the close,
+  minimise and zoom buttons are hidden unless the pointer is in the window's top-left 96 × 44 pt
+  (`keys::BUTTON_CORNER`, the same mouse monitor as the edge pointer). They then sit over the top
+  of the sidebar (pins). A 12 pt strip at the top of the docked sidebar still drags the window
+  (double-click zooms); with the sidebar hidden there is no drag area, as before.
+- **[verify] No status bar on iPadOS.** tao's root view controller is told
+  `setPrefersStatusBarHidden: YES` at launch and whenever the app becomes active
+  (`ios::hide_status_bar`), so the chrome's top safe-area inset should become 0. Whether iPadOS 26
+  windowing still shows a status bar for a windowed (not full-screen) app is unknown.
+- **[decide] What "minimal" removed.** All drop shadows (chrome and notebook; the flyout and narrow
+  sidebars get a 1 pt outline instead, popups and the pill keep their 1 pt border); the active tab's
+  ring (its background remains); pins' tiles (an icon alone; a dot marks the pin whose tab is
+  shown, a background on hover); the empty pins/bookmarks explainer texts (empty lists take no
+  room and open up as dashed drop targets while a row is dragged; the bookmarks' end zone has no
+  text); the foot's buttons show only while the sidebar is pointed at or has focus (touch-only
+  devices: always); the address field's share and copy buttons only while the URL bar is pointed
+  at (touch-only: always). Running downloads' dot on the menu button is hidden with the foot.
+- **[verify] One AI button.** The summary and chat buttons are one sparkle button, before the
+  Notebook and ⋯ (now last). It opens both, summary above chat, with one close button; pressing it
+  summarizes a page with no summary yet, other ways in (Ask AI on a selection, a definition's
+  follow-up, ⌘⇧\) leave the summary waiting for its Summarize button. The summary is no longer
+  per tab: on another tab the panel asks "Summarize …?" instead of opening only where it was
+  turned on. Summarize Again is a circular arrow now (the sparkle is the AI button's).

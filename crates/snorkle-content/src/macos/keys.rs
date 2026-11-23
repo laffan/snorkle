@@ -4,7 +4,8 @@
 //! a local key-down monitor on the application, which sees every key event
 //! of the app before any view or the menu bar does, so they work whatever
 //! has focus: a page, the chrome, or nothing. A matched event is consumed;
-//! anything else (⌘C, ⌘V, ⌘Q, typing) goes on as usual. This is the macOS
+//! anything else (⌘C, ⌘V, typing) goes on as usual. Quit (⌘Q, a shortcut
+//! since 2026-11-23) is the one done here rather than by the chrome. This is the macOS
 //! counterpart of the app delegate's key commands on iPadOS (`ios/menu.rs`).
 //! Recording a new binding (Settings → Keyboard) is done here too: while
 //! recording, the next accepted ⌘ combination, or Escape, is reported and
@@ -15,6 +16,11 @@
 //! and the pointer's position near the window's left edge is reported for
 //! the sidebar's edge tab (pages are native views, so the chrome does not
 //! see the pointer over them).
+//!
+//! The same mouse monitor shows the window's close, minimise and zoom
+//! buttons only while the pointer is in the window's top-left corner
+//! (owner request 2026-11-23; before, they sat in a 40 pt strip at the
+//! top of the docked sidebar): [`BUTTON_CORNER`].
 //!
 //! A local flags-changed monitor reports ⌥ being pressed or let go
 //! (2026-11-16), for the chrome's copy button, which sends the page to the
@@ -32,10 +38,14 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{DefinedClass, MainThreadMarker};
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSView, NSWindow};
+use objc2_app_kit::{
+    NSApplication, NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSView, NSWindow, NSWindowButton,
+};
 
 use super::views::Container;
-use crate::{is_arrow, yields_to_editing, ContentEvents, KeyBinding, MOD_ALT, MOD_CTRL, MOD_SHIFT, SHORTCUTS};
+use crate::{
+    is_arrow, yields_to_editing, ContentEvents, KeyBinding, Shortcut, MOD_ALT, MOD_CTRL, MOD_SHIFT, SHORTCUTS,
+};
 
 thread_local! {
     /// Effective binding of each `SHORTCUTS` entry (the user's or default).
@@ -132,9 +142,39 @@ fn key_down(event: &NSEvent, events: &Rc<dyn ContentEvents>) -> bool {
     let Some(i) = hit else { return false };
     // A held key repeats; a shortcut runs once per press.
     if !event.isARepeat() {
-        events.shortcut(SHORTCUTS[i].action);
+        match SHORTCUTS[i].action {
+            // Quit (⌘Q by default): taken here, before a page could swallow
+            // the key, and done as the menu's Quit does it (`terminate:`,
+            // so the session is written on the way out, `RunEvent::Exit`).
+            // After this handler returns, not from inside it.
+            Shortcut::Quit => crate::dispatch_main(|| {
+                if let Some(mtm) = MainThreadMarker::new() {
+                    NSApplication::sharedApplication(mtm).terminate(None);
+                }
+            }),
+            action => events.shortcut(action),
+        }
     }
     true
+}
+
+/// The window's top-left corner (width, height in points from the top
+/// left) in which its close, minimise and zoom buttons show; elsewhere they
+/// are hidden. Covers the buttons themselves (`trafficLightPosition` 16, 20
+/// in tauri.conf.json) with room around them.
+pub const BUTTON_CORNER: (f64, f64) = (96.0, 44.0);
+
+fn in_button_corner(x: f64, y: f64) -> bool {
+    x.is_finite() && y.is_finite() && (0.0..=BUTTON_CORNER.0).contains(&x) && (0.0..=BUTTON_CORNER.1).contains(&y)
+}
+
+/// Shows or hides the window's close, minimise and zoom buttons.
+pub fn set_window_buttons(window: &NSWindow, shown: bool) {
+    for b in [NSWindowButton::CloseButton, NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton] {
+        if let Some(button) = window.standardWindowButton(b) {
+            button.setHidden(!shown);
+        }
+    }
 }
 
 pub struct Edge {
@@ -214,6 +254,11 @@ pub fn install(
     let edge = Rc::new(Edge { near: Cell::new(false), last: Cell::new(None) });
     let root_ptr: Retained<NSView> = objc2::Message::retain(&**root);
     let (ev, edge2) = (events.clone(), edge.clone());
+    // The window buttons: hidden until the pointer is in the corner.
+    set_window_buttons(window, false);
+    let buttons: Retained<NSWindow> = objc2::Message::retain(window);
+    let corner = Rc::new(Cell::new(false));
+    let (buttons2, corner2) = (buttons.clone(), corner.clone());
     let mouse = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let e = unsafe { event.as_ref() };
         if !in_window(e) {
@@ -232,7 +277,13 @@ pub fn install(
                     }
                 }
             }
-            _ => pointer_at(&edge2, &ev, Some((p.x, height - p.y))),
+            _ => {
+                let inside = in_button_corner(p.x, height - p.y);
+                if corner2.replace(inside) != inside {
+                    set_window_buttons(&buttons2, inside);
+                }
+                pointer_at(&edge2, &ev, Some((p.x, height - p.y)));
+            }
         }
         event.as_ptr()
     });
@@ -245,7 +296,12 @@ pub fn install(
     }
     // Leaving the window (the root view's tracking area).
     let ev = events.clone();
-    *root.ivars().on_exit.borrow_mut() = Some(Box::new(move || pointer_at(&edge, &ev, None)));
+    *root.ivars().on_exit.borrow_mut() = Some(Box::new(move || {
+        if corner.replace(false) {
+            set_window_buttons(&buttons, false);
+        }
+        pointer_at(&edge, &ev, None);
+    }));
     window.setAcceptsMouseMovedEvents(true);
 
     events.note("keys: shortcuts handled by a key-event monitor (work whatever has focus)");

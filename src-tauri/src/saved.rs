@@ -224,14 +224,14 @@ pub fn cancel_capture(tab: TabId) {
     run_js(tab, conversation::CAPTURE_CANCEL_JS.to_string(), conversation::MAX_STEP_BYTES, Duration::from_secs(5));
 }
 
-/// Save for Later (blocking): a thumbnail of the tab's page in light mode,
-/// with images and in full colour (owner request 2026-11-09: view modes are
-/// taken off its loaded page and its view drawn light first; its settings
-/// and installed scripts are left alone), the
-/// archive when the tab has a live page (`live`), then the item is stored
-/// and the tab closed. The chrome is told how far it is
-/// (`ChromeEvent::LaterProgress`). If storing fails, the page gets its view
-/// modes back.
+/// Save for Later (blocking): the archive when the tab has a live page
+/// (`live`; its view modes are taken off the loaded page first so hidden
+/// images and CSS backgrounds load and are kept, owner request 2026-11-09;
+/// its settings and installed scripts are left alone), then the item is
+/// stored and the tab closed. No thumbnail is taken (owner request
+/// 2026-11-23: saved pages are listed without pictures). The chrome is told
+/// how far it is (`ChromeEvent::LaterProgress`). If storing fails, the page
+/// gets its view modes back.
 pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool, captured: bool) -> Result<(), String> {
     let store = shared.store.clone().ok_or("Saving is not available.")?;
     let report = |p: u8| (shared.emit)(ChromeEvent::LaterProgress(tab, "save", p.min(100)));
@@ -239,16 +239,14 @@ pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool
     if live {
         plain_view(tab);
     }
-    report(8);
-    let thumb = thumbnail(tab);
-    report(12);
-    let progress = |p: u8| report(12 + (p as u32 * 84 / 100) as u8);
+    report(10);
+    let progress = |p: u8| report(10 + (p as u32 * 86 / 100) as u8);
     let capture = match conversation::site_of(url) {
         _ if !live => None,
         Some(site) => capture_conversation(tab, site, url, title, wall_ms(), captured, &progress),
         None => capture(tab, url.as_str(), title, &progress),
     };
-    let added = store.later().add(url.as_str(), title, thumb.as_deref(), capture, wall_ms());
+    let added = store.later().add(url.as_str(), title, None, capture, wall_ms());
     match added {
         Ok(Some(_)) => {}
         failed => {
@@ -265,6 +263,45 @@ pub fn save(shared: &Arc<Shared>, tab: TabId, url: &Url, title: &str, live: bool
     let effects = shared.browser().close(tab, now_ms());
     shared.run(effects);
     Ok(())
+}
+
+/// Save for Later on a history row (blocking; owner request 2026-11-23):
+/// loads `url` in a hidden tab of the default profile
+/// (`Browser::open_in_background`, through the navigation policy), waits
+/// for it to finish loading, then saves it as a tab's own button does
+/// (`save`), which closes the tab. A page that does not load (blocked, an
+/// error, 40 s) or cannot be saved is not saved, and its tab is closed.
+pub fn save_url(shared: &Arc<Shared>, url: Url) -> Result<(), String> {
+    let (tab, effects) = shared.browser().open_in_background(url, now_ms());
+    shared.run(effects);
+    let tab = tab.ok_or("This page can't be opened.")?;
+    (shared.emit)(ChromeEvent::LaterProgress(tab, "save", 1));
+    let close = || {
+        let effects = shared.browser().close(tab, now_ms());
+        shared.run(effects);
+    };
+    if !wait_loaded(shared, tab, Duration::from_secs(40)) {
+        close();
+        return Err("The page didn't load, so it wasn't saved.".into());
+    }
+    // Lazy content and data requests settle after the load event.
+    std::thread::sleep(Duration::from_millis(1500));
+    let page = {
+        let b = shared.browser();
+        b.tab(tab).and_then(|t| {
+            let url = t.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https"))?;
+            Some((url, t.title.clone(), t.life == snorkle_core::tabs::Life::Live && t.notice.is_none()))
+        })
+    };
+    let Some((page, title, live)) = page else {
+        close();
+        return Err("The page didn't load, so it wasn't saved.".into());
+    };
+    let saved = save(shared, tab, &page, &title, live, false);
+    if saved.is_err() {
+        close();
+    }
+    saved
 }
 
 fn wall_ms() -> u64 {
@@ -285,22 +322,6 @@ fn plain_view(tab: TabId) {
 
 fn restore_view(tab: TabId) {
     snorkle_content::dispatch_main(move || with_host(|h| h.force_plain(tab, false)));
-}
-
-fn thumbnail(tab: TabId) -> Option<Vec<u8>> {
-    let (tx, rx) = mpsc::channel();
-    snorkle_content::dispatch_main(move || {
-        let tx2 = tx.clone();
-        let mut ran = false;
-        with_host(|h| {
-            ran = true;
-            h.thumbnail(tab, Box::new(move |jpeg| drop(tx.send(jpeg))));
-        });
-        if !ran {
-            let _ = tx2.send(None);
-        }
-    });
-    wait(rx, Duration::from_secs(3)).flatten()
 }
 
 /// Shows page `page` (the first page when `None`) of saved item `item` in

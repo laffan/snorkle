@@ -119,4 +119,7 @@ pub const COMMANDS: &[&str] = &[
     "begin_conversation_capture",
     "conversation_capture_count",
     "cancel_conversation_capture",
+    "save_page_for_later",
+    "passkey_status",
+    "request_passkeys",
 ];

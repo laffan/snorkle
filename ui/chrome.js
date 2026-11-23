@@ -30,7 +30,7 @@
   // along the bottom of the page, which ends above it, instead of a pill
   // floating over the page.
   let barAttached = false;
-  let panel = null; // null | 'history' | 'downloads'
+  let panel = null; // null | 'downloads'
   let modalOpen = false;
   let scriptsOpen = false;
   let menuOpen = false;
@@ -302,7 +302,7 @@
           const ids = members.map((m) => m.id);
           askConfirm(`Close ${ids.length} tabs on ${site}?`, 'Close tabs', null, async () => {
             for (const tab of ids) await invoke('close_tab', { tab });
-          }, null, { shortcut: false, anchor: () => document.querySelector(`.site-heading[data-site="${CSS.escape(key)}"]`) });
+          }, null, { anchor: () => document.querySelector(`.site-heading[data-site="${CSS.escape(key)}"]`) });
         });
         const acts = el('span', 'row-actions');
         acts.appendChild(close);
@@ -411,7 +411,7 @@
     $('lock').toggleAttribute('hidden', security !== 'secure'); // SVG: no .hidden property
     renderUrlInto($('url-sub'), $('url-reg'), $('url-port'), d);
     $('url-warn').hidden = !(d && d.punycode_forced);
-    if (!d) $('url-reg').textContent = 'Search or enter address';
+    if (!d) $('url-reg').textContent = 'search / url';
 
     const bar = $('progress-bar');
     const p = tab && tab.loading ? Math.max(5, tab.progress) / 100 : 0;
@@ -421,7 +421,6 @@
   function renderSurface(tab) {
     const notice = tab && tab.notice;
     const showPanel = !!panel;
-    $('panel').hidden = panel !== 'history';
     $('downloads').hidden = panel !== 'downloads';
     $('notice').hidden = showPanel || !notice;
     $('start').hidden = showPanel || !!notice || !tab || !!tab.url;
@@ -501,11 +500,12 @@
 
   // ---- Save for Later -------------------------------------------------------
   //
-  // A tab's tray button snapshots what it shows (Rust, the app's own web
-  // view), stores its page, title and thumbnail, and closes it. While any
-  // are saved, the same icon sits beside the menu; it swaps the sidebar's
-  // contents for the saved pages (thumbnail, title underneath), each with
-  // Recover (open in a new tab), Bookmark and Delete on hover.
+  // A tab's tray button archives its page (Rust, from the app's own web
+  // view), stores its address and title, and closes it; a visit's tray
+  // button in History does the same for a page loaded in a hidden tab.
+  // Saved pages are listed at the top of the History sidebar (no pictures,
+  // owner request 2026-11-23), each with Recover (open in a new tab), "+"
+  // (add pages), Bookmark and Delete on hover.
 
   // The SVG namespace, from an icon already in the page (no URL literal
   // in this file: the remote-code tripwire bans them).
@@ -524,6 +524,8 @@
     try { host = new URL(t.url.full).hostname.toLowerCase(); } catch (e) { return false; }
     return /(^|\.)(chatgpt\.com|chat\.openai\.com|claude\.ai)$/.test(host) || host === 'gemini.google.com';
   }
+  // A tray with a tick: a visit whose page is saved for later.
+  const TRAY_SAVED = 'M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M8.5 8.5l2.5 2.5 4.5-5';
   const RIBBON = 'M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z';
   const PLUS = 'M12 5v14M5 12h14';
   function svgIcon(d) {
@@ -542,7 +544,6 @@
   }
 
   let laterItems = [];
-  let laterOpen = false;
 
   function loadLater() {
     return T.core.invoke('list_later').then((items) => { laterItems = items || []; renderLater(); }).catch(() => {});
@@ -621,48 +622,39 @@
   });
   $('capture-cancel').addEventListener('click', () => endCapture(true));
 
-  function setLater(open) {
-    laterOpen = open && laterItems.length > 0;
-    document.body.classList.toggle('later-open', laterOpen);
-    $('later-view').hidden = !laterOpen;
-    $('later-btn').setAttribute('aria-pressed', String(laterOpen));
-  }
-
   function laterAction(cmd, id, done) {
     T.core.invoke(cmd, { id }).then(() => { if (done) done(); return loadLater(); }).catch((e) => toast(String(e)));
   }
 
+  // The saved pages, at the top of the History sidebar: one row each (the
+  // site's icon, the title, the site and how many pages), filtered by the
+  // history search. A click opens the saved copy (offline; it stays in the
+  // list), or the live page when there is none.
   function renderLater() {
-    $('later-btn').hidden = !laterItems.length;
-    if (!laterItems.length) setLater(false);
+    const q = historyQuery.trim().toLowerCase();
+    const items = q ? laterItems.filter((it) => (it.title + ' ' + it.url).toLowerCase().includes(q)) : laterItems;
+    $('later-section').hidden = !items.length;
     const list = $('later-list');
     list.replaceChildren();
-    for (const it of laterItems) {
+    for (const it of items) {
       const card = el('div', 'later-card');
       card.dataset.item = it.id;
       card.setAttribute('role', 'listitem');
-      const thumb = el('button', 'thumb');
-      thumb.setAttribute('aria-label', `Open ${it.title || it.host}`);
-      if (it.thumb && it.thumb.startsWith('data:image/jpeg;base64,')) {
-        const img = el('img');
-        img.alt = '';
-        img.src = it.thumb;
-        thumb.appendChild(img);
-      } else {
-        thumb.appendChild(el('span', 'letter', (it.host || '?').charAt(0).toUpperCase()));
-      }
-      // The thumbnail opens the saved copy (offline; it stays in the list),
-      // or the live page when there is none.
-      thumb.addEventListener('click', () => {
+      const open = el('button', 'open');
+      open.setAttribute('aria-label', `Open ${it.title || it.host}`);
+      open.title = it.pages ? 'Open the saved copy' : 'Open the page';
+      open.appendChild(rowIcon(it.url, { registrable: it.host }, null));
+      const text = el('span', 'text');
+      const t = el('span', 't');
+      appendMarked(t, it.title || it.host, q);
+      text.appendChild(t);
+      text.appendChild(el('span', 'u', it.pages > 1 ? `${it.host} · ${it.pages} pages` : it.host));
+      open.appendChild(text);
+      open.addEventListener('click', () => {
         if (it.pages) invoke('open_later', { id: it.id }).then(() => { if (narrow) setSidebar(false); });
         else laterAction('restore_later', it.id, () => { if (narrow) setSidebar(false); });
       });
-      thumb.title = it.pages ? 'Open the saved copy' : 'Open the page';
-      card.appendChild(thumb);
-      const title = el('div', 't', it.title || it.host);
-      title.title = it.host;
-      card.appendChild(title);
-      if (it.pages > 1) card.appendChild(el('div', 'pages', `${it.pages} pages`));
+      card.appendChild(open);
       const acts = el('div', 'later-actions');
       const btn = (d, label, run) => {
         const b = el('button');
@@ -676,20 +668,20 @@
       // "+": add pages to the saved copy by tapping links in it.
       if (it.pages) btn(PLUS, 'Add pages', () => invoke('add_later_pages', { id: it.id }).then(() => { if (narrow) setSidebar(false); }));
       btn(RIBBON, 'Bookmark', () => laterAction('bookmark_later', it.id, () => { loadBookmarks(); toast('Bookmarked.'); }));
-      // Deleting drops the saved copy for good: asked first, beside the card.
+      // Deleting drops the saved copy for good: asked first, beside the row.
       btn(null, 'Delete', () => {
         const name = it.title || it.host || 'this page';
         askConfirm(`Delete “${name}” from Saved for Later? Its saved copy is removed.`, 'Delete', null,
           () => laterAction('delete_later', it.id), null,
-          { shortcut: false, anchor: () => document.querySelector(`.later-card[data-item="${CSS.escape(it.id)}"]`) });
+          { anchor: () => document.querySelector(`.later-card[data-item="${CSS.escape(it.id)}"]`) });
       });
       card.appendChild(acts);
       list.appendChild(card);
     }
     renderLaterSelection();
+    // Visits of saved pages are marked in the list below.
+    if (historyOpen) fillHistory($('history-list'), historyItems, q);
   }
-
-  $('later-btn').addEventListener('click', () => setLater(!laterOpen));
 
   // The card whose saved copy is the shown tab is shown as selected.
   function renderLaterSelection() {
@@ -927,18 +919,28 @@
 
   // ---- history ------------------------------------------------------------
   //
-  // The panel lists visits by day and hour. A visit can be removed with the
-  // × that replaces its time on hover; Select turns rows into checkboxes
-  // (shift-click selects a range) for removing many. Pages whose text was
-  // saved (the 100 most recent) show its size, and clicking one shows that
-  // text; the search box also searches the saved text.
+  // A sidebar view (⌘⇧H, Menu → History; owner request 2026-11-23; before,
+  // a panel over the page): the pages saved for later first, then visits
+  // by day. A visit can be removed with the × that replaces its time on
+  // hover, or saved for later with the tray beside it (the page is loaded
+  // in a hidden tab and archived there, `save_page_for_later`); Select
+  // turns rows into checkboxes (shift-click selects a range) for removing
+  // many. Pages whose text was saved (the 100 most recent) show its size,
+  // and clicking one shows that text; the search box also searches it.
+  // Clearing history keeps the saved pages.
+  let historyOpen = false;
+  // The sidebar was hidden when History opened: closing History hides it.
+  let historyShowedSidebar = false;
   let historyItems = [];
   let historyQuery = '';
   let historySelecting = false;
   const historySel = new Set();
   let historyAnchor = -1;
   let historySearchTimer = 0;
+  // Pages being saved from History (their tray shows it).
+  const savingUrls = new Set();
   const visitKey = (it) => it.url + '\u0000' + it.visited_ms;
+  const pageOf = (url) => String(url || '').split('#')[0];
 
   function fmtBytes(n) {
     if (n < 1024) return `${n} B`;
@@ -962,6 +964,38 @@
     if (at < text.length) parent.appendChild(document.createTextNode(text.slice(at)));
   }
 
+  // Shows or hides History in the sidebar (showing the sidebar if needed).
+  // `focus`: the search field takes the keyboard (a shortcut or the menu).
+  function setHistory(open, focus = open) {
+    if (open === historyOpen) {
+      if (open && !sidebarShown) setSidebar(true);
+      if (open && focus) focusInput($('history-search'));
+      return;
+    }
+    historyOpen = open;
+    closeMenu();
+    historySelecting = false;
+    historySel.clear();
+    historyAnchor = -1;
+    clearArmed = false;
+    $('hv-clear').textContent = 'Clear';
+    document.body.classList.toggle('history-open', open);
+    $('history-view').hidden = !open;
+    if (open) {
+      historyShowedSidebar = !sidebarShown;
+      if (!sidebarShown) setSidebar(true);
+      loadHistory();
+      loadLater();
+      if (focus) focusInput($('history-search'));
+    } else {
+      closePageCopy();
+      $('history-search').blur();
+      if (historyShowedSidebar && sidebarShown && !narrow) setSidebar(false);
+      historyShowedSidebar = false;
+    }
+    renderHistoryHead();
+  }
+
   function loadHistory() {
     const q = historyQuery.trim().toLowerCase();
     const req = q ? T.core.invoke('search_history', { query: q }) : T.core.invoke('list_history', { limit: 500 });
@@ -971,19 +1005,19 @@
       const keys = new Set(items.map(visitKey));
       for (const k of [...historySel]) if (!keys.has(k)) historySel.delete(k);
       historyAnchor = -1;
-      fillHistory($('panel-list'), items, q);
+      renderLater(); // the saved pages above, then the visits (fillHistory)
       renderHistoryHead();
     }).catch((e) => toast(String(e)));
   }
 
   function renderHistoryHead() {
-    $('panel').classList.toggle('selecting', historySelecting);
-    $('panel-select').textContent = historySelecting ? 'Cancel' : 'Select';
-    $('panel-remove').hidden = !historySelecting;
-    $('panel-remove').disabled = historySel.size === 0;
-    $('panel-remove').textContent = historySel.size ? `Remove ${historySel.size}` : 'Remove';
-    $('panel-clear').hidden = historySelecting;
-    $('panel-title').textContent = historySelecting && historySel.size ? `${historySel.size} selected` : 'History';
+    $('history-view').classList.toggle('selecting', historySelecting);
+    $('hv-select').textContent = historySelecting ? 'Cancel' : 'Select';
+    $('hv-remove').hidden = !historySelecting;
+    $('hv-remove').disabled = historySel.size === 0;
+    $('hv-remove').textContent = historySel.size ? `Remove ${historySel.size}` : 'Remove';
+    $('hv-clear').hidden = historySelecting;
+    $('hv-title').textContent = historySelecting && historySel.size ? `${historySel.size} selected` : 'History';
   }
 
   function removeVisits(items) {
@@ -1007,7 +1041,7 @@
       historySel.add(visitKey(it));
     }
     historyAnchor = i;
-    document.querySelectorAll('#panel-list li.visit').forEach((li) => {
+    document.querySelectorAll('#history-list li.visit').forEach((li) => {
       const on = historySel.has(li.dataset.key);
       li.classList.toggle('selected', on);
       li.setAttribute('aria-selected', String(on));
@@ -1015,12 +1049,26 @@
     renderHistoryHead();
   }
 
+  // Save for Later on a visit: the page is loaded in a hidden tab, archived
+  // and listed with the saved pages above.
+  function saveVisit(it) {
+    if (savingUrls.has(it.url)) return;
+    savingUrls.add(it.url);
+    fillHistory($('history-list'), historyItems, historyQuery.trim().toLowerCase());
+    progressToast('Saving for later…', 0);
+    T.core.invoke('save_page_for_later', { url: it.url })
+      .then(() => { toast('Saved for later.'); })
+      .catch((e) => toast(String(e)))
+      .finally(() => { savingUrls.delete(it.url); loadLater(); });
+  }
+
   function fillHistory(list, items, q = '') {
     list.replaceChildren();
     if (!items.length) {
-      list.appendChild(el('li', 'muted', q ? 'No matches.' : 'Nothing here yet.'));
+      list.appendChild(el('li', 'empty muted', q ? 'No matches.' : 'Nothing here yet.'));
       return;
     }
+    const saved = new Set(laterItems.map((it) => pageOf(it.url)));
     const dayName = (d) => {
       const today = new Date();
       const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
@@ -1029,15 +1077,11 @@
       if (diff === 1) return 'Yesterday';
       return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: diff > 300 ? 'numeric' : undefined });
     };
-    const hourName = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(/:\d\d/, ':00');
     let lastDay = '';
-    let lastHour = '';
     items.forEach((it, i) => {
       const when = new Date(it.visited_ms || 0);
       const day = dayName(when);
-      const hour = day + hourName(when);
-      if (day !== lastDay) { list.appendChild(el('li', 'day', day)); lastDay = day; lastHour = ''; }
-      if (hour !== lastHour) { list.appendChild(el('li', 'hour', hourName(when))); lastHour = hour; }
+      if (day !== lastDay) { list.appendChild(el('li', 'day hv-section', day)); lastDay = day; }
       const li = el('li', 'visit');
       li.dataset.key = visitKey(it);
       const selected = historySel.has(li.dataset.key);
@@ -1071,22 +1115,41 @@
       });
       li.appendChild(open);
       const end = el('span', 'end');
+      const isSaved = saved.has(pageOf(it.url));
       end.appendChild(el('span', 'when', when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })));
+      const acts = el('span', 'acts');
+      if (isSaved || savingUrls.has(it.url)) {
+        // Saved (or being saved): a mark in place of the button.
+        const mark = el('span', 'saved-mark' + (isSaved ? '' : ' busy'));
+        mark.appendChild(svgIcon(isSaved ? TRAY_SAVED : TRAY_IN));
+        mark.title = isSaved ? 'Saved for later' : 'Saving for later…';
+        end.appendChild(mark);
+      } else {
+        const later = el('button', 'later');
+        later.appendChild(svgIcon(TRAY_IN));
+        later.setAttribute('aria-label', 'Save for later');
+        later.title = 'Save for later';
+        later.addEventListener('click', (ev) => { ev.stopPropagation(); saveVisit(it); });
+        acts.appendChild(later);
+      }
       const x = el('button', 'x', '×');
       x.setAttribute('aria-label', 'Remove from history');
       x.title = 'Remove from history';
       x.addEventListener('click', (ev) => { ev.stopPropagation(); removeVisits([it]); });
-      end.appendChild(x);
+      acts.appendChild(x);
+      end.appendChild(acts);
       li.appendChild(end);
       list.appendChild(li);
     });
   }
 
+  // A visit opens in the current tab; History stays open beside it.
   function openHistoryItem(url) {
     const tab = activeTab();
     closePageCopy();
-    closePanel();
+    if (narrow) setSidebar(false);
     if (tab) invoke('navigate', { tab: tab.id, input: url });
+    else T.core.invoke('new_tab', { private: false }).then((id) => invoke('navigate', { tab: id, input: url })).catch((e) => toast(String(e)));
   }
 
   // The saved text of a page, as paragraphs (textContent only).
@@ -1107,30 +1170,45 @@
       }
       body.scrollTop = 0;
       $('copy-modal').hidden = false;
+      reportLayout();
       const first = body.querySelector('mark');
       if (first) first.scrollIntoView({ block: 'center' });
       $('copy-close').focus();
     }).catch((e) => toast(String(e)));
   }
   function closePageCopy() {
+    if ($('copy-modal').hidden) return;
     pageCopyUrl = null;
     $('copy-modal').hidden = true;
+    reportLayout();
   }
   $('copy-close').addEventListener('click', closePageCopy);
   $('copy-open').addEventListener('click', () => { if (pageCopyUrl) openHistoryItem(pageCopyUrl); });
   $('copy-modal').addEventListener('click', (ev) => { if (ev.target === $('copy-modal')) closePageCopy(); });
-  $('panel-select').addEventListener('click', () => {
+  $('hv-select').addEventListener('click', () => {
     historySelecting = !historySelecting;
     historySel.clear();
     historyAnchor = -1;
-    document.querySelectorAll('#panel-list li.visit').forEach((li) => { li.classList.remove('selected'); li.setAttribute('aria-selected', 'false'); });
+    document.querySelectorAll('#history-list li.visit').forEach((li) => { li.classList.remove('selected'); li.setAttribute('aria-selected', 'false'); });
     renderHistoryHead();
   });
-  $('panel-remove').addEventListener('click', () => removeVisits(historyItems.filter((it) => historySel.has(visitKey(it)))));
+  $('hv-remove').addEventListener('click', () => removeVisits(historyItems.filter((it) => historySel.has(visitKey(it)))));
+  $('hv-close').addEventListener('click', () => setHistory(false));
+  // Clear asks by changing its label first; saved pages are kept.
+  $('hv-clear').addEventListener('click', () => {
+    if (!clearArmed) { clearArmed = true; $('hv-clear').textContent = 'Clear all?'; return; }
+    clearArmed = false;
+    $('hv-clear').textContent = 'Clear';
+    T.core.invoke('clear_history').then(loadHistory).catch((e) => toast(String(e)));
+  });
+  $('hv-clear').addEventListener('blur', () => { clearArmed = false; $('hv-clear').textContent = 'Clear'; });
   $('history-search').addEventListener('input', () => {
     historyQuery = $('history-search').value;
     clearTimeout(historySearchTimer);
     historySearchTimer = setTimeout(loadHistory, 180);
+  });
+  $('history-search').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); if ($('history-search').value) { $('history-search').value = ''; historyQuery = ''; loadHistory(); } else setHistory(false); }
   });
 
 
@@ -1207,10 +1285,9 @@
   function renderPins() {
     const grid = $('pins');
     grid.replaceChildren();
-    if (!pins.length) {
-      grid.appendChild(el('div', 'hint', `Drag up to ${MAX_PINS} tabs or bookmarks here.`));
-      return;
-    }
+    // Empty: nothing (no explainer text, 2026-11-23); it opens up as a
+    // drop target while a row is dragged (CSS).
+    if (!pins.length) return;
     pins.forEach((p, index) => {
       const node = el('div', 'pin');
       node.dataset.index = String(index);
@@ -1425,10 +1502,7 @@
   function renderBookmarks() {
     const list = $('bookmarks');
     list.replaceChildren();
-    if (!bookmarks.length) {
-      list.appendChild(el('div', 'hint', 'Drag a tab here to bookmark it.'));
-      return;
-    }
+    if (!bookmarks.length) return; // see renderPins
     bookmarks.forEach((b, index) => {
       const node = el('div', 'bm');
       node.dataset.index = String(index);
@@ -1511,13 +1585,14 @@
   }
 
   // While dragging something that can be bookmarked, the bookmarks list
-  // grows a visible target at its end (once it has items, the empty-list
-  // hint is gone and there is otherwise little to aim at).
+  // grows a visible target at its end: an empty dashed box (no text,
+  // 2026-11-23), which is all an empty list shows.
   function showDropZone(item) {
     const list = $('bookmarks');
     if (item.kind === 'tab' && item.private) return; // never persist private tabs
-    if (!list.querySelector('.bm')) return; // the empty-list hint is the target
-    list.appendChild(el('div', 'drop-zone', item.kind === 'bookmark' ? 'Move to the end' : 'Drop here to bookmark'));
+    const zone = el('div', 'drop-zone');
+    zone.setAttribute('aria-label', item.kind === 'bookmark' ? 'Move to the end' : 'Drop here to bookmark');
+    list.appendChild(zone);
   }
 
   function dropTargetAt(x, y) {
@@ -2094,23 +2169,10 @@
     document.body.classList.toggle('menu-open', open);
   }
 
-  function openPanel() {
-    closeMenu();
-    panel = 'history';
-    clearArmed = false;
-    $('panel-clear').textContent = 'Clear history';
-    historySelecting = false;
-    historySel.clear();
-    loadHistory();
-    if (narrow) setSidebar(false);
-    render();
-  }
-
+  // Downloads, the one panel left over the page (History is in the
+  // sidebar since 2026-11-23).
   function closePanel() {
     panel = null;
-    closePageCopy();
-    historySelecting = false;
-    historySel.clear();
     render();
     downloadProgressToast(); // running downloads show in the toast again
   }
@@ -2124,10 +2186,40 @@
   }
 
   const SETTINGS_TITLES = { general: 'General', ai: 'AI', keys: 'Keyboard', cache: 'Cache', blocked: 'Blocked' };
+  // Settings → General → Passkeys (2026-11-23). WebKit signs pages in
+  // with passkeys by itself, but only in a build signed with Apple's
+  // entitlement for browsers (macOS: `npm run macos:passkeys`; iPadOS: the
+  // default-browser entitlement), and only with the person's permission,
+  // which the system asks for once.
+  function renderPasskeys() {
+    const text = $('passkeys-state');
+    const allow = $('passkeys-allow');
+    allow.hidden = true;
+    T.core.invoke('passkey_status').then((st) => {
+      if (st.entitled === false) {
+        text.textContent = 'Not available in this build: sites can use passkeys and security keys only in a build signed with Apple’s passkey entitlement for browsers. Use the site’s other sign-in method meanwhile.';
+        return;
+      }
+      const p = st.permission;
+      if (p === 'authorized') text.textContent = 'On: sites can ask to sign you in with your passkeys and security keys.';
+      else if (p === 'denied') text.textContent = macOS
+        ? 'Off for Snorkle. It can be turned on again in System Settings → Privacy & Security.'
+        : 'Off for Snorkle. It can be turned on again in the Settings app.';
+      else if (p === 'not_determined') {
+        text.textContent = 'Snorkle has not asked yet whether it may use your passkeys.';
+        allow.hidden = false;
+      } else text.textContent = 'Not available on this system.';
+    }).catch(() => { text.textContent = ''; });
+  }
+  $('passkeys-allow').addEventListener('click', () => {
+    T.core.invoke('request_passkeys').then(renderPasskeys).catch((e) => { toast(String(e)); renderPasskeys(); });
+  });
+
   function showSettings(section) {
     document.querySelectorAll('.settings-nav button').forEach((b) => b.setAttribute('aria-current', b.dataset.section === section ? 'page' : 'false'));
     document.querySelectorAll('.settings-body [data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== section; });
     $('settings-heading').textContent = SETTINGS_TITLES[section];
+    if (section === 'general') renderPasskeys();
     if (section === 'ai') { loadAi(); loadUsage(); }
     if (section === 'keys') renderKeys();
     if (section === 'blocked') loadBlocked();
@@ -2650,7 +2742,7 @@
     // beside the page (shrinking the content area), float over it as a
     // hole (the pill, its popup, toasts: the page is cut out there), or set
     // `overlay`, which hides the page.
-    const overlay = !!panel || modalOpen || !$('edit-modal').hidden || (scriptsOpen && narrow) || (chatShown() && narrow) || (notebookShown() && narrow) || (narrow && sidebarShown);
+    const overlay = !!panel || modalOpen || !$('edit-modal').hidden || !$('copy-modal').hidden || (scriptsOpen && narrow) || (chatShown() && narrow) || (notebookShown() && narrow) || (narrow && sidebarShown);
     // Docked right panels (site scripts; or the summary, the chat and the
     // notebook, one above the other when several are open) take the right of the
     // content area, full height, at the width the user dragged.
@@ -2869,10 +2961,11 @@
     { id: 'dark', mode: 'dark', name: 'Dark pages' },
   ];
 
-  // The summary view is per tab (its button is in the URL bar).
-  const summaryTabs = new Set();
-  function summaryOn(tabId) {
-    return tabId !== null && tabId !== undefined && summaryTabs.has(tabId);
+  // The summary is shown with the chat, in the AI sidebar (one button in
+  // the URL bar, owner request 2026-11-23; before, a summary button per
+  // tab and a chat button). `chatOpen` is the AI sidebar being open.
+  function summaryOn() {
+    return chatOpen;
   }
 
   function exemptFor(tabId, mode) {
@@ -2902,17 +2995,13 @@
     document.querySelectorAll('[data-launch-mode]').forEach((b) =>
       b.setAttribute('aria-pressed', String(!!launch[b.dataset.launchMode] === (b.dataset.on === 'true'))));
     applyNightVisionChrome(!!viewModes.modes.night);
-    const h = $('summary-btn');
-    const on = summaryOn(tab);
-    h.classList.toggle('on', on);
-    h.setAttribute('aria-pressed', String(on));
-    $('chat-btn').classList.toggle('on', chatOpen);
-    $('chat-btn').setAttribute('aria-pressed', String(chatOpen));
+    $('ai-btn').classList.toggle('on', chatOpen);
+    $('ai-btn').setAttribute('aria-pressed', String(chatOpen));
     renderSummary();
   }
 
-  $('summary-btn').addEventListener('click', withTab((t) => setSummary(t, !summaryOn(t.id))));
-  $('summary-close').addEventListener('click', withTab((t) => setSummary(t, false)));
+  $('ai-btn').addEventListener('click', () => setAi(!chatOpen, true));
+  $('summary-close').addEventListener('click', () => setAi(false));
 
   // Page actions: a popup above the ⋯ button, floating over the page (a
   // hole, like the pill).
@@ -2949,7 +3038,7 @@
       T.core.invoke('block_site', { tab: t.id })
         .then(() => toast(`Blocked ${site}.`))
         .catch((e) => toast(String(e)));
-    }, null, { shortcut: false });
+    });
   }));
 
   // Page scale (⋯ menu): per tab, decided and saved by the core; the
@@ -3066,22 +3155,18 @@
   }
 
   function summaryShown() {
-    return !!state && !narrow && !scriptsOpen && !rightHidden && summaryOn(state.active);
+    return !!state && !narrow && !scriptsOpen && !rightHidden && summaryOn();
   }
 
-  function setSummary(t, on) {
-    if (on) {
-      summaryTabs.add(t.id);
-      rightHidden = false;
-      applyChat();
-      applyNotebook();
-      // Opening the view is the request: a page without a summary gets one.
-      if (summarizable(t) && summaryFor(t).status === 'ask') summarize(t);
-    } else {
-      summaryTabs.delete(t.id);
-    }
-    renderViewMode();
-    reportLayout();
+  // The AI sidebar: the summary of the page above the chat about it.
+  // Pressing its button is the request for a summary: a page without one
+  // gets one at once. Opened otherwise (Ask AI on a selection, a
+  // definition's follow-up, ⌘⇧\) or on another tab, the summary waits for
+  // its Summarize button.
+  function setAi(open, summarizeNow = false) {
+    setChat(open);
+    const t = activeTab();
+    if (open && summarizeNow && summarizable(t) && summaryFor(t).status === 'ask') summarize(t);
   }
 
   function summarize(t) {
@@ -3128,7 +3213,6 @@
     // Tabs that closed take their summaries with them.
     if (state) {
       for (const id of summaries.keys()) if (!state.tabs.some((x) => x.id === id)) summaries.delete(id);
-      for (const id of summaryTabs) if (!state.tabs.some((x) => x.id === id)) summaryTabs.delete(id);
     }
     if (!show) return;
     const t = activeTab();
@@ -3418,6 +3502,7 @@
     if (open) rightHidden = false;
     if (!open) { archiveOpen = false; setModelMenu(false); }
     applyChat();
+    applyNotebook();
     if (open) {
       loadAi().then(() => { chatKey = ''; renderChat(); });
       focusInput($('chat-input'));
@@ -3567,8 +3652,7 @@
     setChat(true);
   });
 
-  $('chat-btn').addEventListener('click', () => setChat(!chatOpen));
-  $('chat-close').addEventListener('click', () => setChat(false));
+  $('chat-close').addEventListener('click', () => setAi(false));
   $('chat-new').addEventListener('click', () => {
     const t = activeTab();
     if (t) chats.set(t.id, newChat(t.url ? t.url.full : ''));
@@ -4362,6 +4446,12 @@
       else openFind();
     } else if (name === 'toggle_images') {
       toggleMode('hide_media');
+    } else if (name === 'night_vision') {
+      // ⌘⇧R (2026-11-23): as the eye at the sidebar's foot.
+      setNightVision(!viewModes.modes.night);
+    } else if (name === 'history') {
+      // ⌘⇧H (2026-11-23): the history sidebar, shown or hidden.
+      setHistory(!historyOpen);
     } else if (name === 'go_back' || name === 'go_forward') {
       // ⌘← / ⌘→ (2026-11-15): as the pill's buttons.
       const btn = $(name === 'go_back' ? 'back' : 'forward');
@@ -4380,61 +4470,41 @@
     }
   }
 
-  // ⌘W: the pop-up sheet in front, else the active tab. A pin's tab is
-  // never closed this way; a bookmark's tab is, after confirming, and the
-  // bookmark is removed with it (that tab is the bookmark).
+  // ⌘W: the pop-up sheet in front, else the active tab. A pin's or a
+  // bookmark's tab is that item, so it stays: ⌘W opens a new tab instead
+  // (owner request 2026-11-23; before, a pin's tab showed a message and a
+  // bookmark's tab asked whether to remove the bookmark).
   function closeTabShortcut() {
     const id = state && (state.sheet !== null ? state.sheet : state.active);
     if (id === null || id === undefined) return;
     const t = state.tabs.find((x) => x.id === id);
     const key = t && t.sheet_over === null ? t.launcher : null;
-    if (key && pins.some((p) => p.url === key)) {
-      toast('Pinned tabs stay open. Unpin the site to close its tab.');
+    if (key && (pins.some((p) => p.url === key) || bookmarks.some((b) => b.url === key))) {
+      openNewTab(false);
       return;
     }
-    const bm = key ? bookmarks.find((b) => b.url === key) : null;
-    if (!bm) { invoke('close_tab', { tab: id }); return; }
-    if (confirmAction && confirmAction.shortcut && confirmAction.tab === id) { confirmAction.run(); return; } // ⌘W again confirms
-    const name = bm.title || bm.display.registrable;
-    const remove = () =>
-      T.core.invoke('remove_bookmark', { url: bm.url })
-        .then(loadBookmarks)
-        .then(() => invoke('close_tab', { tab: id }))
-        .catch((e) => toast(String(e)));
-    // The tab has moved on from the bookmark's page: going back to it is
-    // offered first (Return), removing the bookmark stays on ⌘W.
-    const moved = t.url && t.url.full !== bm.url;
-    const anchor = () => document.querySelector(`#bookmarks .bm[data-url="${CSS.escape(bm.url)}"]`);
-    if (moved) {
-      askConfirm(`This tab has left “${name}”. Return to the bookmarked page, or remove the bookmark?`, 'Remove Bookmark', id, remove,
-        { label: 'Return to Original URL', run: () => openLink(bm.url, true) }, { anchor });
-    } else {
-      askConfirm(`Close this tab and remove the bookmark “${name}”?`, 'Remove Bookmark', id, remove, null, { anchor });
-    }
+    invoke('close_tab', { tab: id });
   }
 
   // A small confirmation floating above the pill (a hole, like the pill).
-  // ⌘W or the primary button confirms, Escape cancels. `alt` adds a second
+  // The primary button confirms, Escape cancels. `alt` adds a second
   // action ({ label, run }), which then has the focus (Return). Options:
-  // `shortcut: false` (no ⌘W on the primary button), `cancel` (run when
-  // dismissed: Cancel, Escape, a click elsewhere), `cancelLabel`, and
-  // `anchor` (a function returning the sidebar row the confirmation is
-  // about: closing a bookmark's tab or a site's tabs). With an anchor in
+  // `cancel` (run when dismissed: Cancel, Escape, a click elsewhere),
+  // `cancelLabel`, and `anchor` (a function returning the sidebar row the
+  // confirmation is about: a site's tabs, a saved page). With an anchor in
   // a sidebar that is showing, it sits just right of the sidebar beside
   // that row (2026-11-15) instead of above the pill.
   function askConfirm(text, ok, tab, run, alt = null, opts = {}) {
     if (confirmAction) closeConfirm();
-    const shortcut = opts.shortcut !== false;
     confirmAction = {
       tab,
-      shortcut,
       run: () => { closeConfirm(false); run(); },
       alt: alt && (() => { closeConfirm(false); alt.run(); }),
       cancel: opts.cancel || null,
       anchor: opts.anchor || null,
     };
     $('confirm-text').textContent = text;
-    $('confirm-ok').textContent = shortcut ? ok + ' (⌘W)' : ok;
+    $('confirm-ok').textContent = ok;
     $('confirm-cancel').textContent = opts.cancelLabel || 'Cancel';
     $('confirm-alt').hidden = !alt;
     $('confirm-alt').textContent = alt ? alt.label : '';
@@ -4496,7 +4566,7 @@
     const a = downloadAsks[0];
     const who = a.from ? `${a.from}, from a frame inside this page,` : 'A frame inside this page';
     askConfirm(`${who} wants to download a file.`, 'Allow Download', null, () => answerDownload(a, true), null,
-      { shortcut: false, cancel: () => answerDownload(a, false), cancelLabel: 'Block' });
+      { cancel: () => answerDownload(a, false), cancelLabel: 'Block' });
   }
   T.event.listen('download_prompt', (e) => {
     const p = e.payload || {};
@@ -4541,9 +4611,9 @@
   // ⌘⇧\: hide the right panels (keeping them on), or show them again; with
   // none on, open the chat.
   function toggleRight() {
-    const anyOn = scriptsOpen || chatOpen || notebookOpen || (state && summaryOn(state.active));
+    const anyOn = scriptsOpen || chatOpen || notebookOpen;
     if (!anyOn) { setChat(true); return; }
-    if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !notebookOpen && !(state && summaryOn(state.active))) return; }
+    if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !notebookOpen) return; }
     rightHidden = !rightHidden;
     applyChat();
     applyNotebook();
@@ -5041,7 +5111,7 @@
   $('unsplit').addEventListener('click', withTab((t) => invoke('unsplit', { tab: t.id })));
   $('sheet-close').addEventListener('click', () => { if (state && state.sheet !== null) invoke('close_tab', { tab: state.sheet }); });
   $('menu').addEventListener('click', () => (menuOpen ? closeMenu() : openMenu()));
-  $('menu-history').addEventListener('click', openPanel);
+  $('menu-history').addEventListener('click', () => setHistory(true));
   $('menu-downloads').addEventListener('click', openDownloads);
   $('menu-settings').addEventListener('click', () => setModal(true));
   $('menu-console').addEventListener('click', () => setConsole(!consoleOpen));
@@ -5096,7 +5166,7 @@
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || editing) return;
     if (!$('edit-modal').hidden) closeEdit();
-    else if (laterOpen && $('sidebar').contains(document.activeElement)) setLater(false);
+    else if (historyOpen && $('sidebar').contains(document.activeElement)) setHistory(false);
     else if (!$('copy-modal').hidden) closePageCopy();
     else if (unblock) closeUnblock();
     else if (confirmAction) closeConfirm();
@@ -5122,11 +5192,6 @@
       .catch((e) => toast(String(e)));
   }));
   $('bookmark').addEventListener('click', withTab((t) => { setActions(false); toggleBookmark(t); }));
-  $('panel-close').addEventListener('click', closePanel);
-  $('panel-clear').addEventListener('click', () => {
-    if (!clearArmed) { clearArmed = true; $('panel-clear').textContent = 'Tap again to clear'; return; }
-    invoke('clear_history').then(openPanel);
-  });
 
   $('url-display').addEventListener('click', beginEdit);
   const input = $('url-input');

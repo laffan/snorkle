@@ -575,6 +575,27 @@ fn command_click_opens_a_background_tab() {
 }
 
 #[test]
+fn save_for_later_from_history_loads_in_a_hidden_tab() {
+    let mut b = browser(4);
+    let (p, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(p, "https://a.example/", 0).unwrap();
+    webkit_load(&mut b, p, "https://a.example/");
+    let (t, out) = b.open_in_background(u("http://b.example/story"), 5);
+    let t = t.expect("a tab is opened");
+    assert_eq!(b.active(), Some(p), "the current tab stays in front");
+    assert_eq!(b.tab(t).unwrap().profile, Profile::Default);
+    assert!(!out.iter().any(|e| matches!(e, Effect::ShowView { tab, .. } if *tab == t)), "loaded hidden");
+    assert!(
+        out.iter().any(|e| matches!(e, Effect::CreateView { tab, then: AfterCreate::Load(url), .. }
+            if *tab == t && url.as_str() == "https://b.example/story")),
+        "http upgraded, through the policy: {out:?}"
+    );
+    // Only web pages.
+    assert!(b.open_in_background(u("javascript:alert(1)"), 6).0.is_none());
+    assert!(b.open_in_background(u("file:///etc/passwd"), 6).0.is_none());
+}
+
+#[test]
 fn back_from_a_command_clicked_tab_returns_to_the_page_it_came_from() {
     let mut b = browser(4);
     let (p, _) = b.new_tab(Profile::Default, 0);

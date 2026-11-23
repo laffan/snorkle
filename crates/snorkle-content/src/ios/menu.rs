@@ -89,10 +89,11 @@ pub fn text_editing_changed(_mtm: MainThreadMarker) {
     COMMANDS.with(|c| *c.borrow_mut() = None);
 }
 
-/// Whether `SHORTCUTS[index]` is offered now (not an arrow binding while
-/// text is being edited).
+/// Whether `SHORTCUTS[index]` is offered now: one this platform has (not
+/// Quit) and not an arrow binding while text is being edited.
 pub fn offered(index: usize) -> bool {
-    BINDINGS.with(|b| b.borrow().get(index).is_some_and(|k| !yields_to_editing(k)))
+    SHORTCUTS.get(index).is_some_and(|d| d.available())
+        && BINDINGS.with(|b| b.borrow().get(index).is_some_and(|k| !yields_to_editing(k)))
 }
 
 /// The key command input for a binding's key: the key itself, or UIKit's

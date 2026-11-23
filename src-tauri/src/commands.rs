@@ -690,15 +690,12 @@ pub struct LaterView {
     title: String,
     host: String,
     saved_ms: u64,
-    /// `data:image/jpeg;base64,…` (the app's own snapshot), if any.
-    thumb: Option<String>,
     /// Pages its archive holds (0: no archive; the page opens live).
     pages: usize,
 }
 
-/// Save for Later (`saved::save`): a thumbnail of the tab's page (light
-/// mode, images, full colour; drawn by the app from its own web view), an
-/// archive that works offline (channel C22), the tab's committed page
+/// Save for Later (`saved::save`): an archive that works offline (channel
+/// C22), the tab's committed page
 /// (http/https, from the core) and title; then the tab closes. Progress
 /// goes to the chrome as `later_progress`. Not for private tabs, whose
 /// pages are never written, or a saved copy's own tab. A tab without a live
@@ -719,6 +716,27 @@ pub async fn save_for_later(s: S<'_>, tab: u64, captured: Option<bool>) -> Resul
     };
     let shared = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || crate::saved::save(&shared, id, &url, &title, live, captured))
+        .await
+        .map_err(|_| "Request failed.".to_string())?
+}
+
+/// Save for Later on a history row (owner request 2026-11-23): the page
+/// at `url` (http/https without credentials, as history stores it) is
+/// loaded in a hidden tab of the default profile, through the navigation
+/// policy, and saved there (`saved::save_url`; the tab then closes).
+/// Refused when that page is already saved for later.
+#[tauri::command]
+pub async fn save_page_for_later(s: S<'_>, url: String) -> Result<(), String> {
+    let store = s.store.clone().ok_or("Saving is not available.")?;
+    let url = snorkle_core::storage::storable_url(&url)
+        .and_then(|u| Url::parse(&u).ok())
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or("Not a web address.")?;
+    if store.later().list().iter().any(|it| it.url == url.as_str()) {
+        return Err("Already saved for later.".into());
+    }
+    let shared = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || crate::saved::save_url(&shared, url))
         .await
         .map_err(|_| "Request failed.".to_string())?
 }
@@ -770,7 +788,6 @@ pub fn list_later(s: S<'_>) -> Vec<LaterView> {
         .into_iter()
         .map(|it| LaterView {
             host: Url::parse(&it.url).ok().map(|u| url_display::display(&u).registrable).unwrap_or_default(),
-            thumb: if it.thumb { later.thumb_url(&it.id) } else { None },
             pages: it.pages.len(),
             id: it.id,
             url: it.url,
@@ -1001,6 +1018,7 @@ fn shortcut_infos(s: &S<'_>) -> Vec<ShortcutInfo> {
     snorkle_content::SHORTCUTS
         .iter()
         .zip(current)
+        .filter(|(d, _)| d.available())
         .map(|(d, b)| ShortcutInfo {
             id: d.id,
             title: d.title,
@@ -1502,4 +1520,53 @@ pub async fn tab_icons(s: S<'_>, have: Vec<String>) -> Result<TabIcons, String> 
         }
     }
     Ok(out)
+}
+
+/// Passkeys (Settings → General; owner request 2026-11-23): whether this
+/// build is signed with Apple's passkey entitlement for browsers (macOS;
+/// `None` on iPadOS, where the default-browser entitlement counts) and the
+/// person's permission for Snorkle to use their passkeys.
+#[derive(Serialize)]
+pub struct PasskeyStatus {
+    entitled: Option<bool>,
+    permission: &'static str,
+}
+
+#[tauri::command]
+pub async fn passkey_status() -> Result<PasskeyStatus, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        use snorkle_content::passkeys;
+        let _ = tx.send(PasskeyStatus { entitled: passkeys::entitled(), permission: passkeys::permission().name() });
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(5)).ok())
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| "Passkey status unavailable.".to_string())
+}
+
+/// Asks the person, with the system's prompt, whether Snorkle may use their
+/// passkeys; returns their answer (`PasskeyPermission::name`). Refused on
+/// macOS in a build without the entitlement, where pages cannot use
+/// passkeys whatever the answer.
+#[tauri::command]
+pub async fn request_passkeys() -> Result<&'static str, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    snorkle_content::dispatch_main(move || {
+        use snorkle_content::passkeys;
+        if passkeys::entitled() == Some(false) {
+            let _ = tx.send(None);
+            return;
+        }
+        passkeys::request_permission(Box::new(move |p| {
+            let _ = tx.send(Some(p.name()));
+        }));
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(600)).ok())
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| "No answer.".to_string())?
+        .ok_or_else(|| "This build is not signed with Apple's passkey entitlement.".to_string())
 }
