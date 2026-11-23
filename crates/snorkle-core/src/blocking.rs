@@ -35,7 +35,7 @@ pub const MAX_RULES_PER_LIST: usize = 50_000;
 /// Upper bound on generated lists, to bound compile time and memory.
 pub const MAX_LISTS: usize = 8;
 /// Bump when the conversion changes, to invalidate WebKit's compiled cache.
-pub const CONVERTER_VERSION: u32 = 1;
+pub const CONVERTER_VERSION: u32 = 3;
 
 pub struct FilterList<'a> {
     pub name: &'a str,
@@ -105,37 +105,75 @@ pub fn compile(lists: &[FilterList<'_>], allowed_sites: &BTreeSet<String>) -> Re
     let (rules, used) = set.into_content_blocking().map_err(|_| CompileError::Converter)?;
 
     // WebKit applies `ignore-previous-rules` only to earlier rules in the
-    // SAME list, so every chunk carries all exceptions at its end, followed
+    // SAME list, so every chunk carries the exceptions at its end, followed
     // by the user's per-site allow rule.
-    let (mut exceptions, blocking): (Vec<CbRule>, Vec<CbRule>) =
+    //
+    // Element hiding (css-display-none) gets lists of its own (2026-11-23).
+    // The converter ends its rules with one exception for every first-party
+    // document (`ignore_previous_fp_documents`, so a site is never blocked
+    // as a page), meant to follow the network rules only. WebKit takes a
+    // page's hiding rules from its document load, so that exception, after
+    // the hiding rules in the same list, cancelled every one of them on
+    // every page: no element was ever hidden. Hiding lists carry every other
+    // exception (`$document`, `$elemhide`, `$generichide` and the per-site
+    // allow rule still turn hiding off where they should).
+    let fp_documents =
+        serde_json::to_value(adblock::content_blocking::ignore_previous_fp_documents()).map_err(|_| CompileError::Converter)?;
+    let (mut exceptions, rest): (Vec<CbRule>, Vec<CbRule>) =
         rules.into_iter().partition(|r| matches!(r.action.typ, CbType::IgnorePreviousRules));
-    let mut tail: Vec<serde_json::Value> = Vec::with_capacity(exceptions.len() + 1);
+    let (hiding, blocking): (Vec<CbRule>, Vec<CbRule>) =
+        rest.into_iter().partition(|r| matches!(r.action.typ, CbType::CssDisplayNone));
+    let mut network_tail: Vec<serde_json::Value> = Vec::with_capacity(exceptions.len() + 1);
     for r in exceptions.drain(..) {
-        tail.push(serde_json::to_value(r).map_err(|_| CompileError::Converter)?);
+        network_tail.push(serde_json::to_value(r).map_err(|_| CompileError::Converter)?);
     }
-    let exception_count = tail.len();
+    let exception_count = network_tail.len();
     if let Some(rule) = allow_sites_rule(allowed_sites) {
-        tail.push(rule);
+        network_tail.push(rule);
     }
-    if tail.len() >= MAX_RULES_PER_LIST {
-        return Err(CompileError::TooManyExceptions(tail.len()));
+    let hiding_tail: Vec<serde_json::Value> = network_tail.iter().filter(|r| **r != fp_documents).cloned().collect();
+    if network_tail.len() >= MAX_RULES_PER_LIST {
+        return Err(CompileError::TooManyExceptions(network_tail.len()));
     }
-    let per_chunk = MAX_RULES_PER_LIST - tail.len();
-    let chunk_count = blocking.len().div_ceil(per_chunk);
-    if chunk_count > MAX_LISTS {
-        return Err(CompileError::TooManyRules(blocking.len()));
-    }
-
-    let mut out = Vec::with_capacity(chunk_count);
-    for chunk in blocking.chunks(per_chunk) {
-        let mut list: Vec<serde_json::Value> = Vec::with_capacity(chunk.len() + tail.len());
-        for r in chunk {
-            list.push(serde_json::to_value(r).map_err(|_| CompileError::Converter)?);
+    let mut out = Vec::new();
+    for (rules, tail) in [(&blocking, &network_tail), (&hiding, &hiding_tail)] {
+        let per_chunk = MAX_RULES_PER_LIST - tail.len();
+        for chunk in rules.chunks(per_chunk) {
+            let mut list: Vec<serde_json::Value> = Vec::with_capacity(chunk.len() + tail.len());
+            for r in chunk {
+                let mut v = serde_json::to_value(r).map_err(|_| CompileError::Converter)?;
+                top_frame_only_if_generic(&mut v);
+                list.push(v);
+            }
+            list.extend(tail.iter().cloned());
+            out.push(serde_json::Value::Array(list).to_string());
         }
-        list.extend(tail.iter().cloned());
-        out.push(serde_json::Value::Array(list).to_string());
     }
-    Ok(Compiled { lists: out, rules: blocking.len(), exceptions: exception_count, filters_used: used.len() })
+    if out.len() > MAX_LISTS {
+        return Err(CompileError::TooManyRules(blocking.len() + hiding.len()));
+    }
+    Ok(Compiled { lists: out, rules: blocking.len() + hiding.len(), exceptions: exception_count, filters_used: used.len() })
+}
+
+/// Generic hiding (a selector for every site) applies to the page itself,
+/// not to the frames in it (2026-11-23). WebKit adds the generic selectors
+/// (13,636 from EasyList) to the style of every document they apply to;
+/// measured in WebKitGTK (same WebCore code), a page with 40 frames took
+/// 1,110 ms to load with them in every frame and 290 ms with them in the
+/// page only (233 ms without lists), while the page itself hid the same.
+/// Ads in frames are mostly stopped by the network rules. Hiding meant for
+/// particular sites (`if-domain`, `if-top-url`) is left as it is.
+fn top_frame_only_if_generic(rule: &mut serde_json::Value) {
+    if rule["action"]["type"] != "css-display-none" {
+        return;
+    }
+    let Some(trigger) = rule["trigger"].as_object_mut() else { return };
+    let generic = trigger.get("url-filter").and_then(|f| f.as_str()) == Some(".*")
+        && !trigger.contains_key("if-domain")
+        && !trigger.contains_key("if-top-url");
+    if generic {
+        trigger.insert("load-context".into(), json!(["top-frame"]));
+    }
 }
 
 /// One `ignore-previous-rules` rule that disables blocking on pages whose
@@ -213,15 +251,20 @@ example.com#?#div:has(> .sponsored)
         serde_json::from_str::<serde_json::Value>(&c.lists[i]).unwrap().as_array().unwrap().clone()
     }
 
+    fn types(rules: &[serde_json::Value]) -> Vec<&str> {
+        rules.iter().map(|r| r["action"]["type"].as_str().unwrap()).collect()
+    }
+
     #[test]
     fn converts_network_cosmetic_and_exception_rules() {
         let c = compile(&lists(), &BTreeSet::new()).unwrap();
-        assert_eq!(c.lists.len(), 1);
-        let rules = parsed(&c, 0);
-        let types: Vec<&str> = rules.iter().map(|r| r["action"]["type"].as_str().unwrap()).collect();
-        assert!(types.contains(&"block"));
-        assert!(types.contains(&"css-display-none"));
-        assert_eq!(*types.last().unwrap(), "ignore-previous-rules", "exceptions must come last");
+        assert_eq!(c.lists.len(), 2, "network rules, then element hiding");
+        let (network, hiding) = (parsed(&c, 0), parsed(&c, 1));
+        assert!(types(&network).contains(&"block") && !types(&network).contains(&"css-display-none"));
+        assert!(types(&hiding).contains(&"css-display-none") && !types(&hiding).contains(&"block"));
+        for rules in [&network, &hiding] {
+            assert_eq!(*types(rules).last().unwrap(), "ignore-previous-rules", "exceptions must come last");
+        }
         // Scriptlets are never emitted (they need script injection). `:has()`
         // is native CSS that WebKit supports, so it may be kept as a
         // css-display-none selector.
@@ -230,16 +273,45 @@ example.com#?#div:has(> .sponsored)
     }
 
     #[test]
+    fn hiding_is_not_cancelled_by_the_first_party_document_exception() {
+        // WebKit takes a page's hiding rules from its document load; the
+        // converter's exception for first-party documents (meant for the
+        // network rules) cancelled them all when it followed them.
+        let fp = serde_json::to_value(adblock::content_blocking::ignore_previous_fp_documents()).unwrap();
+        let c = compile(&lists(), &BTreeSet::new()).unwrap();
+        assert!(parsed(&c, 0).contains(&fp), "pages are still never blocked as documents");
+        assert!(!parsed(&c, 1).contains(&fp), "the hiding list keeps its rules");
+        // The other exceptions still apply to hiding (e.g. $document).
+        let text = format!("{SAMPLE}@@||trusted.example^$document\n");
+        let c = compile(&[FilterList { name: "doc", text: &text }], &BTreeSet::new()).unwrap();
+        assert!(c.lists[1].contains("trusted"), "a $document exception turns hiding off too");
+    }
+
+    #[test]
+    fn generic_hiding_applies_to_the_page_not_its_frames() {
+        let text = format!("{SAMPLE}##.sponsor-box\n");
+        let c = compile(&[FilterList { name: "generic", text: &text }], &BTreeSet::new()).unwrap();
+        let hiding = parsed(&c, 1);
+        let generic = hiding.iter().find(|r| r["action"]["selector"] == ".sponsor-box").unwrap();
+        assert_eq!(generic["trigger"]["load-context"], json!(["top-frame"]));
+        let site = hiding.iter().find(|r| r["action"]["selector"] == ".ad-slot").unwrap();
+        assert!(site["trigger"]["if-domain"].is_array() && site["trigger"].get("load-context").is_none());
+        assert!(parsed(&c, 0).iter().all(|r| r["trigger"].get("load-context").is_none()), "blocking is unchanged");
+    }
+
+    #[test]
     fn allowlisted_sites_add_a_final_exception() {
         let mut allow = BTreeSet::new();
         allow.insert("news.example".to_string());
         allow.insert("bad\"]}regex(".to_string()); // rejected by normalise_site
         let c = compile(&lists(), &allow).unwrap();
-        let rules = parsed(&c, 0);
-        let last = rules.last().unwrap();
-        assert_eq!(last["action"]["type"], "ignore-previous-rules");
-        assert_eq!(last["trigger"]["if-top-url"], json!(["^[^:]+://+([^:/]+\\.)?news\\.example[:/]"]));
-        assert!(!c.lists[0].contains("regex("));
+        for i in 0..c.lists.len() {
+            let rules = parsed(&c, i);
+            let last = rules.last().unwrap();
+            assert_eq!(last["action"]["type"], "ignore-previous-rules");
+            assert_eq!(last["trigger"]["if-top-url"], json!(["^[^:]+://+([^:/]+\\.)?news\\.example[:/]"]));
+            assert!(!c.lists[i].contains("regex("));
+        }
     }
 
     #[test]

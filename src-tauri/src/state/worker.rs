@@ -4,8 +4,13 @@
 use super::*;
 
 /// How long after a page finished loading its text is read for history
-/// (pages often fill in after the load event).
-pub(super) const PAGE_TEXT_DELAY: Duration = Duration::from_millis(1500);
+/// (pages often fill in after the load event). Eight seconds since
+/// 2026-11-23 (1.5 s before): the read (`innerText`, a walk over the whole
+/// page, then up to 48,000 characters over IPC and a disk write) then
+/// happens after the page's own late work, and only for a page that is
+/// still on screen, not loading, and showing the same address, so pages
+/// only glanced at are not read at all.
+pub(super) const PAGE_TEXT_DELAY: Duration = Duration::from_millis(8000);
 
 /// Longest a session snapshot waits before it is written.
 pub(super) const SESSION_DELAY: Duration = Duration::from_millis(400);

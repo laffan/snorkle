@@ -68,6 +68,35 @@ processes; a sleeping tab waking in 0.2–0.25 s.
   back); `timing: switching to tab N took … ms in the app`; `timing: chrome render took … ms`
   (renders of 4 ms or more).
 
+### Batch 2 (2026-11-23): ad-hiding, measured in WebKit
+
+WebKitGTK 2.52.6 (the same WebCore content-blocking and style code as Safari) on the Linux build
+machine, headless, five runs each, medians; a 3,000-element page with 60 elements matching real
+EasyList generic selectors, and a page with 40 frames of 150 elements each, both over HTTP.
+
+| Lists | page load | 5 full restyles | 40-frame page load | ads hidden |
+|---|---|---|---|---|
+| none | 77 ms | 120 ms | 233 ms | 0 |
+| network rules only | 78 ms | 136 ms | 239 ms | 0 |
+| as shipped until now | 81 ms | 109 ms | 246 ms | **0** |
+| all hiding, every frame (fixed) | 142 ms | 384 ms | 1,110 ms | 60 |
+| hiding without the generic selectors | 76 ms | 130 ms | 314 ms | 1 |
+| **now: generic hiding in the page only** | 134 ms | 410 ms | 239 ms | 60 |
+
+- **Hiding never worked before.** The converter's exception for first-party documents followed
+  the hiding rules in the same lists and cancelled them on every page. Hiding now has a list of its
+  own without that exception (`snorkle_core::blocking`).
+- **Per frame**: the generic selectors cost about 20 ms per document here; they now apply to the
+  page only (`load-context: top-frame`), which keeps every selector for the page itself.
+- **Still costly**: the page itself pays about 60 ms more to load and 60 ms more per full restyle
+  here (a style rebuild, e.g. a site adding a stylesheet). Most of the restyle cost is the 572
+  generic selectors that are not a plain class or id (attribute matches such as `[id^="ad-"]`).
+  Tried and rejected: looking up the 13,064 plain class and id selectors from a script, as
+  uBlock Origin does (it was slower here: 124 ms to DOMContentLoaded against 72 ms).
+- Compiling the 4 lists the first time takes 6–7 s here (a first launch, or after the lists or
+  the allowlist change); later launches look them up.
+- Page text for History is read 8 s after a load (was 1.5 s), only from a page still on screen.
+
 ### Measuring it (needed before and after each change)
 
 Search ships a scriptable bench (`./bench`). Snorkle has only the console. The first step is

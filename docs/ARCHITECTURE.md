@@ -177,8 +177,15 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
 
 - **Lists:** EasyList and EasyPrivacy, bundled (`src-tauri/resources/filters`). They are
   converted by Brave's `adblock` crate (`snorkle_core::blocking`) into WebKit content-rule-list
-  JSON: about 127k rules, split into 3 lists of at most 50k rules. Every list repeats all 1.4k
-  exception rules, because WebKit applies `ignore-previous-rules` only within its own list.
+  JSON: about 127k rules, split into 3 lists of network rules (at most 50k each) and 1 list of
+  element hiding (2026-11-23). Every list repeats the 1.4k exception rules, because WebKit applies
+  `ignore-previous-rules` only within its own list, except that the hiding list leaves out the
+  converter's exception for every first-party document (`ignore_previous_fp_documents`, meant to
+  follow the network rules): WebKit takes a page's hiding rules from its document load, so with
+  that exception after them no element was ever hidden (until 2026-11-23). Generic hiding (the
+  13,636 selectors for every site) applies to the page, not to frames in it (`load-context:
+  top-frame`): measured in WebKitGTK, a page with 40 frames loaded in 1,110 ms with them in every
+  frame and in 239 ms this way (233 ms without lists).
   Conversion takes about 0.5 s (release build, laptop) and runs on a background thread.
 - **Caching:** WebKit compiles the lists and stores them as `snorkle.cb.<key>.<i>.of.<n>`, where
   the key hashes the converter version, the lists and the allowlist. Later launches look up the
@@ -416,8 +423,9 @@ Pointing at a visit replaces its time with a tray (Save for Later, below) and an
 a visit of a page already saved shows a tray with a tick instead. Select turns rows into
 checkboxes (Shift-click selects a range) and Remove deletes the selection (`remove_history`, by
 URL and visit time). Clear (pressed twice) clears history; pages saved for later stay. The text of
-the 100 most recently visited pages is saved (`storage` `page-text/`, `SavedPageText`): 1.5 s
-after a non-private page finishes loading, the host runs the constant `ai::PAGE_TEXT_JS` (C17) and
+the 100 most recently visited pages is saved (`storage` `page-text/`, `SavedPageText`): 8 s
+(1.5 s until 2026-11-23) after a non-private page finishes loading, if it is still on screen, done
+loading and on the same address, the host runs the constant `ai::PAGE_TEXT_JS` (C17) and
 the title and visible text (`innerText`, ≤ 48,000 characters, cleaned) are written if the tab still
 shows that page. The text is kept only while the page is in history: removing its last visit or
 clearing history deletes it. Rows with saved text show its size beside the address; clicking one

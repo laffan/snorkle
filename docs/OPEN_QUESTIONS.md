@@ -1273,3 +1273,25 @@ The live sites were not reachable or not signed in from this environment.
   keep a snapshot of each page it hides and cover the reloading view with it until the load
   commits.
 
+## Performance batch 2 (2026-11-23)
+
+- **[verify] Ad-hiding now works.** Until now no element was ever hidden: the converter's
+  exception for first-party documents (`adblock::content_blocking::ignore_previous_fp_documents`)
+  followed the hiding rules in every list, and WebKit takes a page's hiding rules from its document
+  load. Hiding now has its own list without that exception (measured in WebKitGTK: 60 of 60
+  elements hidden, 0 before). On a device: open a news site with the ad blocker on and off for it.
+- **[decide] Generic hiding only in the page, not in its frames** (`load-context: top-frame`):
+  a page with 40 frames loaded in 239 ms instead of 1,110 ms (WebKitGTK). Ads inside frames are
+  still blocked by the network rules; only the empty boxes they leave in third-party frames show.
+- **[decide] What hiding still costs**: about 60 ms more per page load and per full restyle on the
+  build machine (less on an M-series Mac), mostly from 572 generic selectors with attribute
+  matches. Dropping those would halve the restyle cost and hide fewer ads; not done.
+- **[verify] `load-context`** is assumed supported by WebKit on iPadOS 26 and macOS with Safari 26
+  (WebKitGTK 2.52 accepts and applies it). A WebKit that rejected it would fail to compile the
+  hiding list, and the toast "Ad blocker could not start" would show.
+- **[decide] Page text read after 8 s** (was 1.5 s), and only from a page still on screen, done
+  loading and on the same address: pages glanced at are no longer in History's text search.
+- **[verify] View modes' cost** (black and white, hidden media) is in how WebKit draws the filters
+  and was not measured; their scripts already do pointer work once per frame. Compare scrolling and
+  Activity Monitor's GPU column with the palette and images buttons on and off.
+

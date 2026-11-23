@@ -72,6 +72,17 @@ impl Events {
         let _ = std::thread::Builder::new().name("snorkle-page-text".into()).spawn(move || {
             std::thread::sleep(PAGE_TEXT_DELAY);
             snorkle_content::dispatch_main(move || {
+                // Kept open: on screen, done loading, still on that page.
+                let kept = {
+                    let b = shared.browser();
+                    b.is_on_screen(tab)
+                        && b.tab(tab).is_some_and(|t| {
+                            !t.loading && t.committed_url.as_ref().map(|u| u.to_string()) == Some(page.clone())
+                        })
+                };
+                if !kept {
+                    return;
+                }
                 with_host(|h| {
                     h.read_page_text(
                         tab,

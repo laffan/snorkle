@@ -277,6 +277,12 @@ impl Browser {
         out
     }
 
+    /// Whether `id` is on screen: the active tab, or the other half of the
+    /// split pair that holds it.
+    pub fn is_on_screen(&self, id: TabId) -> bool {
+        self.active == Some(id) || self.split_view().is_some_and(|s| s.left == id || s.right == id)
+    }
+
     /// The pair on screen: the one holding the active tab.
     pub fn split_view(&self) -> Option<SplitView> {
         self.active.and_then(|a| self.pair_of(a))
