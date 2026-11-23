@@ -4,21 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>Snorkle</title>
-  <link rel="stylesheet" href="chrome.css">
+  <link rel="stylesheet" href="style/base.css">
+  <link rel="stylesheet" href="style/bar.css">
+  <link rel="stylesheet" href="style/panels.css">
   <link rel="stylesheet" href="notebook.css">
-  <script src="notebook.js" defer></script>
-  <script src="chrome.js" defer></script>
+  <script src="load.js" defer></script>
 </head>
 <body>
-  <!--
-    Trusted browser chrome. Everything rendered here comes from Rust state;
-    page-controlled strings (titles, hosts) are only ever set via
-    textContent. Web content is drawn by native WKWebViews placed below
-    #chrome and to the right of a docked #sidebar (Rust positions them using
-    the insets reported from here, and never over the chrome). Anything that
-    overlaps the content area (popups, modals) sets `overlay`, which hides
-    the native content views while it is open.
-  -->
+  <!-- Trusted browser chrome, rendered from Rust's state; page-controlled
+       strings (titles, hosts) are set with textContent only. Pages are
+       native views beside the docked panels; what covers them sets
+       `overlay` or is cut out of them as a hole (docs/ARCHITECTURE.md §5f). -->
 
   <!-- Sidebar along the left edge: bookmarks bar, tabs, bottom bar.
        Docked and resizable in wide windows; slides over a hidden content
@@ -279,7 +275,6 @@
     </section>
   </main>
 
-  <!-- Settings modal (over the content area). -->
   <!-- History: the saved text of a visited page (the 100 most recent). -->
   <div id="copy-modal" class="backdrop" hidden>
     <div class="modal page-copy" role="dialog" aria-modal="true" aria-labelledby="copy-title">

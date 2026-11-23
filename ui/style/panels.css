@@ -1,0 +1,376 @@
+/* The chrome's styles, part 3 of 3 (ui/style/, linked in order; one cascade):
+   The chat, night vision, the console, the start page, pins, menus, Settings, the attached bar, Blocked, History and Save for Later. */
+
+/* ---- AI chat (docked right of the page) ---------------------------------- */
+.sheet.chat { display: flex; flex-direction: column; overflow: hidden; }
+.sheet.chat:not(.dock) { height: calc(100% - env(safe-area-inset-top) - 80px); }
+.chat-head h1 { flex: 0 0 auto; }
+.chat-plus { min-width: 30px; height: 30px; border-radius: 15px; font-size: 22px; line-height: 1; margin-left: 2px; }
+.chat-context { font-size: 12px; color: var(--muted); margin: -4px 0 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-log {
+  flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0 -4px; padding: 4px;
+  display: flex; flex-direction: column; gap: 8px; -webkit-user-select: text; user-select: text;
+}
+.chat-log li { max-width: 92%; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.4; }
+.chat-log li.user { align-self: flex-end; background: var(--fg); color: var(--bar); border-bottom-right-radius: 4px; }
+.chat-log li.assistant { align-self: flex-start; background: var(--field); border-bottom-left-radius: 4px; }
+.chat-log li.error, .chat-log li.info { align-self: center; max-width: 100%; background: none; color: var(--muted); font-size: 12px; text-align: center; padding: 2px 8px; }
+.chat-log li.error { font-weight: 600; }
+.chat-log li.pending { color: var(--muted); }
+.chat-log li .meta { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.chat-form { display: flex; gap: 8px; align-items: stretch; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.chat-form[hidden] { display: none; }
+#chat-input {
+  flex: 1; min-width: 0; resize: none; max-height: 30vh; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--field); padding: 8px 10px; font-size: 15px;
+}
+#chat-send { flex: 0 0 auto; height: auto; }
+.chat-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
+.linkbtn {
+  font-size: 13px; color: var(--muted); padding: 4px 0; text-decoration: underline; text-underline-offset: 3px;
+  max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.linkbtn:hover { color: var(--fg); }
+#chat-cost { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.popup.chat-model-menu { left: 20px; right: auto; bottom: 44px; max-height: 60%; overflow-y: auto; min-width: 220px; z-index: 5; }
+.chat-model-menu button.chosen { font-weight: 700; }
+.chat-archive { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0; }
+.chat-archive li { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.chat-archive li.empty { justify-content: center; padding: 16px; border: 0; }
+.chat-archive button.open { flex: 1; min-width: 0; text-align: left; padding: 10px 4px; display: flex; flex-direction: column; gap: 2px; }
+.chat-archive .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-archive .u { font-size: 12px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-archive button.remove { padding: 8px 12px; color: var(--muted); font-size: 18px; }
+#chat-archive[aria-pressed="true"] { background: var(--fg); color: var(--bar); }
+.option { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.option > div { flex: 1; }
+.option > .seg { flex: 0 0 auto; }
+.option > .option-check { flex: 0 0 auto; width: 20px; height: 20px; margin: 0; }
+label.option-title { display: block; }
+
+/* Night vision (Settings → General → Appearance; chrome.js): the chrome
+   in red alone. Two click-through layers over everything: the first
+   reduces what is under it to its luminance, the second multiplies that
+   by pure red, leaving no green or blue. Filter functions and a blend
+   mode only (WebKit takes SVG url() filters off its accelerated path and
+   refuses them in backdrop-filter). Pages draw their own pair
+   (viewmodes::NIGHT_CSS); the body's opaque background keeps the red
+   from painting over anything transparent. */
+.night-vision-layer { position: fixed; inset: 0; pointer-events: none; }
+#night-vision-grey { z-index: 2147483646; -webkit-backdrop-filter: grayscale(1); backdrop-filter: grayscale(1); }
+#night-vision-red { z-index: 2147483647; background: #f00; mix-blend-mode: multiply; }
+.option-title { font-weight: 600; }
+.credits { margin-top: 20px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.field input, .field textarea {
+  width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--field); padding: 8px 10px; font-size: 15px;
+}
+.field textarea { font-family: ui-monospace, Menlo, monospace; font-size: 13px; resize: vertical; }
+.check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+#scripts-new { margin-top: 12px; }
+
+/* ---- console ------------------------------------------------------------ */
+#console {
+  /* `left` is set from JS (docked sidebar width); height is --console-h. */
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; height: var(--console-h, 34vh);
+  display: flex; flex-direction: column; background: var(--bar); border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.console-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.console-head .icon { min-width: 32px; height: 32px; font-size: 20px; }
+.seg { display: inline-flex; background: var(--field); border-radius: 8px; padding: 2px; }
+.seg button { font-size: 12px; padding: 4px 8px; border-radius: 6px; }
+.seg button[aria-pressed="true"] { background: var(--bar); font-weight: 600; }
+#console-capture[aria-pressed="true"] { color: var(--danger); }
+.console-note { margin: 0; padding: 6px 10px; font-size: 12px; background: var(--warn-bg); }
+.console-list {
+  flex: 1; overflow-y: auto; margin: 0; padding: 0; list-style: none;
+  font: 12px/1.4 ui-monospace, Menlo, monospace; -webkit-user-select: text; user-select: text;
+}
+.console-list li { display: flex; gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--line); align-items: baseline; }
+.console-list .when { color: var(--muted); flex: 0 0 auto; }
+.console-list .src { color: var(--muted); flex: 0 0 auto; max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-list .msg { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.console-list li.warn { background: var(--warn-bg); }
+.console-list li.error { font-weight: 700; }
+.console-list li.debug .msg { color: var(--muted); }
+
+/* ---- start page (a new tab) and its palette ------------------------------ */
+/* The start page fills its pane (the surface: the content area, or the
+   focused half of a split). The input's middle sits at 40% of the pane's
+   height, a little above centre; the rows open below it, scrolling inside
+   the card rather than pushing the input up. */
+#surface > #start { position: absolute; inset: 0; max-width: none; margin: 0; overflow: hidden; }
+#start .palette {
+  position: absolute; left: 50%; top: 40%; transform: translate(-50%, -31px);
+  width: min(640px, calc(100% - 48px)); max-height: calc(60% - 57px);
+  display: flex; flex-direction: column;
+  background: var(--bar); border: 1px solid var(--line); border-radius: 16px;
+  overflow: hidden;
+}
+#palette-input {
+  flex: none; width: 100%; height: 62px; border: 0; border-bottom: 1px solid var(--line); outline: none; background: transparent;
+  padding: 0 20px; font-size: 20px;
+}
+.palette-list { list-style: none; margin: 0; padding: 6px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.palette-list:empty { display: none; }
+.palette-list li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; cursor: pointer; }
+.palette-list li[aria-selected="true"] { background: var(--fg); color: var(--bar); }
+.palette-list li[aria-selected="true"] .h, .palette-list li[aria-selected="true"] .kind { color: var(--bar); opacity: .75; }
+.palette-list .t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.palette-list .h { color: var(--muted); font-size: 13px; flex: 0 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 40%; }
+.palette-list .kind { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; flex: 0 0 auto; width: 64px; }
+.palette-list mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
+/* Define: the definition sits above the input (the input stays where it
+   is), scrolling inside its card when long. */
+.define-card {
+  position: absolute; left: 50%; bottom: calc(60% + 43px); transform: translateX(-50%);
+  width: min(640px, calc(100% - 48px)); max-height: calc(40% - 55px);
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 18px;
+  background: var(--bar); border: 1px solid var(--line); border-radius: 16px;
+  overflow: hidden;
+}
+.define-head { display: flex; align-items: center; gap: 8px; flex: none; }
+.define-word { flex: 1; min-width: 0; font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.define-head .icon { width: 30px; height: 30px; font-size: 20px; }
+.define-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; white-space: pre-wrap; line-height: 1.45; user-select: text; -webkit-user-select: text; }
+.define-body.pending { color: var(--muted); }
+.define-body.error { color: var(--danger); }
+.define-ask { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
+.define-foot { display: flex; align-items: center; gap: 12px; flex: none; }
+.define-foot .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- pinned grid ------------------------------------------------------- */
+.pingrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-height: 60px; padding: 2px; border-radius: 12px; }
+/* Empty pins and bookmarks take no room and show no explainer text
+   (2026-11-23); while a row is dragged they open up as drop targets. */
+.pingrid:empty, .droplist:empty { min-height: 0; padding: 0; }
+body.dragging .pingrid:empty { min-height: 60px; outline: 2px dashed var(--line); outline-offset: -2px; }
+body.dragging .droplist:empty { min-height: 44px; }
+.pingrid.drop-target { background: var(--field); box-shadow: 0 0 0 2px var(--accent) inset; }
+.pin { position: relative; min-width: 0; aspect-ratio: 1; border-radius: 12px; touch-action: manipulation; }
+.pin.drag-src { opacity: .35; }
+/* Bare icons (owner request 2026-11-23: no borders or backgrounds); the
+   pin whose tab is shown gets a dot under its icon. */
+.pin.active::after {
+  content: ""; position: absolute; left: 50%; bottom: 6px; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--fg); pointer-events: none;
+}
+@media (any-hover: hover) { .pin:hover { background: var(--field); } }
+/* Unpin appears only while the pointer is over the pin (touch-only
+   devices: on the selected pin). */
+.pin > .unpin { opacity: 0; pointer-events: none; transition: opacity .1s; }
+.pin:focus-within > .unpin { opacity: 1; pointer-events: auto; }
+@media (any-hover: hover) {
+  .pin:hover > .unpin { opacity: 1; pointer-events: auto; }
+}
+@media (any-hover: none) {
+  .pin.active > .unpin { opacity: 1; pointer-events: auto; }
+}
+body.dragging .pin > .unpin { opacity: 0; pointer-events: none; }
+.pin > .open { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 12px; }
+.pin img { width: 28px; height: 28px; object-fit: contain; pointer-events: none; }
+/* Bundled single-colour icons are black; light on dark backgrounds. */
+.pin img.prefab { width: 24px; height: 24px; }
+.pin .emoji { font-size: 26px; line-height: 1; pointer-events: none; }
+/* Pin menu (right-click / ⌘-click), placed under the pin in the sidebar. */
+.popup.pin-pop { left: 10px; right: 10px; bottom: auto; min-width: 0; z-index: 6; }
+.letter { width: 28px; height: 28px; border-radius: 8px; color: #fff; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; }
+.pin > .unpin {
+  position: absolute; top: -4px; right: -4px; width: 20px; height: 20px; border-radius: 10px;
+  background: var(--field); color: var(--muted); font-size: 13px; line-height: 20px;
+}
+
+/* ---- selected-text menu (over the page, cut out of it) ------------------- */
+/* Selection and image menus: one action per row. */
+.sel-pop {
+  position: fixed; z-index: 30; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 150px;
+  background: var(--fg); color: var(--bar); border-radius: 12px;
+}
+.sel-pop button { padding: 7px 11px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; text-align: left; }
+.sel-pop button:active { background: rgba(127, 127, 127, .35); }
+
+/* ---- settings: AI uses, keyboard ------------------------------------------ */
+.settings-sub {
+  margin: 20px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em;
+}
+.settings-body section > .settings-sub:first-of-type { margin-top: 8px; }
+.ai-uses { display: flex; flex-direction: column; }
+.ai-use { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--line); }
+.ai-use-label { flex: 1 1 200px; min-width: 0; }
+.ai-use-pickers { display: flex; gap: 8px; flex: 1 1 260px; min-width: 0; }
+.ai-use-pickers select {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--field);
+  padding: 8px; font-size: 14px; color: var(--fg);
+}
+.ai-use-pickers select:first-child { flex: 0 0 120px; }
+.keys-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.keys-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.keys-title { flex: 1; min-width: 0; }
+.keys-combo {
+  min-width: 92px; padding: 6px 10px; border-radius: 8px; background: var(--field); text-align: center;
+  font-variant-numeric: tabular-nums; font-size: 14px; letter-spacing: .04em;
+}
+.keys-combo.recording { background: var(--fg); color: var(--bar); }
+
+/* ---- attached URL bar (⋯ → Attach URL Bar) --------------------------------- */
+/* A full-width bar along the bottom of the page instead of the floating
+   pill; the page ends above it (reported as the content area's bottom
+   inset), so text fields at the bottom of pages stay clear. Toasts, the
+   find bar and the ⋯ popup still float above it, over the page. */
+body.bar-attached #chrome { padding: 0; }
+body.bar-attached #chrome > :not(#toolbar) { margin-left: 12px; margin-right: 12px; }
+body.bar-attached #toolbar.urlpill {
+  align-self: stretch; justify-content: center; border-radius: 0; border-width: 1px 0 0; box-shadow: none;
+  padding: 4px max(12px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  opacity: 1;
+}
+body.bar-attached.sb-docked #toolbar.urlpill { padding-left: 12px; }
+body.bar-attached .findbar { margin-bottom: -1px; }
+body.bar-attached #progress { top: -1px; bottom: auto; left: 0; right: 0; }
+body.bar-attached #surface { padding-bottom: 24px; }
+body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
+
+/* ---- Settings → Blocked ------------------------------------------------------- */
+.mono-inline { font-family: ui-monospace, Menlo, monospace; font-size: .92em; overflow-wrap: anywhere; }
+.blocked-add { display: flex; gap: 8px; margin-top: 12px; }
+.blocked-add input, .blocked-message {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--field);
+  padding: 9px 10px; font-size: 15px;
+}
+.blocked-add input { font-family: ui-monospace, Menlo, monospace; }
+.blocked-message { display: block; width: 100%; resize: vertical; }
+.blocked-msg { min-height: 1.2em; margin-top: 6px; }
+.blocked-list { margin-top: 4px; }
+.blocked-list li { gap: 8px; padding: 6px 0; }
+.blocked-list li.empty { border: 0; padding: 8px 0; }
+.blocked-list .pattern { flex: 1; min-width: 0; }
+.blocked-list .blocked-edit { padding: 6px 12px; font-size: 13px; }
+
+/* The passage modal: the text is greyed out and each letter turns solid
+   as it is typed; a wrong letter is shown inverted until it is deleted. */
+#unblock-modal { z-index: 60; }
+.modal.unblock { width: min(560px, 100%); }
+.unblock-for { margin: 0 0 12px; }
+.unblock-type { position: relative; border-radius: 10px; background: var(--field); padding: 14px 16px; cursor: text; }
+.unblock-type:focus-within { box-shadow: 0 0 0 2px var(--accent) inset; }
+.unblock-text { margin: 0; font-size: 17px; line-height: 1.55; white-space: pre-wrap; }
+.unblock-text span { opacity: .3; transition: opacity .08s; }
+.unblock-text span.ok { opacity: 1; }
+.unblock-text span.bad { opacity: 1; background: var(--fg); color: var(--bar); border-radius: 2px; }
+.unblock-type:focus-within .unblock-text span.cur { box-shadow: -2px 0 0 var(--fg); animation: unblock-caret 1s steps(1) infinite; }
+@keyframes unblock-caret { 50% { box-shadow: none; } }
+/* The real input sits invisibly over the text so a tap anywhere on the
+   passage focuses it (and brings up the keyboard on iPad). 16px keeps
+   iOS from zooming. */
+.unblock-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; resize: none; border: 0; padding: 0;
+  font-size: 16px; color: transparent; background: transparent; caret-color: transparent; cursor: text;
+}
+.unblock-actions { margin-top: 14px; }
+
+/* Settings → Blocked: the user's message in the middle of a blocked tab. */
+#notice.user-blocked {
+  min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding-top: 0;
+}
+#notice.user-blocked h1 { font-size: 30px; max-width: 30ch; overflow-wrap: anywhere; }
+#notice.user-blocked #notice-body:empty { display: none; }
+#unblock-edit { font-family: ui-monospace, Menlo, monospace; }
+
+/* Tab favicons (2026-11-04): the site's icon, a bundled one, or its letter,
+   left of the title. Clicks go to the row. */
+.tab > .tab-icon, .bm > .tab-icon { flex: 0 0 18px; width: 18px; height: 18px; margin-left: 10px; border-radius: 4px; object-fit: contain; pointer-events: none; }
+:is(.tab, .bm) > span.tab-icon.emoji-icon { display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; }
+:is(.tab, .bm) > span.tab-icon.letter { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; }
+:is(.tab, .bm) > .tab-icon + .open { padding-left: 8px; }
+.tab-group > .tab > .tab-icon { margin-left: 6px; }
+.tab-group > .tab > .tab-icon + .open { padding-left: 6px; }
+
+/* Domain headings are containers, never a parent page. */
+.site-heading { display: flex; align-items: center; min-height: 28px; padding-right: 2px; gap: 4px; }
+.site-heading .site-toggle { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; border: 0; font-weight: 500; color: var(--muted); }
+
+
+.chat-foot { flex-wrap: wrap; }
+#chat-model-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#chat-effort { max-width: 125px; font-size: 12px; padding: 4px; }
+
+/* ---- History and Save for Later (sidebar) ------------------------------- */
+/* While open, History replaces the sidebar's contents (pins, bookmarks,
+   tabs): its heading row stays in view, then the search field, the pages
+   saved for later and the visits by day. Rows are one title line over a
+   muted site line; their buttons appear on hover (always on touch-only
+   devices), as on tab rows. */
+#history-view { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
+body.history-open #side-scroll { display: none; }
+#ai-btn[aria-pressed="true"], #notebook-btn[aria-pressed="true"], #night-btn[aria-pressed="true"] { color: var(--fg); background: var(--field); }
+/* The AI sidebar (summary above chat) has one close button, the
+   summary's; the chat's shows when the chat is alone (narrow windows). */
+#summary:not([hidden]) ~ #chat #chat-close { display: none; }
+.hv-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 2px;
+  padding: 10px 2px 6px; background: var(--side);
+}
+.hv-title { font-size: 15px; font-weight: 700; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hv-btn { font-size: 12px; padding: 5px 7px; border-radius: 7px; color: var(--muted); white-space: nowrap; }
+.hv-btn:hover { color: var(--fg); background: var(--field); }
+.hv-btn:disabled:hover { background: none; color: var(--muted); }
+.hv-close { min-width: 28px; height: 28px; font-size: 18px; color: var(--muted); border-radius: 7px; }
+.history-search { width: 100%; margin: 0 0 6px; padding: 7px 10px; border-radius: 8px; border: 0; background: var(--field); font-size: 14px; outline: none; }
+.hv-section { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 12px 6px 4px; }
+.later-section { padding-bottom: 4px; }
+.later-list { display: flex; flex-direction: column; gap: 1px; }
+.later-card { position: relative; border-radius: 8px; }
+.later-card.active { background: var(--tab-active); }
+.later-card > .open, .history-list .open {
+  flex: 1; min-width: 0; width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px; border-radius: 8px;
+}
+.later-card > .open > .tab-icon { flex: 0 0 18px; width: 18px; height: 18px; border-radius: 4px; object-fit: contain; }
+.later-card > .open > span.tab-icon.letter { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; }
+.later-card .text, .history-list .open { flex-direction: column; align-items: stretch; gap: 0; }
+.later-card .text { flex: 1; min-width: 0; display: flex; }
+.later-card .t, .history-list .t { font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.later-card .u, .history-list .u { font-size: 11px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: flex; min-width: 0; }
+.later-actions {
+  position: absolute; top: 50%; right: 2px; transform: translateY(-50%); display: flex; gap: 0; border-radius: 7px;
+  background: var(--side); opacity: 0; pointer-events: none; transition: opacity .1s;
+}
+.later-card.active .later-actions { background: var(--tab-active); }
+.later-actions button, .history-list .acts button {
+  width: 26px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); font-size: 17px;
+}
+.later-actions button:hover, .history-list .acts button:hover { color: var(--fg); background: var(--field); }
+.later-actions svg, .history-list .acts svg, .history-list .saved-mark svg { width: 15px; height: 15px; }
+/* Only while pointed at, or with keyboard focus (not the focus a click
+   leaves); touch-only devices: the card whose saved copy is open. */
+.later-card:has(:focus-visible) .later-actions { opacity: 1; pointer-events: auto; }
+@media (any-hover: hover) { .later-card:hover .later-actions { opacity: 1; pointer-events: auto; } }
+@media (any-hover: none) { .later-card.active .later-actions { opacity: 1; pointer-events: auto; } }
+/* Visits: the time at the row's end; on hover, Save for Later and ×
+   in its place. A saved page's visits carry the tray as a mark. */
+.history-list { list-style: none; margin: 0; padding: 0; }
+.history-list li.empty { padding: 8px 6px; font-size: 13px; }
+.history-list li.visit { position: relative; display: flex; align-items: center; border-radius: 8px; }
+.history-list .size { flex: 0 0 auto; margin-left: 6px; }
+.history-list .snip { font-size: 12px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+.history-list .end { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding-right: 2px; }
+.history-list .when { font-size: 11px; color: var(--muted); white-space: nowrap; padding: 0 4px; font-variant-numeric: tabular-nums; }
+.history-list .saved-mark { display: inline-flex; color: var(--muted); padding: 0 2px; }
+.history-list .saved-mark.busy { animation: dl-pulse 1.4s ease-in-out infinite; }
+.history-list .acts { display: none; }
+@media (any-hover: hover) {
+  .history-list li.visit:hover .when { display: none; }
+  .history-list li.visit:hover .acts { display: inline-flex; }
+}
+@media (any-hover: none) {
+  .history-list .when { display: none; }
+  .history-list .acts { display: inline-flex; }
+}
+.history-list .check { flex: 0 0 auto; width: 18px; height: 18px; margin: 0 2px 0 6px; border-radius: 5px; border: 1.5px solid var(--muted); display: none; }
+#history-view.selecting .history-list .check { display: inline-block; }
+#history-view.selecting .history-list .acts { display: none !important; }
+#history-view.selecting .history-list .when { display: inline !important; }
+#history-view.selecting .history-list li.visit { user-select: none; -webkit-user-select: none; }
+.history-list li.selected { background: var(--field); }
+.history-list li.selected .check { background: var(--fg); border-color: var(--fg); box-shadow: 0 0 0 3px var(--field) inset; }

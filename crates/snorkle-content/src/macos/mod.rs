@@ -258,7 +258,7 @@ impl ContentHost {
     }
 
     /// Frame of one pane, from the top left; the same layout as on iPadOS
-    /// (`ios/mod.rs` `pane_frame`, `ui/chrome.js` `splitSizes`).
+    /// (`ios/mod.rs` `pane_frame`, `ui/chrome/sidebar.js` `splitSizes`).
     fn pane_frame(&self, pane: Pane) -> Tl {
         let a = self.content_frame();
         let r = self.split_ratio.get();

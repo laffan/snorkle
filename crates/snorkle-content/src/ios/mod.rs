@@ -279,7 +279,7 @@ impl ContentHost {
     /// view (side by side, or one above the other): the first pane gets
     /// `split_ratio` of the space less the 8 pt gap (floored), the second
     /// the rest. The chrome draws the divider's handle in the gap, which no
-    /// page covers (`ui/chrome.js` `splitSizes` uses the same formula).
+    /// page covers (`ui/chrome/sidebar.js` `splitSizes` uses the same formula).
     fn pane_frame(&self, pane: Pane) -> CGRect {
         let area = self.content_frame();
         let r = self.split_ratio.get();
