@@ -10,10 +10,10 @@ procedure. Fill in the results tables from real devices; do not quote the target
 | Live content web views | by physical RAM: <4 GB 2 · <6 GB 3 · <8 GB 4 · <16 GB 6 · ≥16 GB 8 | `tabs::MemoryBudget::for_physical_memory` |
 | Background live-view TTL | 10 min, then discard | `MemoryBudget::DEFAULT_TTL_MS` |
 | On memory warning | keep only the active view | `Browser::on_memory_warning` |
-| WebContent crash | auto-reload ≤ 2 per 60 s, then notice | `browser.rs` `MAX_CRASH_RELOADS` |
+| WebContent crash | auto-reload ≤ 2 per 60 s, then notice | `browser/mod.rs` `MAX_CRASH_RELOADS` |
 | `decidePolicyForNavigationAction` cost | pure function, no I/O; target < 50 µs on device | `policy.rs` |
 | Chrome state pushes | coalesced; progress in 5 % steps | `Browser::on_progress` |
-| Disk writes | off main thread; session writes coalesced (400 ms) | `src-tauri/src/state.rs` |
+| Disk writes | off main thread; session writes coalesced (400 ms) | `src-tauri/src/state/` |
 | Restore | only the active tab gets a web view | `Browser::restore_session` |
 | Ad-block conversion | off main thread; skipped when WebKit already has the compiled lists | `src-tauri/src/adblock.rs` |
 

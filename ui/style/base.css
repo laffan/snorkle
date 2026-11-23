@@ -89,7 +89,7 @@ body:not(.sb-docked) #chrome { padding-left: max(12px, env(safe-area-inset-left)
 #safe-bottom { position: fixed; bottom: 0; left: 0; width: 0; height: env(safe-area-inset-bottom); pointer-events: none; }
 
 /* ---- sidebar ---------------------------------------------------------- */
-/* Two modes, set on <body> by chrome.js: attached (a full-height column
+/* Two modes, set on <body> by the chrome's scripts (ui/chrome/): attached (a full-height column
    beside the page) or flyout (`sb-flyout`: inset, rounded, over the page);
    `sb-hidden` slides it out. The toggle tab is a child, so it always moves
    with it. One transition list covers every change (slide, reshape); the
@@ -125,7 +125,7 @@ body.sb-flyout #sidebar-resize { display: none; }
   transition: opacity .15s;
 }
 /* Attached (wide windows): no tab; it shows only in flyout mode (see
-   `edgeAway` in chrome.js for the exceptions). */
+   `edgeAway` in chrome/sidebar.js for the exceptions). */
 body.edge-away #edge-tab { opacity: 0; pointer-events: none; }
 /* Attached: a vertical line. */
 #edge-tab::after {

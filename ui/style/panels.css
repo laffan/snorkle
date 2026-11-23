@@ -48,7 +48,7 @@
 .option > .option-check { flex: 0 0 auto; width: 20px; height: 20px; margin: 0; }
 label.option-title { display: block; }
 
-/* Night vision (Settings → General → Appearance; chrome.js): the chrome
+/* Night vision (Settings → General → Appearance; chrome/sidebar.js): the chrome
    in red alone. Two click-through layers over everything: the first
    reduces what is under it to its luminance, the second multiplies that
    by pure red, leaving no green or blue. Filter functions and a blend

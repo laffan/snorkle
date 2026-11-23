@@ -1080,7 +1080,7 @@ The live sites were not reachable or not signed in from this environment.
   a summary sends the page's text (as numbered blocks, ≤ 40,000 characters) to the Summary View
   service right away, as pressing Send does for the chat; after the tab moves to another page the
   panel asks first ("Summarize “title”?"). If opening should also ask first, `setSummary` in
-  `ui/chrome.js` is the one place to change. Private tabs are summarized like any other (nothing
+  `ui/chrome/` is the one place to change. Private tabs are summarized like any other (nothing
   is stored), as with the page chat.
 - **[decide] What counts as a new page.** The summary is dropped when the tab's address changes,
   ignoring the fragment (`#…`), so jumps within a page keep it. A reload of the same address keeps

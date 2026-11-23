@@ -11,7 +11,7 @@
   const FOLLOW_KEY = 'nbFollow';
   const SAVE_MS = 600;
 
-  // `root`: the panel to fill. `env` (from chrome.js):
+  // `root`: the panel to fill. `env` (from chrome/wiring.js):
   //   invoke(cmd, args) → Promise; toast(text);
   //   place() → { url, title } of the page shown (null: none, or private);
   //   goTo(target) — open a link's page; openLink(href) — a typed link;

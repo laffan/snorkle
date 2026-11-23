@@ -3,7 +3,7 @@
 
 // ---- Notebook (owner request 2026-11-15) ------------------------------------
 //
-// notebook.js draws it (zotero-helper's notepad); here it is docked with
+// ui/notebook/ draws it (zotero-helper's notepad); here it is docked with
 // the right panels and fed from pages: ⌥-click on text or an image shows
 // "Send to Notebook" above it, ⌥-drag clips a part of the page (C23), the
 // scissors turn clip mode on in the page, and the quote button dragged

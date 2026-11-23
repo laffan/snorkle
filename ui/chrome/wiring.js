@@ -2,7 +2,7 @@
 'use strict';
 
 // ---- wiring -----------------------------------------------------------
-// The Notebook (notebook.js), in its panel; open as it was left.
+// The Notebook (ui/notebook/), in its panel; open as it was left.
 notebook = window.SnorkleNotebook.create($('notebook'), {
   invoke: (cmd, args) => T.core.invoke(cmd, args),
   toast,

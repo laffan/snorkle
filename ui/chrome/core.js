@@ -39,7 +39,7 @@ let modalOpen = false;
 let scriptsOpen = false;
 let menuOpen = false;
 let chatOpen = false;
-// The Notebook (notebook.js; remembered): docked with the right panels.
+// The Notebook (ui/notebook/; remembered): docked with the right panels.
 let notebookOpen = false;
 let notebook = null;
 // ⌘⇧\ hides the right panels without closing them (the summary view

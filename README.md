@@ -27,12 +27,21 @@ crates/snorkle-core     platform-independent core (#![forbid(unsafe_code)])
 crates/snorkle-content  content WKWebView hosts (objc2): src/ios (UIKit), src/macos (AppKit),
                         src/webkit (WebKit code both share), stub elsewhere
 src-tauri               Tauri app: chrome window, commands, capabilities, plist/entitlements
-ui                      chrome UI (HTML/CSS/JS, no build step, no packages)
+ui                      chrome UI (HTML/CSS/JS, no build step, no packages): index.html,
+                        load.js (adds the scripts in order), chrome/, notebook/, style/
 fuzz                    cargo-fuzz targets (separate workspace, nightly)
 tests/device            on-device probes (IPC isolation, rAF/ProMotion)
 scripts                 check-ios.sh / check-macos.sh (type-checks without Xcode), check-deps.sh,
                         macos-passkeys.sh (the macOS build with the passkey entitlement)
 ```
+
+**700-line rule** (2026-11-23): no code or style file (`.rs`, `.js`, `.css`, `.html`, `.sh`) is
+longer than 700 lines; `src-tauri/tests/file_size.rs` fails otherwise. Split by topic instead:
+Rust `x.rs` becomes `x/mod.rs` with submodules (tests in `x/tests.rs`); the chrome's scripts are
+ordered classic scripts in `ui/chrome/` sharing one scope (listed in `ui/load.js`; a file may call
+another's functions at load only if that one comes earlier); the notebook's are closures in
+`ui/notebook/` that share what they define through `window.SnorkleNb`; styles are
+`ui/style/*.css`, linked in order as one cascade.
 
 ## Test (any OS)
 

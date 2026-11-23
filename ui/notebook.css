@@ -1,4 +1,4 @@
-/* The Notebook (notebook.js): zotero-helper's notepad (notepad.css,
+/* The Notebook (ui/notebook/): zotero-helper's notepad (notepad.css,
    notepad-clips.css, notepad-texts.css), on Snorkle's colours. One
    continuous surface in the panel's colour: a slim bar of tools over the
    canvas, which the pen writes on in the theme's ink (or red) and a finger
@@ -11,7 +11,7 @@
   --nb-border: var(--line);
   --nb-select: var(--field);
   --nb-accent: #2f6fdb;
-  /* The red pen's ink (notebook.js RED_INK); typed notes' headings too. */
+  /* The red pen's ink (notebook/surface.js RED_INK); typed notes' headings too. */
   --nb-red: #ff5f57;
   --nb-bad: #d0342c;
   --nb-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
@@ -273,7 +273,7 @@
 }
 .nb-note-hit.nb-current { border-color: #f19837; background: color-mix(in srgb, #f19837 8%, transparent); }
 
-/* A paste is caught here (notebook.js): never seen. */
+/* A paste is caught here (notebook/notebook.js): never seen. */
 .notepad-paste-catcher { position: fixed; left: -1000px; top: 0; width: 10px; height: 10px; opacity: 0; pointer-events: none; }
 
 /* ---- around the notebook: its toggle and the page's "Send to Notebook" ---- */

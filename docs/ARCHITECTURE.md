@@ -98,7 +98,7 @@ processes as for Safari.
 | B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants every app command in `command_list.rs` and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast")`. Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews inside the content area (between the status bar, the sidebar and any docked panel; down to the bottom of the window), `clipsToBounds`. The URL pill, its popup and toasts float over the content area as **holes**: every container is masked there and does not take touches there, so the chrome below shows through and a page can never draw over or under them (§5f). Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Other chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs` (`apply_mask`), `ios/keys.rs` (`pointInside`), `snorkle_content::sanitize_holes`, `Browser::sync_visibility`, `browser_invariants.rs` |
-| B5 | App ↔ disk | native → storage | JSON files in the app container, written atomically off the main thread. Only http(s) URLs are stored, and only from non-private tabs. Data protection `NSFileProtectionComplete` (entitlement). | `storage.rs` tests, `browser_invariants.rs::private_tabs_never_reach_storage`, fuzz `browser_events` |
+| B5 | App ↔ disk | native → storage | JSON files in the app container, written atomically off the main thread. Only http(s) URLs are stored, and only from non-private tabs. Data protection `NSFileProtectionComplete` (entitlement). | `storage/tests.rs`, `browser_invariants.rs::private_tabs_never_reach_storage`, fuzz `browser_events` |
 | B6 | App ↔ network | content → internet | WebKit for pages. The app itself makes no telemetry or update requests; its own requests are favicon fetches for pins (sandboxed web view) and, only when the user has connected an AI account, HTTPS calls to `api.openai.com` / `api.anthropic.com` (`snorkle_core::ai::is_allowed_url`, ephemeral `NSURLSession`): site-script drafts, page summaries and page chat (which send the page's text, §5g, §5j). ATS stays on for the app; `NSAllowsArbitraryLoadsInWebContent` is set only so HTTP can load after explicit user consent. TLS: system validation, `PerformDefaultHandling` for every auth challenge, deprecated TLS refused. | `delegates.rs`, `config_hardening.rs` |
 | B7 | Profiles | site data | Default profile → `WKWebsiteDataStore(forIdentifier:)` with a fixed UUID. Private → one non-persistent store per private session, wiped and released when the last private tab closes. The chrome's own webview uses the default store, which is separate from both. | `ios/mod.rs::store_for`, `release_private_store` |
 
@@ -280,7 +280,7 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   transparent canvas); top-layer elements (`:modal`, `:popover-open`, `:fullscreen`) get a red
   multiply of their own. The content views' native canvas is pure red (light) or black (dark)
   while it is on (`set_light` / `set_dark`). The chrome draws the same two layers over its own
-  document (`chrome.css`, `applyNightVisionChrome`), keeping a copy of the setting so it is red
+  document (`ui/style/`, `applyNightVisionChrome`), keeping a copy of the setting so it is red
   from its first frame. Save for Later's plain preview leaves it on. Native UI (menus, sheets, the
   keyboard, selection handles, full-screen video) is not covered. OPEN_QUESTIONS: Night vision.
 - **Shared content controllers** (fixed 2026-11-09): a popup's web view (a `target=_blank` link,
@@ -747,7 +747,7 @@ overlaid sidebar instead.
 ## 5i. Notebook (2026-11-15)
 
 One notebook for every page, not bound to a tab: the notepad of laffan/zotero-helper
-(`src/notepad/`, `NotepadBody.tsx`) ported to the chrome as plain DOM (`ui/notebook.js`,
+(`src/notepad/`, `NotepadBody.tsx`) ported to the chrome as plain DOM (`ui/notebook/`,
 `ui/notebook.css`). The toggle sits between the menu and Save for Later at the sidebar's foot; the
 notebook docks right of the page with the other right panels (remembered open or closed; ⌘⇧\
 hides it with them). As in zotero-helper: a bar (the quote button and the scissors in one orange
@@ -869,7 +869,7 @@ CSS/JS lands in the editor and runs only if the user saves it; chat replies are 
 Password AutoFill in WKWebView uses the system (iCloud Keychain / Passwords app). Any future
 credential feature must use the iOS Keychain (`kSecClassGenericPassword` /
 `kSecClassInternetPassword`, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`) and needs a
-security review. `config_hardening.rs` and `storage.rs` contain no credential fields by design.
+security review. `config_hardening.rs` and `storage/` contain no credential fields by design.
 
 ## 7. Default-browser entitlement (`com.apple.developer.web-browser`)
 

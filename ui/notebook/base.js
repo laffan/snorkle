@@ -3,7 +3,7 @@
 // notebook, not bound to a page or a tab: strokes, notes typed in Markdown,
 // quotes and clips from any page, kept natively (`notebook.json`, checked
 // in Rust: snorkle_core::notebook::clean). It lives in the right panel; the
-// chrome (chrome.js) hosts it and brings things in from pages.
+// chrome (ui/chrome/notebook-dock.js) hosts it and brings things in from pages.
 //
 // What is the same as in zotero-helper: one continuous surface — a slim bar
 // of tools over a canvas with a faint dot grid that pans. The pen (a Pencil
