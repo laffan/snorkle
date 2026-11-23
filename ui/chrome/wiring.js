@@ -2,21 +2,25 @@
 'use strict';
 
 // ---- wiring -----------------------------------------------------------
-// The Notebook (ui/notebook/), in its panel; open as it was left.
-notebook = window.SnorkleNotebook.create($('notebook'), {
-  invoke: (cmd, args) => T.core.invoke(cmd, args),
-  toast,
-  place: () => {
-    const t = activeTab();
-    return t && t.url && !t.private ? { url: t.url.full, title: t.title || '' } : null;
-  },
-  goTo: openTarget,
-  openLink: openTypedLink,
-  setClipMode,
-  dragLink,
-  drop: dropOnNotebook,
-  close: () => setNotebook(false),
-});
+// The Notebook (ui/notebook/), in its panel; open as it was left. Its code
+// loads the first time it is opened or sent something (ensureNotebook).
+function createNotebook() {
+  notebook = window.SnorkleNotebook.create($('notebook'), {
+    invoke: (cmd, args) => T.core.invoke(cmd, args),
+    toast,
+    place: () => {
+      const t = activeTab();
+      return t && t.url && !t.private ? { url: t.url.full, title: t.title || '' } : null;
+    },
+    goTo: openTarget,
+    openLink: openTypedLink,
+    setClipMode,
+    dragLink,
+    drop: dropOnNotebook,
+    close: () => setNotebook(false),
+  });
+  return notebook;
+}
 
 // Nothing dropped on the chrome navigates it (Tauri's own file-drop
 // handler is off, so the notebook can take drops): a drop no part of
@@ -33,6 +37,7 @@ document.addEventListener('drop', (e) => {
 });
 notebookOpen = pref('notebookOpen') === '1';
 applyNotebook();
+if (notebookOpen) ensureNotebook();
 
 
 $('back').addEventListener('click', withTab((t) => invoke('go_back', { tab: t.id })));
@@ -161,6 +166,15 @@ renderBookmarks();
 renderPins();
 
 T.event.listen('state', (e) => { state = e.payload; render(); });
+// A tab's load progress alone (no re-render of the rest).
+T.event.listen('progress', (e) => {
+  const p = e.payload || {};
+  const t = state && state.tabs.find((x) => x.id === p.tab);
+  if (!t) return;
+  t.loading = !!p.loading;
+  t.progress = Number(p.progress) || 0;
+  if (t.id === state.active) renderProgress(t);
+});
 T.event.listen('toast', (e) => toast(String(e.payload)));
 T.event.listen('shortcut', (e) => runShortcut(String(e.payload)));
 T.event.listen('pins', () => loadPins());
@@ -170,7 +184,12 @@ T.event.listen('console_reset', () => loadConsole());
 T.core.invoke('get_state').then((s) => { state = s; render(); });
 loadBookmarks();
 loadPins();
-loadLater();
-loadScripts();
-loadAi();
 T.core.invoke('get_view_mode').then((m) => { viewModes = m; renderViewMode(); reportLayout(); }).catch(() => {});
+// Not needed for the first frame (2026-11-23): after it, so the launch's
+// first calls are the ones it draws from (sync commands run one at a time
+// on the main thread).
+setTimeout(() => {
+  loadLater();
+  loadScripts();
+  loadAi();
+}, 250);

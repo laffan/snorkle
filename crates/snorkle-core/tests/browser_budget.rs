@@ -378,3 +378,13 @@ fn on_screen_is_the_active_tab_or_its_split_partner() {
     b.split(a, c, 2);
     assert!(b.is_on_screen(a) && b.is_on_screen(c), "both halves of the pair on screen");
 }
+
+#[test]
+fn load_progress_is_sent_alone() {
+    let mut b = browser(4);
+    let (t, _) = b.new_tab(Profile::Default, 0);
+    b.navigate_input(t, "https://a.example/", 0).unwrap();
+    assert_eq!(b.on_progress(t, 0.42), vec![Effect::NotifyProgress(t)], "not the whole state");
+    assert!(b.on_progress(t, 0.43).is_empty(), "5 % steps");
+}
+

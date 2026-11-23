@@ -138,16 +138,33 @@ function emojiIcon(e) {
   return el('span', 'tab-icon emoji-icon', e);
 }
 
+// The selected row alone changed (a tab switch, 2026-11-23): move the
+// highlight instead of building the list again.
+let tabsSelected = null;
+function renderTabSelection() {
+  const sel = shownTab();
+  if (sel === tabsSelected) return;
+  tabsSelected = sel;
+  document.querySelectorAll('#tabs .tab, #private-tabs .tab').forEach((node) => {
+    const on = Number(node.dataset.tab) === sel;
+    node.classList.toggle('active', on);
+    node.setAttribute('aria-selected', String(on));
+  });
+  document.querySelectorAll('#tabs .tab-group, #private-tabs .tab-group').forEach((g) => g.classList.toggle('active', !!g.querySelector('.tab.active')));
+  const act = $('sidebar').querySelector('.tab.active');
+  if (act && !dragState) act.scrollIntoView({ block: 'nearest' });
+}
+
 function renderTabs() {
   refreshTabIcons(false);
   const key = JSON.stringify([
     state.tabs.map((t) => [t.id, !!t.saved, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, !!t.url && conversationSite(t), t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
-    state.active,
     state.splits,
     tabIcons.version,
   ]);
-  if (key === tabsKey) return;
+  if (key === tabsKey) { renderTabSelection(); return; }
   tabsKey = key;
+  tabsSelected = shownTab();
   const normal = $('tabs');
   const priv = $('private-tabs');
   normal.replaceChildren();
@@ -316,9 +333,14 @@ function renderToolbar(tab) {
   $('url-warn').hidden = !(d && d.punycode_forced);
   if (!d) $('url-reg').textContent = 'search / url';
 
-  const bar = $('progress-bar');
+  renderProgress(tab);
+}
+
+// The load bar along the pill. Also on its own: Rust sends a tab's
+// progress without the rest of the state (`progress` events, 2026-11-23).
+function renderProgress(tab) {
   const p = tab && tab.loading ? Math.max(5, tab.progress) / 100 : 0;
-  bar.style.transform = `scaleX(${p})`;
+  $('progress-bar').style.transform = `scaleX(${p})`;
 }
 
 function renderSurface(tab) {

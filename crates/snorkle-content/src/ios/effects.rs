@@ -107,6 +107,7 @@ impl ContentHost {
                 Effect::RecordHistory { .. }
                 | Effect::PersistSession(_)
                 | Effect::NotifyChrome
+                | Effect::NotifyProgress(_)
                 | Effect::OpenSavedPage { .. } => {}
             }
         }

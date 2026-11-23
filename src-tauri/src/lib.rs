@@ -251,6 +251,11 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
             ChromeEvent::State(s) => handle.emit_to(CHROME_LABEL, "state", s),
             ChromeEvent::Toast(m) => handle.emit_to(CHROME_LABEL, "toast", m),
             ChromeEvent::Shortcut(name) => handle.emit_to(CHROME_LABEL, "shortcut", name),
+            ChromeEvent::Progress(tab, loading, percent) => handle.emit_to(
+                CHROME_LABEL,
+                "progress",
+                serde_json::json!({ "tab": tab, "loading": loading, "progress": percent }),
+            ),
             ChromeEvent::PinsChanged => handle.emit_to(CHROME_LABEL, "pins", ()),
             ChromeEvent::IconsChanged => handle.emit_to(CHROME_LABEL, "icons", ()),
             ChromeEvent::Console(entry) => handle.emit_to(CHROME_LABEL, "console", entry),

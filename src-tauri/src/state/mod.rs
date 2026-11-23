@@ -79,6 +79,9 @@ pub enum ChromeEvent<'a> {
     Toast(&'a str),
     /// A native keyboard shortcut for the chrome to perform.
     Shortcut(&'a str),
+    /// A tab's load progress alone (`Effect::NotifyProgress`): tab, loading,
+    /// percent.
+    Progress(TabId, bool, u8),
     /// Pinned grid content (e.g. a favicon) changed.
     PinsChanged,
     /// A favicon was stored: the chrome asks for tab icons again.

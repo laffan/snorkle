@@ -1295,3 +1295,17 @@ The live sites were not reachable or not signed in from this environment.
   and was not measured; their scripts already do pointer work once per frame. Compare scrolling and
   Activity Monitor's GPU column with the palette and images buttons on and off.
 
+## Performance batch 3 (2026-11-23)
+
+- **[decide] A floating URL bar without masks** needs a choice between drawing the chrome above
+  the pages (transparent web view; cursor and hover from two views) and a second web view for the
+  bar (macOS only). Measure first: scroll a long page with the floating pill and with ⋯ → Attach
+  URL Bar (no mask at all since batch 1) and compare Activity Monitor's GPU and Energy columns. If
+  they are close, keep the pill and its mask.
+- **[verify] Notebook on demand.** Its scripts load the first time it is opened or sent something
+  (⌥-click, a clip, the copy button with ⌥, a drop on its button); the first send may take a moment
+  longer. A notebook left open loads at launch as before.
+- **[verify] `progress` events** carry a tab id, whether it is loading and the percentage; the
+  chrome updates the bar and its copy of the tab. Anything else that changes during a load still
+  sends the whole state.
+

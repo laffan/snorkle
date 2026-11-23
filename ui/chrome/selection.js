@@ -167,9 +167,10 @@ $('copy-url').addEventListener('click', (ev) => {
   if (!t.url) { toast('Open a page to copy its address.'); return; }
   if (ev.altKey || optionHeld) {
     if (t.private) { toast('Private tabs don’t send anything to the notebook.'); return; }
-    if (!notebook) return;
-    notebook.addQuote({ kind: 'page', url: t.url.full, title: t.title || t.url.registrable });
-    toast(notebookShown() ? 'Page added to the notebook.' : 'Page sent to the notebook.');
+    ensureNotebook().then((nb) => {
+      nb.addQuote({ kind: 'page', url: t.url.full, title: t.title || t.url.registrable });
+      toast(notebookShown() ? 'Page added to the notebook.' : 'Page sent to the notebook.');
+    });
     return;
   }
   navigator.clipboard.writeText(t.url.full).then(() => toast('Address copied.'), () => toast('Could not copy (clipboard unavailable).'));

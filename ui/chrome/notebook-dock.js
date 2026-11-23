@@ -22,9 +22,27 @@ function applyNotebook() {
   if (notebook && !shown && was) notebook.hidden();
 }
 
+// The notebook, its code loaded and created on first use (2026-11-23).
+let notebookLoading = null;
+function ensureNotebook() {
+  if (notebook) return Promise.resolve(notebook);
+  if (!notebookLoading) {
+    notebookLoading = window.snorkleLoadNotebook().then(() => {
+      createNotebook();
+      notebookPage = '';
+      notebookTrack();
+      if (notebookShown()) requestAnimationFrame(() => notebook.shown());
+      return notebook;
+    });
+    notebookLoading.catch((e) => { notebookLoading = null; toast(String(e)); });
+  }
+  return notebookLoading;
+}
+
 function setNotebook(open) {
   notebookOpen = open;
   setPref('notebookOpen', open ? '1' : '0');
+  if (open) ensureNotebook();
   if (open) {
     rightHidden = false;
     if (scriptsOpen) setScripts(false);
@@ -182,9 +200,11 @@ function clipToNotebook(t, r) {
       // in the picture) goes with it for search; it is not shown.
       const target = { kind: 'clip', url: t.url.full, title: t.title || '' };
       if (clip.text) target.text = clip.text;
-      notebook.addClip(clip.image, target);
-      if (!notebookShown()) toast('Clipped to the notebook.');
-      clipWords(clip, target);
+      ensureNotebook().then((nb) => {
+        nb.addClip(clip.image, target);
+        if (!notebookShown()) toast('Clipped to the notebook.');
+        clipWords(clip, target);
+      });
     })
     .catch((e) => toast(String(e)));
 }
@@ -243,15 +263,19 @@ $('nb-send').addEventListener('click', () => {
       .then((title) => {
         let host = '';
         try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (err) { host = url; }
-        notebook.addQuote({ kind: 'page', url, title: title || host });
-        toast(notebookShown() ? 'Link added.' : 'Link sent to the notebook.');
+        ensureNotebook().then((nb) => {
+          nb.addQuote({ kind: 'page', url, title: title || host });
+          toast(notebookShown() ? 'Link added.' : 'Link sent to the notebook.');
+        });
       });
     return;
   }
   T.core.invoke('read_selection', { tab: t.id }).then((text) => {
     if (!text) { toast('Nothing selected to send.'); return; }
-    notebook.addQuote({ kind: 'quote', url: textFragmentUrl(t.url.full, text), title: t.title || '', text });
-    if (!notebookShown()) toast('Sent to the notebook.');
+    ensureNotebook().then((nb) => {
+      nb.addQuote({ kind: 'quote', url: textFragmentUrl(t.url.full, text), title: t.title || '', text });
+      if (!notebookShown()) toast('Sent to the notebook.');
+    });
   }).catch((err) => toast(String(err)));
 });
 

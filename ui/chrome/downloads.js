@@ -179,4 +179,4 @@ $('downloads-clear').addEventListener('click', () => {
   invoke('clear_downloads');
 });
 T.event.listen('downloads', (e) => setDownloads(e.payload));
-T.core.invoke('list_downloads').then(setDownloads).catch(() => {});
+setTimeout(() => T.core.invoke('list_downloads').then(setDownloads).catch(() => {}), 250); // after the first frame

@@ -164,7 +164,7 @@ impl Browser {
             return Vec::new();
         }
         t.progress = p;
-        vec![Effect::NotifyChrome]
+        vec![Effect::NotifyProgress(id)]
     }
 
     pub fn on_history_state(&mut self, id: TabId, back: bool, forward: bool) -> Vec<Effect> {

@@ -105,6 +105,9 @@ pub enum Effect {
     PersistSession(Session),
     /// Chrome state changed; re-render from [`Browser::view`].
     NotifyChrome,
+    /// Only a tab's load progress changed (2026-11-23): the chrome is sent
+    /// that number, not the whole state, about twenty times a page load.
+    NotifyProgress(TabId),
 }
 
 /// Where a visible content view is placed within the content area.

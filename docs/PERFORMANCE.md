@@ -97,6 +97,25 @@ EasyList generic selectors, and a page with 40 frames of 150 elements each, both
   the allowlist change); later launches look them up.
 - Page text for History is read 8 s after a load (was 1.5 s), only from a page still on screen.
 
+### Batch 3 (2026-11-23)
+
+- The Notebook's code (2,700 lines) and its data (`notebook.json`, up to 64 MB) load the first time
+  it is opened or sent something, not at every launch (`ui/load.js` `snorkleLoadNotebook`).
+- Load progress goes to the chrome as a tab's numbers (`progress` event,
+  `Effect::NotifyProgress`) instead of the whole state (5–51 KB for 10–100 tabs, about twenty times
+  a page load), and only the bar is redrawn.
+- A tab switch moves the tab list's highlight instead of rebuilding the list: 1.0 / 1.3 / 1.4 ms for
+  10 / 40 / 100 tabs, was 2.0 / 5.6 / 11.6 ms (headless Chromium, build machine).
+- At launch, Save for Later's list, site scripts, AI status and downloads are asked for 250 ms after
+  the calls the first frame needs.
+- **Not done: a floating URL bar without masks.** Since batch 1, a page is masked only where the
+  floating pill (or a popup, toast or flyout) lies over it; with ⋯ → Attach URL Bar no page is
+  masked at all. So the mask's cost can be measured on a Mac before choosing between the two ways
+  to remove it, both large: drawing the chrome's web view above the pages (transparent, letting
+  clicks through outside its controls; the pointer's cursor and hover then come from two views at
+  once), or a second, small web view for the bar and its popups (macOS only; `add_child` is a
+  reviewed tripwire, and the bar's code would have to talk to the main chrome).
+
 ### Measuring it (needed before and after each change)
 
 Search ships a scriptable bench (`./bench`). Snorkle has only the console. The first step is

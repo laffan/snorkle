@@ -138,9 +138,11 @@ impl Shared {
         self.log_effects(&effects);
         let mut host_effects = Vec::new();
         let mut notify = false;
+        let mut progress = Vec::new();
         for e in effects {
             match e {
                 Effect::NotifyChrome => notify = true,
+                Effect::NotifyProgress(tab) => progress.push(tab),
                 Effect::RecordHistory { url, title } => {
                     self.storage(StorageJob::History { url: url.to_string(), title })
                 }
@@ -169,6 +171,16 @@ impl Shared {
         if notify {
             let state = self.view();
             (self.emit)(ChromeEvent::State(&state));
+        } else {
+            // Progress alone: the tab's numbers, not the whole state.
+            for tab in progress {
+                let b = self.browser();
+                if let Some(t) = b.tab(tab) {
+                    let (loading, percent) = (t.loading, t.progress);
+                    drop(b);
+                    (self.emit)(ChromeEvent::Progress(tab, loading, percent));
+                }
+            }
         }
     }
 
@@ -202,7 +214,7 @@ impl Shared {
         };
         for e in effects {
             let tab = match e {
-                Effect::NotifyChrome | Effect::PersistSession(_) => continue,
+                Effect::NotifyChrome | Effect::NotifyProgress(_) | Effect::PersistSession(_) => continue,
                 Effect::CreateView { tab, .. }
                 | Effect::AdoptPopup { tab }
                 | Effect::DestroyView { tab, .. }
