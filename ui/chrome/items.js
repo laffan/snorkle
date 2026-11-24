@@ -28,8 +28,9 @@ function renderLauncherSelection() {
 
 // ---- pinned grid ----------------------------------------------------------
 
-// Bundled icons (ui/icons, Simple Icons, CC0) for sites whose favicons
-// the fetcher cannot get. First match wins: host, then optional path prefix.
+// Bundled icons (ui/icons; sources in ui/icons/SOURCES.md) for sites
+// whose favicons the fetcher cannot get or draws too small. First match
+// wins: host (exact, or a pattern), then optional path prefix.
 const PREFAB_ICONS = [
   ['mail.google.com', '', 'gmail'],
   ['drive.google.com', '', 'googledrive'],
@@ -48,12 +49,17 @@ const PREFAB_ICONS = [
   ['photos.google.com', '', 'googlephotos'],
   ['www.youtube.com', '', 'youtube'],
   ['youtube.com', '', 'youtube'],
+  // 2026-11-24: Pinterest (its country sites too, and pin.it links) and
+  // Substack (every publication's subdomain).
+  [/^(www\.|[a-z]{2}\.)?pinterest\.(com|ca|co\.uk|com\.au|com\.mx|co\.kr|de|fr|es|it|nl|at|ch|se|dk|pt|ie|nz|cl|ph|jp)$/, '', 'pinterest'],
+  ['pin.it', '', 'pinterest'],
+  [/^([a-z0-9-]+\.)?substack\.com$/, '', 'substack'],
 ];
 
 function prefabIcon(url) {
   let u;
   try { u = new URL(url); } catch (e) { return null; }
-  const hit = PREFAB_ICONS.find(([host, path]) => u.hostname === host && u.pathname.startsWith(path));
+  const hit = PREFAB_ICONS.find(([host, path]) => (host instanceof RegExp ? host.test(u.hostname) : u.hostname === host) && u.pathname.startsWith(path));
   return hit ? `icons/${hit[2]}.svg` : null;
 }
 

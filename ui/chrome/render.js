@@ -406,6 +406,8 @@ function renderSurface(tab) {
   if (!$('start').hidden) renderStart(tab);
   else startTab = null;
   startShown = !$('start').hidden;
+  // A new tab's start page has no URL bar (owner request 2026-11-24).
+  document.body.classList.toggle('start-page', startShown);
   renderDefine();
 }
 

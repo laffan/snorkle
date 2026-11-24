@@ -1471,3 +1471,27 @@ The live sites were not reachable or not signed in from this environment.
   saved the same way). It reads Saved for a page already saved for later.
 - **[decide] A page that cannot show** (blocked, offline, another app's address) leaves the saved
   text or "Loading…" in the dialog; Open Page shows the page's notice in the tab.
+
+## History selection, folded days, the new tab page, ⌘W (2026-11-24)
+
+- **[verify] ⌘W on iPad.** Cause found in the code, not reproduced on a device: closing the tab
+  whose page had keyboard focus destroyed the view, leaving nothing first responder, and iPadOS
+  then delivers no key commands until a tap (as already noted for returning from another app), so
+  the next ⌘W did nothing. The host now gives focus to the page in front (or the chrome) after
+  such a change. macOS was not affected (its key monitor sees every key).
+- **[decide] ⌘W on a pin's or bookmark's tab** still opens a New Tab instead of closing (owner
+  decision 2026-11-23). Since a tab dragged into the bookmarks bar or bookmarked with ⌘D becomes
+  the bookmark's tab, ⌘W stops closing it from then on, which can read as ⌘W "not always"
+  closing. Changing this is one line in `closeTabShortcut` (`ui/chrome/shortcuts.js`).
+- **[decide] Restore and Send to** open each selected page once (the newest visit's title), at
+  most 100, as tabs that load when chosen. Send to → New Research Session names the session after
+  the search (or "New Research", to be renamed) and shows it with its first page, closing History.
+- **[decide] Folded days** are remembered until the app quits, not stored; a search starts with
+  every day open and its folding lasts for that search only.
+- **[decide] No URL bar on an empty tab** also hides the AI and Notebook buttons there (they are in
+  the pill); ⌘⇧\ and the notebook's own × still work. A new research session starts on an empty
+  tab, so its Notebook (open by default) shows, but the AI panel cannot be opened from the pill
+  until a page loads.
+- **[verify] Pinterest and Substack icons.** Pinterest's country sites (a list of common ones),
+  pin.it links and every *.substack.com publication match; Substack publications on their own
+  domains show their favicon as before.

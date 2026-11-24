@@ -73,8 +73,9 @@ function renderPalette() {
   const ql = q.toLowerCase();
   let rows;
   if (!ql) {
-    // Open tabs, pins and bookmarks first; recent history fills the rest.
-    rows = paletteCandidates().slice(0, 8).map((c) => ({ ...c, hits: [] }));
+    // Nothing until something is typed (owner request 2026-11-24; before,
+    // open tabs, pins, bookmarks and recent history were listed).
+    rows = [];
   } else {
     rows = paletteCandidates()
       .map((c) => {
@@ -114,7 +115,8 @@ function renderPalette() {
     li.addEventListener('click', () => choosePalette(i));
     list.appendChild(li);
   });
-  if (!rows.length) list.appendChild(el('li', 'muted', 'No open tabs, bookmarks or history yet. Type an address or a search.'));
+  // Empty until something is typed (the list then takes no room).
+  $('palette-input').setAttribute('aria-expanded', String(rows.length > 0));
 }
 
 function looksLikeAddress(q) {

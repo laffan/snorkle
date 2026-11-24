@@ -257,6 +257,19 @@ unsafe extern "C-unwind" fn note_responder(this: *mut AnyObject, _cmd: Sel, _sen
 /// application or its delegate receiving it means there was none. Returns
 /// a note for the console.
 pub fn ensure_responder(mtm: MainThreadMarker, fallback: Option<&UIView>) -> &'static str {
+    if responder_present(mtm) {
+        return "keys: app active again; a view still has keyboard focus";
+    }
+    match fallback {
+        Some(v) if v.becomeFirstResponder() => "keys: app active again with no keyboard focus; gave it to the chrome",
+        _ => "keys: app active again with no keyboard focus; the chrome could not take it",
+    }
+}
+
+/// Whether a view or view controller (not a window, the application or
+/// its delegate) is first responder, so key commands are delivered (see
+/// [`ensure_responder`]).
+pub fn responder_present(mtm: MainThreadMarker) -> bool {
     unsafe {
         if !NOTE_ADDED.with(Cell::get) {
             let imp: Imp = std::mem::transmute::<unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject), Imp>(
@@ -279,15 +292,7 @@ pub fn ensure_responder(mtm: MainThreadMarker, fallback: Option<&UIView>) -> &'s
                 (view || controller) && !window
             });
         NOTED.with(|n| n.set(std::ptr::null()));
-        if real {
-            return "keys: app active again; a view still has keyboard focus";
-        }
-        match fallback {
-            Some(v) if v.becomeFirstResponder() => {
-                "keys: app active again with no keyboard focus; gave it to the chrome"
-            }
-            _ => "keys: app active again with no keyboard focus; the chrome could not take it",
-        }
+        real
     }
 }
 

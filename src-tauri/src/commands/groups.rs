@@ -12,7 +12,7 @@ fn tab_ids(tabs: Vec<u64>) -> Vec<TabId> {
     tabs.into_iter().take(MAX_IDS).map(TabId).collect()
 }
 
-fn space_arg(space: Option<String>) -> Result<Option<String>, String> {
+pub(super) fn space_arg(space: Option<String>) -> Result<Option<String>, String> {
     match space {
         Some(id) if !snorkle_core::browser::valid_research_id(&id) => Err("That research session is gone.".into()),
         other => Ok(other),

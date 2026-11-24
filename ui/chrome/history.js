@@ -9,9 +9,12 @@
 // hover, or saved for later with the tray beside it (the page is loaded
 // in a hidden tab and archived there, `save_page_for_later`); Select
 // turns rows into checkboxes (shift-click selects a range) for removing
-// many. Pages whose text was saved (the 100 most recent) show its size,
-// and clicking one shows that text; the search box also searches it.
-// Clearing history keeps the saved pages.
+// many; ⌘- or ⇧-click starts or adjusts a selection too. While searching,
+// Select Results chooses every result shown (2026-11-24); what is chosen
+// can be deleted, restored as tabs, or sent as tabs to a research session.
+// Days fold: today is open, every other day starts folded (2026-11-24).
+// Pages whose text was saved (the 100 most recent) show its size; the
+// search box also searches it. Clearing history keeps the saved pages.
 let historyOpen = false;
 // The sidebar was hidden when History opened: closing History hides it.
 let historyShowedSidebar = false;
@@ -24,6 +27,28 @@ let historySearchTimer = 0;
 // Pages being saved from History (their tray shows it).
 const savingUrls = new Set();
 const visitKey = (it) => it.url + '\u0000' + it.visited_ms;
+// Folded days (owner request 2026-11-24): today open, the others folded,
+// until a heading is clicked (remembered until the app quits). While
+// searching every day starts open, and folding lasts for that search.
+const dayFolds = new Map();
+let searchFolds = new Map();
+let foldsQuery = '';
+const dayKey = (ms) => { const d = new Date(ms || 0); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+function dayFolded(key) {
+  const q = historyQuery.trim().toLowerCase();
+  if (q !== foldsQuery) { foldsQuery = q; searchFolds = new Map(); }
+  const folds = q ? searchFolds : dayFolds;
+  if (folds.has(key)) return folds.get(key);
+  return q ? false : key !== dayKey(Date.now());
+}
+function toggleDay(key) {
+  const folds = historyQuery.trim() ? searchFolds : dayFolds;
+  folds.set(key, !dayFolded(key));
+  fillHistory($('history-list'), historyItems, historyQuery.trim().toLowerCase());
+  renderHistoryHead();
+}
+// Rows shown (not in a folded day): the ones a range or Select Results takes.
+const visitShown = (i) => !!historyItems[i] && !dayFolded(dayKey(historyItems[i].visited_ms));
 const pageOf = (url) => String(url || '').split('#')[0];
 
 function fmtBytes(n) {
@@ -97,12 +122,37 @@ function loadHistory() {
 function renderHistoryHead() {
   $('history-view').classList.toggle('selecting', historySelecting);
   $('hv-select').textContent = historySelecting ? 'Cancel' : 'Select';
-  $('hv-remove').hidden = !historySelecting;
-  $('hv-remove').disabled = historySel.size === 0;
-  $('hv-remove').textContent = historySel.size ? `Remove ${historySel.size}` : 'Remove';
   $('hv-clear').hidden = historySelecting;
   $('hv-title').textContent = historySelecting && historySel.size ? `${historySel.size} selected` : 'History';
+  // Under the search box: searching, the results' number and Select
+  // Results; selecting, what to do with the selection.
+  const searching = !!historyQuery.trim() && historyItems.length > 0;
+  $('hv-bar').hidden = !historySelecting && !searching;
+  $('hv-count').textContent = historySelecting ? '' : `${historyItems.length} ${historyItems.length === 1 ? 'result' : 'results'}`;
+  $('hv-select-results').hidden = historySelecting || !searching;
+  for (const id of ['hv-remove', 'hv-restore', 'hv-send']) {
+    $(id).hidden = !historySelecting;
+    $(id).disabled = historySel.size === 0;
+  }
+  if (!historySelecting) closeHvSend();
 }
+function syncSelectedRows() {
+  document.querySelectorAll('#history-list li.visit').forEach((li) => {
+    const on = historySel.has(li.dataset.key);
+    li.classList.toggle('selected', on);
+    li.setAttribute('aria-selected', String(on));
+  });
+}
+function setSelecting(on) {
+  historySelecting = on;
+  historySel.clear();
+  historyAnchor = -1;
+  syncSelectedRows();
+  renderHistoryHead();
+}
+const selectedVisits = () => historyItems.filter((it) => historySel.has(visitKey(it)));
+// The pages chosen, each once, newest visit first.
+const selectedPages = () => [...new Set(selectedVisits().map((it) => it.url))];
 
 function removeVisits(items) {
   if (!items.length) return;
@@ -118,19 +168,66 @@ function selectVisit(i, shift) {
   if (!it) return;
   if (shift && historyAnchor >= 0) {
     const [a, b] = historyAnchor < i ? [historyAnchor, i] : [i, historyAnchor];
-    for (let k = a; k <= b; k++) historySel.add(visitKey(historyItems[k]));
+    for (let k = a; k <= b; k++) if (visitShown(k)) historySel.add(visitKey(historyItems[k]));
   } else if (historySel.has(visitKey(it))) {
     historySel.delete(visitKey(it));
   } else {
     historySel.add(visitKey(it));
   }
   historyAnchor = i;
-  document.querySelectorAll('#history-list li.visit').forEach((li) => {
-    const on = historySel.has(li.dataset.key);
-    li.classList.toggle('selected', on);
-    li.setAttribute('aria-selected', String(on));
-  });
+  syncSelectedRows();
   renderHistoryHead();
+}
+
+// Restore and Send to (owner request 2026-11-24): the chosen pages as tabs
+// (not loaded until chosen) of the session shown, of another, or of a new
+// one named after the search (`history_to_tabs`, at most 100).
+async function visitsToTabs(to) {
+  const urls = selectedPages();
+  if (!urls.length) return;
+  if (urls.length > 100) toast('Only the first 100 pages are opened.');
+  try {
+    let target = to;
+    const fresh = to === 'new';
+    if (fresh) {
+      const q = historyQuery.trim();
+      target = await T.core.invoke('new_research', { name: q || 'New Research' });
+      if (!q) researchRenamePending = target;
+    }
+    const ids = await T.core.invoke('history_to_tabs', { urls: urls.slice(0, 100), to: target });
+    setSelecting(false);
+    if (fresh) {
+      // The new session shows its first page; its empty start tab goes.
+      if (ids.length) {
+        await T.core.invoke('activate_tab', { tab: ids[0] });
+        const s = await T.core.invoke('get_state');
+        const start = s.tabs.find((t) => t.space === target && !t.url && !ids.includes(t.id));
+        if (start) await T.core.invoke('close_tab', { tab: start.id });
+      }
+      setHistory(false);
+      return;
+    }
+    const here = state ? state.space || null : null;
+    const name = target === here ? null : target ? ((state.research || []).find((r) => r.id === target) || {}).name || 'the research session' : 'Everyday Browsing';
+    const n = ids.length === 1 ? '1 page' : `${ids.length} pages`;
+    toast(name ? `${n} sent to ${name}.` : `${n} restored as tabs.`);
+  } catch (e) {
+    toast(String(e));
+  }
+}
+function closeHvSend() { $('hv-send-pop').hidden = true; }
+function openHvSend() {
+  const pop = $('hv-send-pop');
+  pop.replaceChildren(el('div', 'menu-label', 'Send to'));
+  for (const t of sendTargets()) {
+    const b = el('button', null, t.label);
+    b.setAttribute('role', 'menuitem');
+    b.addEventListener('click', () => { closeHvSend(); visitsToTabs(t.to); });
+    pop.appendChild(b);
+  }
+  const btn = $('hv-send');
+  pop.style.top = Math.round(btn.offsetTop + btn.offsetHeight + 4) + 'px';
+  pop.hidden = false;
 }
 
 // Save for Later on a visit: the page is loaded in a hidden tab, archived
@@ -161,11 +258,25 @@ function fillHistory(list, items, q = '') {
     if (diff === 1) return 'Yesterday';
     return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: diff > 300 ? 'numeric' : undefined });
   };
-  let lastDay = '';
+  // Visits per day, for the headings.
+  const perDay = new Map();
+  for (const it of items) { const k = dayKey(it.visited_ms); perDay.set(k, (perDay.get(k) || 0) + 1); }
+  let lastDay = null;
   items.forEach((it, i) => {
     const when = new Date(it.visited_ms || 0);
-    const day = dayName(when);
-    if (day !== lastDay) { list.appendChild(el('li', 'day hv-section', day)); lastDay = day; }
+    const key = dayKey(it.visited_ms);
+    const folded = dayFolded(key);
+    if (key !== lastDay) {
+      lastDay = key;
+      const head = el('li', 'day hv-section');
+      const b = el('button', 'day-toggle' + (folded ? ' folded' : ''));
+      b.setAttribute('aria-expanded', String(!folded));
+      b.append(el('span', 'chev', '▾'), el('span', 'day-name', dayName(when)), el('span', 'day-count', String(perDay.get(key))));
+      b.addEventListener('click', () => toggleDay(key));
+      head.appendChild(b);
+      list.appendChild(head);
+    }
+    if (folded) return;
     const li = el('li', 'visit');
     li.dataset.key = visitKey(it);
     const selected = historySel.has(li.dataset.key);
@@ -193,6 +304,13 @@ function fillHistory(list, items, q = '') {
       open.appendChild(snip);
     }
     open.addEventListener('click', (ev) => {
+      // ⌘- or ⇧-click chooses rows (and starts choosing); in Select
+      // mode a plain click does too.
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey) {
+        if (!historySelecting) setSelecting(true);
+        selectVisit(i, ev.shiftKey);
+        return;
+      }
       if (historySelecting) { selectVisit(i, ev.shiftKey); return; }
       if (/^https?:/i.test(it.url)) { showPageCopy(it); return; }
       openHistoryItem(it.url);
@@ -349,14 +467,17 @@ $('copy-later').addEventListener('click', () => {
     });
 });
 $('copy-modal').addEventListener('click', (ev) => { if (ev.target === $('copy-modal')) closePageCopy(); });
-$('hv-select').addEventListener('click', () => {
-  historySelecting = !historySelecting;
-  historySel.clear();
-  historyAnchor = -1;
-  document.querySelectorAll('#history-list li.visit').forEach((li) => { li.classList.remove('selected'); li.setAttribute('aria-selected', 'false'); });
+$('hv-select').addEventListener('click', () => setSelecting(!historySelecting));
+$('hv-select-results').addEventListener('click', () => {
+  setSelecting(true);
+  historyItems.forEach((it, i) => { if (visitShown(i)) historySel.add(visitKey(it)); });
+  syncSelectedRows();
   renderHistoryHead();
 });
-$('hv-remove').addEventListener('click', () => removeVisits(historyItems.filter((it) => historySel.has(visitKey(it)))));
+$('hv-remove').addEventListener('click', () => { const v = selectedVisits(); setSelecting(false); removeVisits(v); });
+$('hv-restore').addEventListener('click', () => visitsToTabs(state ? state.space || null : null));
+$('hv-send').addEventListener('click', () => ($('hv-send-pop').hidden ? openHvSend() : closeHvSend()));
+document.addEventListener('pointerdown', (ev) => { if (!$('hv-send-pop').hidden && !ev.target.closest('#hv-send-pop, #hv-send')) closeHvSend(); });
 $('hv-close').addEventListener('click', () => setHistory(false));
 // Clear asks by changing its label first; saved pages are kept.
 $('hv-clear').addEventListener('click', () => {

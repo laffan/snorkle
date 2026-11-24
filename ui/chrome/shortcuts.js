@@ -118,6 +118,9 @@ function runShortcut(name, via = 'native') {
 // (owner request 2026-11-23; before, a pin's tab showed a message and a
 // bookmark's tab asked whether to remove the bookmark).
 function closeTabShortcut() {
+  // History's page dialog is what is in front: ⌘W closes it, not the tab
+  // under it (2026-11-24).
+  if (!$('copy-modal').hidden) { closePageCopy(); return; }
   const id = state && (state.sheet !== null ? state.sheet : state.active);
   if (id === null || id === undefined) return;
   const t = state.tabs.find((x) => x.id === id);

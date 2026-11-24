@@ -250,6 +250,37 @@ pub fn close_preview(s: S<'_>) {
     s.run(effects);
 }
 
+/// Most pages History's Restore and Send open at once.
+const MAX_HISTORY_TABS: usize = 100;
+
+/// History's Restore and Send (owner request 2026-11-24): pages from
+/// history, as tabs of everyday browsing (`to` `None`) or a research
+/// session, at the end of its list and not loaded until chosen
+/// (`Browser::send_page`, as restored tabs), in the order given. Only
+/// addresses in history are opened (each titled as history has it); at
+/// most [`MAX_HISTORY_TABS`]. Returns the new tabs.
+#[tauri::command]
+pub fn history_to_tabs(s: S<'_>, urls: Vec<String>, to: Option<String>) -> Result<Vec<u64>, String> {
+    let to = super::groups::space_arg(to)?;
+    let store = s.store.clone().ok_or("History is not available.")?;
+    let mut titles: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for e in store.history(usize::MAX) {
+        titles.entry(e.url).or_insert(e.title);
+    }
+    let mut ids = Vec::new();
+    for url in urls.iter().take(MAX_HISTORY_TABS) {
+        let Some(title) = titles.get(url) else { continue };
+        let Ok(page) = Url::parse(url) else { continue };
+        let (tab, effects) = s.browser().send_page(page, title, to.as_deref(), now_ms());
+        s.run(effects);
+        ids.extend(tab.map(|t| t.0));
+    }
+    if ids.is_empty() && !urls.is_empty() {
+        return Err("Those pages are no longer in history.".into());
+    }
+    Ok(ids)
+}
+
 /// ⌘⇧T: reopens the most recently closed tab whose page is still in
 /// history (pages removed from history are skipped). False when there is
 /// none.

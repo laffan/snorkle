@@ -45,13 +45,15 @@
       <div class="hv-head">
         <span id="hv-title" class="hv-title">History</span>
         <span class="spacer"></span>
-        <button id="hv-remove" class="hv-btn" hidden disabled>Remove</button>
         <button id="hv-select" class="hv-btn">Select</button>
         <button id="hv-clear" class="hv-btn" title="Clear history (pages saved for later stay)">Clear</button>
         <button id="hv-close" class="icon hv-close" aria-label="Close history" title="Close (⇧⌘H)">&#x00D7;</button>
       </div>
       <input id="history-search" class="history-search" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
              maxlength="200" placeholder="Search history" aria-label="Search history and saved page text">
+      <!-- Searching: the results' number and Select Results; selecting: what to do with them (2026-11-24). -->
+      <div id="hv-bar" class="hv-bar" hidden><span id="hv-count" class="hv-count"></span><span class="spacer"></span><button id="hv-select-results" class="hv-btn">Select Results</button><button id="hv-remove" class="hv-btn" disabled>Delete</button><button id="hv-restore" class="hv-btn" disabled>Restore</button><button id="hv-send" class="hv-btn" aria-haspopup="menu" disabled>Send to…</button></div>
+      <div id="hv-send-pop" class="popup hv-send-pop" role="menu" hidden></div>
       <section id="later-section" class="later-section" aria-labelledby="later-head" hidden>
         <div id="later-head" class="hv-section">Saved for Later</div>
         <div id="later-list" class="later-list" role="list"></div>

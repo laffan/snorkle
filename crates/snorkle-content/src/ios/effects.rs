@@ -41,6 +41,7 @@ impl ContentHost {
                         rules::unregister(*tab);
                         drop(v);
                         self.sync_backdrop();
+                        self.refocus_soon();
                     }
                     if !*keep_state {
                         self.saved.remove(tab);
@@ -68,6 +69,7 @@ impl ContentHost {
                         v.container.setHidden(true);
                     }
                     self.sync_backdrop();
+                    self.refocus_soon();
                 }
                 Effect::Load { tab, url } => {
                     if let Some(v) = self.views.get(tab) {
@@ -226,5 +228,49 @@ impl ContentHost {
     /// thread and WebKit compiles its output. `done` runs on the main thread.
     pub fn install_rules(&mut self, key: String, make: crate::MakeRuleLists, done: crate::RulesDone) {
         rules::install(self.mtm, key, make, done);
+    }
+}
+
+thread_local! {
+    /// A keyboard-focus check is queued (see `refocus_soon`).
+    static REFOCUS_QUEUED: Cell<bool> = const { Cell::new(false) };
+}
+
+impl ContentHost {
+    /// After a page view is destroyed or hidden. If it had keyboard focus,
+    /// nothing has it now, and iPadOS then delivers no key commands (⌘W,
+    /// ⌘T, …) until the next tap: closing a tab with ⌘W worked once and the
+    /// next ⌘W did nothing (owner report 2026-11-24). Once the effects being
+    /// applied are done (queued on the main queue), if nothing has focus,
+    /// the page in front takes it, else the chrome.
+    fn refocus_soon(&self) {
+        if REFOCUS_QUEUED.with(|q| q.replace(true)) {
+            return;
+        }
+        let root = self.root.clone();
+        let chrome = self.chrome.borrow().clone();
+        let block = RcBlock::new(move || {
+            REFOCUS_QUEUED.with(|q| q.set(false));
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            if menu::responder_present(mtm) {
+                return;
+            }
+            // Containers are brought to the front when shown: the last
+            // visible one is the page in front.
+            use objc2::ClassType;
+            let containers: Vec<Retained<UIView>> = root.subviews().iter().collect();
+            let page = containers
+                .iter()
+                .rev()
+                .filter(|c| !c.isHidden() && c.downcast_ref::<keys::KeyContainer>().is_some())
+                .find_map(|c| c.subviews().iter().find(|s| s.isKindOfClass(WKWebView::class())));
+            let took = page.is_some_and(|w| w.becomeFirstResponder());
+            if !took {
+                if let Some(c) = chrome.as_deref() {
+                    c.becomeFirstResponder();
+                }
+            }
+        });
+        unsafe { NSOperationQueue::mainQueue().addOperationWithBlock(&block) };
     }
 }

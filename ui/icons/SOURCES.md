@@ -1,6 +1,7 @@
 # Bundled site icons
 
-Google product artwork identifies pinned sites, tabs and bookmarks. The SVGs
+Google product artwork (and, since 2026-11-24, Pinterest's and Substack's)
+identifies pinned sites, tabs and bookmarks. The SVGs
 are bundled locally and displayed in their original colours through `<img>`;
 no icon CDN is contacted by the chrome. Trademarks belong to Google LLC.
 
@@ -16,7 +17,15 @@ no icon CDN is contacted by the chrome. Trademarks belong to Google LLC.
   correctly. Copyright (c) 2024 Bjorn Lammers, Meier Lukas, Thomas Camlong and
   Homarr Labs.
 
-These public catalogs redistribute Google's product logos; the files were not
+- Pinterest (2026-11-24): `svg/pinterest.svg` from the same dashboard-icons
+  commit (Apache-2.0), unchanged. Trademark of Pinterest, Inc.
+- Substack (2026-11-24): the glyph of `icons/substack.svg` in Simple Icons
+  (https://github.com/simple-icons/simple-icons, develop at d59bb32d4f94,
+  CC0-1.0), drawn in white on a rounded square of the brand colour Simple
+  Icons lists for it (#FF6719), as the site's own app icon is. Trademark of
+  Substack Inc.
+
+These public catalogs redistribute the companies' product logos; the files were not
 retrieved directly from Google in this environment. Each imported SVG was
 checked for scripts, event attributes, external references and embedded images.
 Only vector shapes, gradients, masks and local fragment references are present.
