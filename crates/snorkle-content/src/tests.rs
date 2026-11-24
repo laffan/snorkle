@@ -116,6 +116,7 @@ fn night_vision_history_and_quit_shortcuts() {
         ("night_vision", "r", MOD_SHIFT, "night_vision"),
         ("history", "h", MOD_SHIFT, "history"),
         ("new_private_tab", "n", MOD_SHIFT, "new_private_tab"),
+        ("notebook_page", "d", MOD_SHIFT, "notebook_page"),
         ("quit", "q", 0, "quit"),
     ] {
         let i = shortcut_index(id).unwrap();

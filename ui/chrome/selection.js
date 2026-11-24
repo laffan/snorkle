@@ -166,15 +166,22 @@ $('copy-url').addEventListener('click', (ev) => {
   if (!t) return;
   if (!t.url) { toast('Open a page to copy its address.'); return; }
   if (ev.altKey || optionHeld) {
-    if (t.private) { toast('Private tabs don’t send anything to the notebook.'); return; }
-    ensureNotebook().then((nb) => {
-      nb.addQuote({ kind: 'page', url: t.url.full, title: t.title || t.url.registrable });
-      toast(notebookShown() ? 'Page added to the notebook.' : 'Page sent to the notebook.');
-    });
+    sendPageToNotebook(t);
     return;
   }
   navigator.clipboard.writeText(t.url.full).then(() => toast('Address copied.'), () => toast('Could not copy (clipboard unavailable).'));
 });
+
+// The page shown goes to the notebook as a link (⌥-click on the copy
+// button; ⌘⇧D since 2026-11-24).
+function sendPageToNotebook(t) {
+  if (!t || !t.url) { toast('Open a page to send it to the notebook.'); return; }
+  if (t.private) { toast('Private tabs don’t send anything to the notebook.'); return; }
+  ensureNotebook().then((nb) => {
+    nb.addQuote({ kind: 'page', url: t.url.full, title: t.title || t.url.registrable });
+    toast(notebookShown() ? 'Page added to the notebook.' : 'Page sent to the notebook.');
+  });
+}
 
 // Share: the system share sheet for this page, pointing at the button.
 $('share').addEventListener('click', withTab((t) => {

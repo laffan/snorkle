@@ -46,6 +46,9 @@ use url::Url;
 use crate::selection::{SelectionRect, HANDLER_NAME};
 use crate::text::sanitize_page_text;
 
+mod export;
+pub use export::{add_page, export_html};
+
 /// Largest report accepted, in bytes (a link report carries its address).
 pub const MAX_REPORT: usize = 5000;
 /// Largest region text read back ([`region_text_js`]), and kept.

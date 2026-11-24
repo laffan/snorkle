@@ -89,6 +89,9 @@ function runShortcut(name, via = 'native') {
   } else if (name === 'night_vision') {
     // ⌘⇧R (2026-11-23): as the eye at the sidebar's foot.
     setNightVision(!viewModes.modes.night);
+  } else if (name === 'notebook_page') {
+    // ⌘⇧D (2026-11-24): the page shown, to the notebook as a link.
+    sendPageToNotebook(activeTab());
   } else if (name === 'history') {
     // ⌘⇧H (2026-11-23): the history sidebar, shown or hidden.
     setHistory(!historyOpen);

@@ -100,6 +100,17 @@ fn research_sessions_have_their_own_notebooks() {
 }
 
 #[test]
+fn exports_keep_one_cleaned_file() {
+    let dir = tmpdir("exports");
+    let s = Store::open(&dir).unwrap();
+    let a = s.export_file("../../Tide: pools.html", b"one").unwrap();
+    assert_eq!(a, dir.join("exports").join("Tide- pools.html"));
+    let b = s.export_file("Other.html", b"two").unwrap();
+    assert!(!a.exists() && fs::read(&b).unwrap() == b"two");
+    assert_eq!(fs::read_dir(dir.join("exports")).unwrap().count(), 1);
+}
+
+#[test]
 fn icons_keep_a_dark_copy() {
     let dir = tmpdir("icons-dark");
     let s = Store::open(&dir).unwrap();

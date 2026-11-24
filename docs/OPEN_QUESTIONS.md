@@ -1362,3 +1362,13 @@ The live sites were not reachable or not signed in from this environment.
 - **[gap] Not done:** moving tab groups as a whole by dragging (only into the bookmarks bar), groups
   in the pinned grid (not wanted), choosing pins, colours for groups, and sending a whole research
   session's tabs back at once (choose them, then Send to).
+- **[decide] Export Notebook's format** (2026-11-24): one self-contained HTML page (the canvas as
+  drawn: ink, quotes, clips, links, typed notes), which any browser opens and can print to PDF.
+  Typed notes are shown as their Markdown text, not rendered (no Markdown renderer runs on export).
+  Alternatives: Markdown (text, quotes and links only; ink and clips lost), a PDF or image of the
+  canvas, or the raw notebook JSON (lossless, but only Snorkle reads it; there is no import).
+- **[decide] A tab dropped on a session's row** adds a link to that session's notebook; the tab
+  stays where it is (Send to moves tabs). Dropping it on the notebook shown places the link where
+  it was let go.
+- **[verify] Export on a device.** The save panel (macOS) and the Files export picker (iPadOS) are
+  the ones Downloads uses, unchanged; the exported page's look was checked only in Chromium.

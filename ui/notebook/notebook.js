@@ -29,11 +29,12 @@
     // once the pen has paused; at once when the app is put away.
     let saveTimer = 0;
     let pending = false;
+    // Returns the save (resolved once written), so an export can wait.
     function flush() {
       clearTimeout(saveTimer);
-      if (!pending || !loaded) return;
+      if (!pending || !loaded) return Promise.resolve();
       pending = false;
-      env.invoke('save_notebook', { notebook: JSON.stringify(pad) }).catch((e) => env.toast(String(e)));
+      return env.invoke('save_notebook', { notebook: JSON.stringify(pad) }).catch((e) => env.toast(String(e)));
     }
     function saveSoon() {
       pending = true;
@@ -543,6 +544,9 @@
       clipping: () => clipping,
       // Something from a page: a quote (target only), or a clip.
       addQuote(target) { whenReady(() => surface.addLink(target)); },
+      // A tab dragged from the sidebar (2026-11-24): a link where it was
+      // let go (window coordinates).
+      addLinkAt(target, at) { whenReady(() => surface.addLink(target, null, at)); },
       addClip(image, target) { whenReady(() => placeClip(image, target, null)); },
       // A clip's text (for search; not shown), when the words read in its
       // picture come. Set on the clip's target itself: the clip keeps that

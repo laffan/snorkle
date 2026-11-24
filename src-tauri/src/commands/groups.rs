@@ -80,6 +80,79 @@ pub fn send_page(s: S<'_>, url: String, to: Option<String>) -> Result<bool, Stri
     Ok(tab.is_some())
 }
 
+/// Export Notebook (a research session's menu, 2026-11-24): the session's
+/// notebook (`None`: everyday browsing's) as one HTML page
+/// (`notebook::export_html`: no scripts, nothing loaded), named after its
+/// topic, offered to the Files export picker (iPadOS) or a save panel
+/// (macOS). `date` is the chrome's local date, shown under the title.
+#[tauri::command]
+pub async fn export_notebook(s: S<'_>, space: Option<String>, date: String) -> Result<(), String> {
+    let space = space_arg(space)?;
+    let title = match &space {
+        Some(id) => s
+            .browser()
+            .research()
+            .iter()
+            .find(|r| r.id == *id)
+            .map(|r| r.name.clone())
+            .ok_or("That research session is gone.")?,
+        None => "Notebook".to_string(),
+    };
+    let store = s.store.clone().ok_or("Storage unavailable")?;
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        let json = store.notebook_in(space.as_deref()).unwrap_or_else(|| "{}".to_string());
+        let html =
+            snorkle_core::notebook::export_html(&json, &title, &date).ok_or("The notebook could not be exported.")?;
+        store.export_file(&format!("{title}.html"), html.as_bytes()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "The notebook could not be exported.".to_string())??;
+    super::downloads::on_host(move |h| h.export_file(&path)).await
+}
+
+/// A tab (`tab`), or a pin's or bookmark's page (`item`, its stored URL),
+/// dropped on a research session's row (2026-11-24): its page is added to
+/// that session's notebook (`None`: everyday browsing's) as a link, below
+/// everything in it (`notebook::add_page`). The address comes from the core
+/// or the store; private tabs are refused. Returns whether it was added.
+#[tauri::command]
+pub async fn notebook_add_page(
+    s: S<'_>,
+    space: Option<String>,
+    tab: Option<u64>,
+    item: Option<String>,
+) -> Result<bool, String> {
+    let space = space_arg(space)?;
+    if space.as_ref().is_some_and(|id| !s.browser().research().iter().any(|r| r.id == *id)) {
+        return Err("That research session is gone.".into());
+    }
+    let store = s.store.clone().ok_or("Storage unavailable")?;
+    let page = match (tab, item) {
+        (Some(id), _) => {
+            let b = s.browser();
+            let t = b.tab(TabId(id)).ok_or("That tab is gone.")?;
+            if t.is_private() {
+                return Err("Private tabs don’t send anything to the notebook.".into());
+            }
+            t.committed_url.as_ref().map(|u| (u.to_string(), t.title.clone()))
+        }
+        (None, Some(url)) => {
+            store.pins().into_iter().chain(store.bookmarks()).find(|b| b.url == url).map(|b| (b.url, b.title))
+        }
+        (None, None) => None,
+    };
+    let Some((url, title)) = page else { return Ok(false) };
+    tauri::async_runtime::spawn_blocking(move || {
+        let json = store.notebook_in(space.as_deref());
+        let Some(next) = snorkle_core::notebook::add_page(json.as_deref(), &url, &title, wall_ms()) else {
+            return Ok(false);
+        };
+        store.set_notebook_in(space.as_deref(), &next).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "The notebook could not be saved.".to_string())?
+}
+
 // ---- tab groups ----------------------------------------------------------------
 
 /// Groups the tabs (those that can be: listed, of the first one's profile

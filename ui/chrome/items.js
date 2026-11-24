@@ -148,6 +148,7 @@ function openPinPop(p, node, kind = 'pin') {
   $('item-copy').hidden = kind === 'tab' && !p.url;
   $('item-edit').hidden = false;
   $('item-more').replaceChildren();
+  delete pop.dataset.space;
   pop.hidden = false;
   syncMenuOpen();
 }

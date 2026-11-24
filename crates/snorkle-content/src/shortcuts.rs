@@ -48,6 +48,8 @@ pub enum Shortcut {
     NightVision,
     /// Show or hide the history sidebar (⌘⇧H, 2026-11-23).
     History,
+    /// Send the page shown to the notebook as a link (⌘⇧D, 2026-11-24).
+    NotebookPage,
     /// Quit the app (⌘Q, 2026-11-23; macOS only, see
     /// [`ShortcutDef::available`]). Handled natively, never sent to the
     /// chrome.
@@ -141,6 +143,7 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
     def("attach_bar", ShortcutMenu::View, "Attach URL Bar", "down", 0, Shortcut::AttachUrlBar),
     def("night_vision", ShortcutMenu::View, "Night Vision", "r", MOD_SHIFT, Shortcut::NightVision),
     def("history", ShortcutMenu::View, "Show or Hide History", "h", MOD_SHIFT, Shortcut::History),
+    def("notebook_page", ShortcutMenu::File, "Send Page to Notebook", "d", MOD_SHIFT, Shortcut::NotebookPage),
     def("quit", ShortcutMenu::File, "Quit Snorkle", "q", 0, Shortcut::Quit),
 ];
 
@@ -198,6 +201,7 @@ impl Shortcut {
             Shortcut::AttachUrlBar => "attach_bar".into(),
             Shortcut::NightVision => "night_vision".into(),
             Shortcut::History => "history".into(),
+            Shortcut::NotebookPage => "notebook_page".into(),
             Shortcut::Quit => "quit".into(),
         }
     }

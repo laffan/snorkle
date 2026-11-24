@@ -70,10 +70,26 @@ function privateGroup(id) {
   return !!state && state.tabs.some((t) => t.group === id && t.private);
 }
 
+// The page a dragged row stands for (a tab's, a pin's or a bookmark's),
+// as a notebook link's target; null for private tabs and empty ones.
+function draggedPage(item) {
+  if (item.kind === 'tab') {
+    const t = state && state.tabs.find((x) => x.id === item.id);
+    return t && t.url && !t.private ? { kind: 'page', url: t.url.full, title: t.title || t.url.registrable } : null;
+  }
+  const b = item.kind === 'pin' ? pins.find((p) => p.url === item.url) : item.kind === 'bookmark' ? bookmarks.find((x) => x.url === item.url) : null;
+  return b ? { kind: 'page', url: b.url, title: b.title || b.display.registrable } : null;
+}
+
 function dropTargetAt(x, y) {
   const hit = document.elementFromPoint(x, y);
   if (!hit) return null;
   const kind = dragState.item.kind;
+  // Into a notebook (2026-11-24): on the one shown, a link where it is let
+  // go; on a research session's row, a link in that session's notebook.
+  const page = (hit.closest('#notebook') || hit.closest('.rs-row')) && draggedPage(dragState.item);
+  if (page && hit.closest('#notebook')) return { kind: 'notebook', page, x, y };
+  if (page && hit.closest('.rs-row')) return { kind: 'rs-notebook', page, row: hit.closest('.rs-row'), space: hit.closest('.rs-row').dataset.space };
   // A group's heading goes only into the bookmarks bar (a tab group
   // becomes a bookmark group, 2026-11-24).
   if (kind === 'bgroup') return null;
@@ -161,11 +177,15 @@ function tabAfter(id) {
 
 function showDropFeedback(target) {
   document.querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+  $('notebook').classList.toggle('nb-drop', !!target && target.kind === 'notebook');
+  if (target && target.kind === 'rs-notebook') target.row.classList.add('drop-target');
   document.querySelectorAll('.tab-group.leaving').forEach((n) => n.classList.remove('leaving'));
   const line = $('drop-line');
   line.hidden = true;
   if (!target) return;
-  if (target.kind === 'tab') {
+  if (target.kind === 'notebook' || target.kind === 'rs-notebook') {
+    return;
+  } else if (target.kind === 'tab') {
     target.node.classList.add('drop-target');
   } else if (target.kind === 'reorder') {
     const r = target.node.getBoundingClientRect();
@@ -209,7 +229,11 @@ function endDrag(commit) {
   }
   const t = d.target;
   if (!commit || !t) return;
-  if (d.item.kind === 'tab' && t.kind === 'tab') {
+  if (t.kind === 'notebook') {
+    ensureNotebook().then((nb) => { nb.addLinkAt(t.page, { x: t.x, y: t.y }); toast('Added to the notebook.'); });
+  } else if (t.kind === 'rs-notebook') {
+    addToSessionNotebook(t.space, d.item, t.page);
+  } else if (d.item.kind === 'tab' && t.kind === 'tab') {
     invoke('split_tabs', { tab: d.item.id, with: t.id });
   } else if (d.item.kind === 'tab' && t.kind === 'reorder') {
     // A half of a split pair dragged elsewhere in the list leaves its pair.

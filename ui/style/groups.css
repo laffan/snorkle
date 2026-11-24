@@ -19,6 +19,12 @@ body.research #pins, body.research #bookmarks, body.research #side-scroll > .sid
 #research-head:hover .rs-rename, #research-head:focus-within .rs-rename { opacity: 1; }
 @media (any-hover: none) { #research-head .rs-rename { opacity: 1; } }
 #research-head .rs-rename:hover, #research-head .rs-back:hover { color: var(--fg); background: var(--field); }
+/* The session's menu (≡): always right of its topic; on a row, while it
+   is pointed at (row-actions). */
+.rs-menu { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.rs-menu svg { width: 17px; height: 17px; }
+.rs-menu:hover { color: var(--fg); background: var(--field); }
+.rs-row > .row-actions > .rs-menu { width: 30px; height: 28px; }
 #research-head .rs-field, .group-rename {
   flex: 1; min-width: 0; font: inherit; color: var(--fg); background: var(--field);
   border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; outline: none;
@@ -28,7 +34,7 @@ body.research #pins, body.research #bookmarks, body.research #side-scroll > .sid
 /* Every session, as tabs along the foot of the sidebar, above its buttons. */
 #research-list {
   display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 4px;
-  border-top: 1px solid var(--line); max-height: 30%; overflow-y: auto; background: var(--side);
+  max-height: 30%; overflow-y: auto; background: var(--side);
 }
 #research-list[hidden] { display: none; }
 .rs-row { position: relative; display: flex; align-items: center; border-radius: 10px; }
@@ -67,6 +73,11 @@ body.research #pins, body.research #bookmarks, body.research #side-scroll > .sid
 @media (any-hover: none) { .group-head > .row-actions { opacity: 1; pointer-events: auto; } }
 .group-head.drag-src { opacity: .35; }
 
+/* A tab dragged over the notebook, or over a session's row (its link goes
+   into that session's notebook). */
+#notebook.nb-drop { box-shadow: inset 0 0 0 2px var(--accent); }
+.rs-row.drop-target { box-shadow: 0 0 0 2px var(--accent) inset; background: var(--field); }
+
 /* ---- chosen rows (⌘- and ⇧-click) ---- */
 .tab.chosen, .bm.chosen { box-shadow: 0 0 0 2px var(--accent) inset; }
 .tab.chosen:not(.active), .bm.chosen:not(.active) { background: var(--field); }
@@ -79,3 +90,5 @@ body.research #pins, body.research #bookmarks, body.research #side-scroll > .sid
 .group-head .group-rename { margin: 3px 4px; padding: 4px 8px; font-size: 13px; font-weight: 700; }
 /* History replaces the sidebar's contents, the sessions' row included. */
 body.history-open #research-list { display: none; }
+.rs-row.active > .row-actions { --close-bg: var(--tab-active); }
+@media (any-hover: none) { .rs-row > .row-actions { opacity: 1; pointer-events: auto; } }

@@ -145,6 +145,8 @@
     "allow-list-bookmark-groups",
     "allow-group-bookmarks",
     "allow-edit-bookmark-group",
-    "allow-remove-bookmarks"
+    "allow-remove-bookmarks",
+    "allow-export-notebook",
+    "allow-notebook-add-page"
   ]
 }

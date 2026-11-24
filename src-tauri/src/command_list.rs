@@ -137,4 +137,6 @@ pub const COMMANDS: &[&str] = &[
     "group_bookmarks",
     "edit_bookmark_group",
     "remove_bookmarks",
+    "export_notebook",
+    "notebook_add_page",
 ];

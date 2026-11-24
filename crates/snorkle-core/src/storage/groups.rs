@@ -18,6 +18,9 @@ pub(super) const BOOKMARK_GROUPS_FILE: &str = "bookmark-groups.json";
 const NOTEBOOKS_DIR: &str = "notebooks";
 /// Favicons' copies for the dark appearance, in the icons folder.
 const DARK_ICONS_DIR: &str = "dark";
+/// A notebook being exported (2026-11-24): the one file the save panel or
+/// Files picker copies from; replaced by the next export.
+const EXPORTS_DIR: &str = "exports";
 
 /// A bookmark group id: `g` and 1–20 digits.
 pub fn valid_bookmark_group_id(id: &str) -> bool {
@@ -210,6 +213,18 @@ impl Store {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
         }
+    }
+
+    /// Writes a file to be exported (a notebook's page) under a cleaned
+    /// name (`clean_download_name`) in the app's own `exports/` folder,
+    /// which keeps only this one, and returns its path.
+    pub fn export_file(&self, name: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
+        let dir = self.dir.join(EXPORTS_DIR);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir)?;
+        let path = dir.join(clean_download_name(name));
+        atomic_write(&path, bytes)?;
+        Ok(path)
     }
 
     /// The favicon's copy for the dark appearance (made when the icon is

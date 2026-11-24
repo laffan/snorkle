@@ -3,7 +3,9 @@
 // its own tabs) and its own notebook, shown open by default. Its topic
 // heads the tab list beside a back button to everyday browsing; pointing
 // at the topic offers Rename. Every session is a row at the foot of the
-// sidebar, above its buttons. Menu → New Research Session makes one.
+// sidebar, above its buttons. Menu → New Research Session makes one. Each
+// session has a menu (≡ on its row while pointed at, and right of its
+// topic): Export Notebook, Send Tabs to Main, Delete.
 'use strict';
 
 // The session whose sidebar and notebook are set up (null: everyday).
@@ -55,7 +57,8 @@ function renderResearchHead(space) {
     pen.title = 'Rename';
     pen.appendChild(svgIcon('M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4'));
     pen.addEventListener('click', renameResearch);
-    head.append(back, name, pen);
+    const menu = researchMenuButton(() => researchById(state && state.space), head);
+    head.append(back, name, pen, menu);
   }
   head.querySelector('.rs-topic').textContent = r.name;
 }
@@ -113,11 +116,8 @@ function renderResearchList(space) {
     open.appendChild(el('span', 'rs-count', String(r.tabs)));
     open.title = `${r.name}: ${r.tabs === 1 ? '1 tab' : `${r.tabs} tabs`}`;
     open.addEventListener('click', () => invoke('enter_research', { space: r.id === space ? null : r.id }));
-    const del = el('button', 'close', '×');
-    del.setAttribute('aria-label', `Delete the research session ${r.name}`);
-    del.addEventListener('click', (ev) => { ev.stopPropagation(); deleteResearch(r); });
     const acts = el('span', 'row-actions');
-    acts.appendChild(del);
+    acts.appendChild(researchMenuButton(() => r, row));
     row.append(open, acts);
     row.addEventListener('contextmenu', (ev) => {
       ev.preventDefault();
@@ -136,20 +136,87 @@ function deleteResearch(r) {
   }, null, { anchor });
 }
 
-// Right-click on a session's row: Open, Rename, Delete.
-function openResearchMenu(r, row) {
-  openPinPop({ url: '', id: null }, row, 'group');
+// The session's menu button (≡): on its row (shown while pointed at) and
+// right of its topic. `session()` is the session when pressed.
+function researchMenuButton(session, anchor) {
+  const b = el('button', 'icon rs-menu');
+  b.setAttribute('aria-label', 'Research session menu');
+  b.setAttribute('aria-haspopup', 'menu');
+  b.title = 'Export Notebook, Send Tabs to Main, Delete';
+  b.appendChild(svgIcon('M5 7h14M5 12h14M5 17h14'));
+  // A press outside the menu closes it first (wiring.js): a second press
+  // on the button that opened it only closes it.
+  let wasOpen = false;
+  b.addEventListener('pointerdown', () => {
+    const r = session();
+    wasOpen = !!r && !$('pin-pop').hidden && $('pin-pop').dataset.space === r.id;
+  });
+  b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const r = session();
+    if (!r || wasOpen) { wasOpen = false; return; }
+    openResearchMenu(r, anchor);
+  });
+  return b;
+}
+
+// A session's menu (its ≡, or right-click on its row): Export Notebook,
+// Send Tabs to Main, Delete.
+function openResearchMenu(r, anchor) {
+  openPinPop({ url: '', id: null }, anchor, 'group');
+  $('pin-pop').dataset.space = r.id;
   for (const id of ['item-copy', 'item-edit', 'item-original', 'pin-to-bookmark']) $(id).hidden = true;
   for (const e of $('pin-pop').querySelectorAll('.pin-only, .item-only')) e.hidden = true;
   const more = $('item-more');
   more.replaceChildren(el('div', 'menu-label', r.name));
-  more.appendChild(menuButton('Open', () => invoke('enter_research', { space: r.id })));
-  more.appendChild(menuButton('Rename', () => {
-    if (state && state.space === r.id) renameResearch();
-    else { researchRenamePending = r.id; invoke('enter_research', { space: r.id }); }
-  }));
-  more.appendChild(menuButton('Delete Session…', () => deleteResearch(r)));
-  placePinPop(row);
+  more.appendChild(menuButton('Export Notebook', () => exportResearchNotebook(r)));
+  more.appendChild(menuButton('Send Tabs to Main', () => sendResearchTabsHome(r)));
+  more.appendChild(menuButton('Delete', () => deleteResearch(r)));
+  placePinPop(anchor);
+}
+
+// The session's notebook as one page, saved where the user chooses (the
+// one shown is saved first, so the export has its last strokes).
+async function exportResearchNotebook(r) {
+  try {
+    if (notebook && notebookSpace === r.id) await notebook.flush();
+    await T.core.invoke('export_notebook', { space: r.id, date: new Date().toLocaleDateString() });
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+// A tab (or a pin's or bookmark's page) dropped on a session's row: a
+// link in that session's notebook (the tab stays where it is). The
+// notebook shown takes it at once; another is changed where it is kept.
+function addToSessionNotebook(space, item, page) {
+  const r = researchById(space);
+  if (!r) return;
+  const done = () => toast(`Added to the notebook of “${r.name}”.`);
+  if (notebookSpace === space && (notebook || notebookLoading)) {
+    ensureNotebook().then((nb) => { nb.addQuote(page); done(); });
+    return;
+  }
+  const args = item.kind === 'tab' ? { space, tab: item.id, item: null } : { space, tab: null, item: item.url };
+  T.core.invoke('notebook_add_page', args)
+    .then((added) => (added ? done() : toast('Nothing to add yet.')))
+    .catch((e) => toast(String(e)));
+}
+
+// Every tab of the session goes to everyday browsing; from inside the
+// session, everyday browsing is shown with the first of them.
+async function sendResearchTabsHome(r) {
+  const tabs = (state ? state.tabs : []).filter((t) => t.space === r.id && t.sheet_over === null && !t.saved && t.launcher === null);
+  const pages = tabs.filter((t) => t.url);
+  if (!pages.length) { toast(`“${r.name}” has no tabs to send.`); return; }
+  const shown = state.space === r.id;
+  try {
+    await T.core.invoke('send_tabs', { tabs: pages.map((t) => t.id), to: null });
+    if (shown) await T.core.invoke('activate_tab', { tab: pages[0].id });
+    toast(`${pages.length === 1 ? '1 tab' : `${pages.length} tabs`} sent to everyday browsing.`);
+  } catch (e) {
+    toast(String(e));
+  }
 }
 
 $('menu-new-research').addEventListener('click', () => {

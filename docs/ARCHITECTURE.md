@@ -367,7 +367,7 @@ returns its position, "3/12" (C18). Nothing is selected, so the selection menu s
 ↩ / ⇧↩ in the bar and ⌘G / ⌘⇧G anywhere step through the matches, wrapping (⌘G opens the bar
 if it is closed).
 
-Keyboard shortcuts (`snorkle_content::SHORTCUTS`; since 2026-11-24 also ⌘⇧N New Private Tab, and ⌘D on a pin's tab bookmarks the pin, §5k) are key commands vended by the app delegate
+Keyboard shortcuts (`snorkle_content::SHORTCUTS`; since 2026-11-24 also ⌘⇧N New Private Tab, ⌘⇧D Send Page to Notebook (§5l), and ⌘D on a pin's tab bookmarks the pin, §5k) are key commands vended by the app delegate
 (`keyCommands`, added to tao's class at runtime), the last responder in every chain, so they
 work whatever has focus, including nothing (sidebar hidden, no page). They are not menu-bar
 items any more (as menu items they stopped working, apparently from the menu system's
@@ -916,9 +916,29 @@ Menu → New Research Session makes one (`new_research`: an id `r` + the wall-cl
 entered at once with an empty tab) and puts its topic in place to be typed. Its topic heads the tab
 list beside a back button to everyday browsing (`enter_research(None)`: the tab used there last, a
 pin's or bookmark's included); pointing at it shows a pencil, and the topic itself is a button that
-renames in place. Every session is a row at the foot of the sidebar, above its buttons (its name and
-tab count; a click enters it, or leaves it when it is shown; its × or right-click → Delete Session…
-closes its tabs and deletes its notebook, after a confirmation; right-click → Rename).
+renames in place. Every session is a row at the foot of the sidebar, above its buttons, with no line
+above them (its name and tab count; a click enters it, or leaves it when it is shown). Each session
+has a menu (≡: on its row while it is pointed at, always right of its topic inside the session, and
+on right-click on its row): **Export Notebook** (below), **Send Tabs to Main** (every tab of the
+session with a page goes to everyday browsing; from inside the session, everyday browsing is then
+shown with the first of them) and **Delete** (closes its tabs and deletes its notebook, after a
+confirmation).
+
+**Export Notebook** (`export_notebook`): the session's notebook, saved first if it is the one shown,
+becomes one self-contained HTML page (`notebook::export_html`), named after the topic and offered to
+the Files export picker (iPadOS) or a save panel (macOS), as Downloads' Save… does; the file is
+written to the app's `exports/` folder, which keeps only the latest. The page draws the canvas as in
+the app (the ink as SVG, quotes with their source links, clips, links, typed notes as their Markdown
+text; pinned chips under the ink), with the topic and the date above it. Every string is escaped,
+links are the notebook's checked http(s) addresses, and a content security policy allows no scripts
+and no loads but its own `data:` images.
+
+**Tabs into notebooks**: a tab (or a pin or bookmark) dragged from the sidebar onto the notebook
+shown becomes a link where it is let go; dropped on a research session's row, it becomes a link in
+that session's notebook, below everything in it (`notebook_add_page`: the address from the core or
+the store, never a private tab; `notebook::add_page` on the stored notebook, or the open notebook
+itself when that session is shown). The tab stays where it is. ⌘⇧D sends the page shown to the
+notebook as a link, as ⌥-click on the copy button does.
 
 New tabs, popups and ⌘-clicked links open in their opener's session; closing a session's last tab
 opens an empty one there (the session stays until deleted). Pins' and bookmarks' tabs are everyday
