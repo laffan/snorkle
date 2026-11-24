@@ -24,6 +24,15 @@ const $ = (id) => document.getElementById(id);
 // web engine's version is Safari's.
 const macOS = navigator.maxTouchPoints === 0 && /Macintosh/.test(navigator.userAgent);
 if (macOS) document.documentElement.classList.add('macos');
+// iPadOS (touch points, a Mac or iPad user agent). Since the status bar is
+// hidden (2026-11-23) the window's top ~30 pt is where iPadOS 26 drags,
+// shrinks or un-fullscreens the window: a drag begun there (the notebook's
+// quote button, a pin) went to the system. Nothing the chrome drags sits
+// there (`IPAD_TOP_STRIP`, html.ipados; owner report 2026-11-24); pages
+// still reach the top.
+const iPadOS = navigator.maxTouchPoints > 0 && /Macintosh|iPad/.test(navigator.userAgent);
+const IPAD_TOP_STRIP = 30;
+if (iPadOS) document.documentElement.classList.add('ipados');
 
 let state = null;
 // Define cards on start pages, by tab (see defineWord).

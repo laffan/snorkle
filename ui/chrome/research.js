@@ -131,7 +131,10 @@ function deleteResearch(r) {
   const anchor = () => document.querySelector(`.rs-row[data-space="${CSS.escape(r.id)}"]`);
   const tabs = r.tabs === 1 ? 'its tab' : `its ${r.tabs} tabs`;
   askConfirm(`Delete “${r.name}”, ${tabs} and its notebook?`, 'Delete', null, () => {
-    try { localStorage.removeItem('nbClosed:' + r.id); } catch (e) { /* storage unavailable */ }
+    try {
+      localStorage.removeItem('nbClosed:' + r.id);
+      localStorage.removeItem('aiOpen:' + r.id);
+    } catch (e) { /* storage unavailable */ }
     invoke('delete_research', { id: r.id });
   }, null, { anchor });
 }
@@ -228,14 +231,23 @@ $('menu-new-research').addEventListener('click', () => {
     .catch((e) => toast(String(e)));
 });
 
-// ---- each session's notebook -------------------------------------------------------
+// ---- each session's notebook and right panels ---------------------------------------
 //
 // One notebook per session (Rust: `notebook_in`): moving between sessions
 // saves the one shown and loads the other's. A research session's notebook
 // is open unless it was closed there; everyday browsing's is open or
-// closed as last left (`notebookOpen`).
+// closed as last left (`notebookOpen`). The right panels are each
+// session's own (owner request 2026-11-24): the AI panel open or closed
+// (remembered, `aiOpen`), and hidden with ⌘⇧\ or not (until the app
+// quits), so everyday browsing keeps its own while a session changes its.
 
 let notebookSpace = null;
+const panelsHidden = new Map();
+chatOpen = pref('aiOpen') === '1';
+
+function rememberAiOpen(open) {
+  setPref(notebookSpace ? 'aiOpen:' + notebookSpace : 'aiOpen', open ? '1' : '0');
+}
 
 function notebookOpenFor(space) {
   return space ? pref('nbClosed:' + space) !== '1' : pref('notebookOpen') === '1';
@@ -259,12 +271,13 @@ function switchNotebookSpace(space) {
   const nb = $('notebook');
   nb.replaceChildren();
   nb.className = 'sheet';
+  panelsHidden.set(notebookSpace, rightHidden);
   notebookSpace = space;
   notebookOpen = notebookOpenFor(space);
-  if (notebookOpen) {
-    rightHidden = false;
-    ensureNotebook();
-  }
+  chatOpen = pref(space ? 'aiOpen:' + space : 'aiOpen') === '1';
+  rightHidden = panelsHidden.get(space) || false;
+  if (chatOpen) archiveOpen = false;
+  if (notebookOpen) ensureNotebook();
   applyNotebook();
   applyChat();
   renderSummary();

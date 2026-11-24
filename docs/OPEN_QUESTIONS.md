@@ -1372,3 +1372,33 @@ The live sites were not reachable or not signed in from this environment.
   it was let go.
 - **[verify] Export on a device.** The save panel (macOS) and the Files export picker (iPadOS) are
   the ones Downloads uses, unchanged; the exported page's look was checked only in Chromium.
+
+## Round 3: one AI panel, the quote drag on iPad, ⌥ outline, clip copy (2026-11-24)
+
+- **[verify] The quote drag on iPad** (owner report: two dashed lines in different colours, a
+  zooming effect, and the window leaving full screen). Neither line's code changed since the
+  notebook was added (f048b94): the chrome draws a red line from the quote button, and the page draws
+  its own red line from its right edge (inside the page, so its black-and-white and dark filters
+  recolour it). What changed is the window's top: since cfbb949 (2026-11-23) the iPadOS status bar is
+  hidden, which put the notebook's bar, and its quote button about 20 pt from the top, inside the
+  strip by which iPadOS 26 drags windows (about the top 30 pt, per Apple's developer forums). A drag
+  begun there is taken as the system's window drag, which shrinks the window out of full screen
+  (the "zoom") while both lines are drawn. Fix: on iPadOS the chrome keeps its top 30 pt clear
+  (sidebar rows and right panels start below it). Not run on an iPad. If it persists, the next
+  step is native: tao's root view controller can defer top-edge system gestures
+  (`setPreferredScreenEdgesDeferringSystemGestures:`), which Apple does not document for window
+  dragging; or the status bar could come back.
+- **[decide] ⌥-click now clips.** While ⌥ is held the element under the pointer is outlined;
+  ⌥-click clips it at once. Before, ⌥-click on text selected its sentence and offered "Send to
+  Notebook" (a quote), and on an image offered "Send to Notebook" (a clip). Quotes now come from a
+  selection (select, then ⌥-click), the quote button, or text with no outlined element under it.
+  The outlined element is the innermost one laid out as a block, at least 16 × 12 and no larger
+  than the view; there is no way yet to step out to a larger one (e.g. with the scroll wheel).
+- **[decide] One AI panel.** The chat lives under the summary in one scrolling column with its box
+  at the bottom. New Chat (+) and Earlier Chats (an icon) moved to the panel's foot, beside the model.
+- **[decide] Right panels per session.** Everyday browsing and each research session keep whether
+  the AI panel and the Notebook are open (stored per session in the chrome's `localStorage`) and
+  whether ⌘⇧\ hid them (until the app quits). A new research session opens with its Notebook and
+  without the AI panel.
+- **[verify] Copy Picture** uses the Clipboard API (`ClipboardItem` with a PNG promise) from the
+  chrome's web view; WebKit should allow it on a press. Checked only in Chromium.

@@ -1,14 +1,16 @@
 /* The chrome's styles, part 3 of 3 (ui/style/, linked in order; one cascade):
    The chat, night vision, the console, the start page, pins, menus, Settings, the attached bar, Blocked, History and Save for Later. */
 
-/* ---- AI chat (docked right of the page) ---------------------------------- */
-.sheet.chat { display: flex; flex-direction: column; overflow: hidden; }
-.sheet.chat:not(.dock) { height: calc(100% - env(safe-area-inset-top) - 80px); }
-.chat-head h1 { flex: 0 0 auto; }
+/* ---- AI panel: the summary, then the chat, its box at the bottom ---------- */
+.sheet.ai-panel { display: flex; flex-direction: column; overflow: hidden; }
+.sheet.ai-panel:not(.dock) { height: calc(100% - env(safe-area-inset-top) - 80px); }
+.ai-scroll { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.ai-panel.archive-open :is(#summary-ask, #summary-msg, #summary-list, #summary-foot) { display: none; }
+.ai-panel .chat-log:not(:empty) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .chat-plus { min-width: 30px; height: 30px; border-radius: 15px; font-size: 22px; line-height: 1; margin-left: 2px; }
 .chat-context { font-size: 12px; color: var(--muted); margin: -4px 0 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .chat-log {
-  flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0 -4px; padding: 4px;
+  list-style: none; margin: 0 -4px; padding: 4px;
   display: flex; flex-direction: column; gap: 8px; -webkit-user-select: text; user-select: text;
 }
 .chat-log li { max-width: 92%; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.4; }
@@ -26,6 +28,9 @@
 }
 #chat-send { flex: 0 0 auto; height: auto; }
 .chat-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 6px; }
+/* New chat and earlier chats: small icons at the foot's end. */
+.chat-foot .chat-plus { min-width: 28px; height: 28px; border-radius: 8px; font-size: 20px; margin: 0; }
+#chat-new { margin-left: auto; }
 .linkbtn {
   font-size: 13px; color: var(--muted); padding: 4px 0; text-decoration: underline; text-underline-offset: 3px;
   max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
@@ -34,7 +39,7 @@
 #chat-cost { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .popup.chat-model-menu { left: 20px; right: auto; bottom: 44px; max-height: 60%; overflow-y: auto; min-width: 220px; z-index: 5; }
 .chat-model-menu button.chosen { font-weight: 700; }
-.chat-archive { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0; }
+.chat-archive { list-style: none; margin: 0; padding: 0; }
 .chat-archive li { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
 .chat-archive li.empty { justify-content: center; padding: 16px; border: 0; }
 .chat-archive button.open { flex: 1; min-width: 0; text-align: left; padding: 10px 4px; display: flex; flex-direction: column; gap: 2px; }
@@ -305,9 +310,6 @@ body.bar-attached .popup.actions-pop { bottom: calc(100% + 6px); }
 #history-view { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
 body.history-open #side-scroll { display: none; }
 #ai-btn[aria-pressed="true"], #notebook-btn[aria-pressed="true"], #night-btn[aria-pressed="true"] { color: var(--fg); background: var(--field); }
-/* The AI sidebar (summary above chat) has one close button, the
-   summary's; the chat's shows when the chat is alone (narrow windows). */
-#summary:not([hidden]) ~ #chat #chat-close { display: none; }
 .hv-head {
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 2px;
   padding: 10px 2px 6px; background: var(--side);

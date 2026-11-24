@@ -121,9 +121,13 @@ function renderPins() {
     });
     const rm = el('button', 'unpin', '\u00D7');
     rm.setAttribute('aria-label', 'Unpin');
+    // Asked first (owner request 2026-11-24), beside the pin; its tab stays
+    // open as an ordinary tab.
     rm.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      invoke('unpin', { url: p.url, bookmarkIndex: null }).then(loadPins);
+      const name = p.title || p.display.registrable;
+      const anchor = () => [...document.querySelectorAll('#pins .pin')].find((n) => n.dataset.url === p.url);
+      askConfirm(`Unpin “${name}”?`, 'Unpin', null, () => invoke('unpin', { url: p.url, bookmarkIndex: null }).then(loadPins), null, { anchor });
     });
     node.append(open, rm);
     node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'pin', url: p.url, index }));

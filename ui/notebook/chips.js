@@ -2,7 +2,11 @@
 (() => {
   'use strict';
   const NB = window.SnorkleNb;
-  const { ICONS, capture, el, linkLabel, onPress, renderText, siteOf } = NB;
+  const { ICONS, capture, el, icon, linkLabel, onPress, renderText, siteOf } = NB;
+
+  // A clip's copy buttons (2026-11-24): its text, and its picture.
+  const COPY_TEXT_ICON = () => icon([['rect', { x: '5', y: '5', width: '8.5', height: '9', rx: '1.5' }], ['path', { d: 'M10.5 5V3a1 1 0 0 0-1-1H3.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1H5' }], ['path', { d: 'M7 8h4.5M7 10.5h3' }]], 12);
+  const COPY_IMAGE_ICON = () => icon([['rect', { x: '2', y: '3', width: '12', height: '10', rx: '1.5' }], ['circle', { cx: '5.7', cy: '6.4', r: '1.1' }], ['path', { d: 'M2.5 11.5l3.5-3 2.5 2 2-1.6 3 2.6' }]], 12);
 
   // ---- chips: links, quotes, clips, typed notes (links.ts) ---------------------------------
 
@@ -112,8 +116,54 @@
       if (l.imageDark) image(l.imageDark, 'dark');
       e.classList.toggle('has-dark', Boolean(l.imageDark));
       const foot = el('span', 'notepad-clip-foot');
-      foot.append(pin(l), el('span', 'notepad-link-page', siteOf(l.target.url) || l.target.title || ''));
+      foot.append(
+        pin(l),
+        el('span', 'notepad-link-page', siteOf(l.target.url) || l.target.title || ''),
+        copyButton(COPY_TEXT_ICON(), 'Copy the text in this clip', () => copyClipText(l)),
+        copyButton(COPY_IMAGE_ICON(), 'Copy this clip as a picture', () => copyClipImage(l)),
+      );
       e.appendChild(foot);
+    }
+
+    // Copy buttons on a clip (owner request 2026-11-24). A press on one is
+    // its own: the clip is not moved or followed.
+    function copyButton(svg, title, act) {
+      const b = el('span', 'notepad-clip-copy');
+      b.setAttribute('role', 'button');
+      b.setAttribute('aria-label', title);
+      b.title = title;
+      b.appendChild(svg);
+      onPress(b, act);
+      return b;
+    }
+
+    // The clip's text: what the page had in its region and what text
+    // recognition read in its picture (kept for search, `target.text`).
+    function copyClipText(l) {
+      const text = (l.target.text || '').trim();
+      if (!text) { env.toast('No text was found in this clip.'); return; }
+      navigator.clipboard.writeText(text).then(() => env.toast('Text copied.'), () => env.toast('Could not copy (clipboard unavailable).'));
+    }
+
+    // The clip's picture (as the page showed it), as a PNG: the clipboard
+    // takes PNG pictures. Given to the clipboard as a promise, so the press
+    // that asked still counts while the picture is converted.
+    function copyClipImage(l) {
+      if (!l.image || !navigator.clipboard || !window.ClipboardItem) { env.toast('Could not copy (clipboard unavailable).'); return; }
+      const png = new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          c.getContext('2d').drawImage(img, 0, 0);
+          c.toBlob((b) => (b ? resolve(b) : reject(new Error('no picture'))), 'image/png');
+        };
+        img.onerror = () => reject(new Error('no picture'));
+        img.src = l.image;
+      });
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+        .then(() => env.toast('Picture copied.'), () => env.toast('Could not copy the picture.'));
     }
 
     function textChip(l) {

@@ -1,4 +1,6 @@
-// Browser chrome (see core.js): The AI sidebar: summary and chat.
+// Browser chrome (see core.js): The AI sidebar: the summary, with the
+// chat about the page under it and its box at the bottom (one panel since
+// 2026-11-24; the chat had its own panel under the summary's).
 'use strict';
 
 // ---- summary view ---------------------------------------------------------
@@ -38,8 +40,10 @@ function summaryFor(t) {
   return sm;
 }
 
+// The AI panel is shown: docked right of the page, or (narrow windows)
+// over it.
 function summaryShown() {
-  return !!state && !narrow && !scriptsOpen && !rightHidden && summaryOn();
+  return !!state && !scriptsOpen && !rightHidden && summaryOn();
 }
 
 // The AI sidebar: the summary of the page above the chat about it.
@@ -92,7 +96,7 @@ function goToPoint(t, sm, i) {
 function renderSummary() {
   const show = summaryShown();
   $('summary').hidden = !show;
-  $('summary').classList.toggle('dock', show);
+  $('summary').classList.toggle('dock', show && !narrow);
   if (!show) $('summary').classList.remove('split-lower');
   // Tabs that closed take their summaries with them.
   if (state) {
@@ -278,6 +282,8 @@ function renderChat() {
   if (!chatShown()) { chatKey = ''; return; }
   const t = activeTab();
   $('chat-archive').setAttribute('aria-pressed', String(archiveOpen));
+  // The archive takes the panel's place (the summary too).
+  $('summary').classList.toggle('archive-open', archiveOpen);
   $('chat-log').hidden = archiveOpen;
   $('chat-form').hidden = archiveOpen;
   $('chat-archive-list').hidden = !archiveOpen;
@@ -291,7 +297,9 @@ function renderChat() {
   chatKey = key;
   renderChatModels();
   const log = $('chat-log');
-  const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+  // The summary and the chat scroll together.
+  const scroller = $('ai-scroll');
+  const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 24;
   log.replaceChildren();
   const c = t && (t.url || (cur && cur.sticky)) ? chatFor(t) : null;
   $('chat-context').hidden = !(c && c.context);
@@ -311,5 +319,5 @@ function renderChat() {
   const tokens = c.input + c.output;
   $('chat-cost').textContent = tokens ? `${c.unpriced ? '≥ ' : '≈ '}${money(c.cost)} · ${tokens.toLocaleString()} tokens` : '';
   $('chat-send').disabled = c.busy || !pick;
-  if (atEnd || c.busy) log.scrollTop = log.scrollHeight;
+  if ((atEnd || c.busy) && c.log.length) scroller.scrollTop = scroller.scrollHeight;
 }

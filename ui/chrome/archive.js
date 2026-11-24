@@ -60,16 +60,15 @@ function openArchived(id) {
   }).catch((e) => toast(String(e)));
 }
 
-// Shows or hides the chat panel (open, and the right panels not hidden).
+// Shows or hides the AI panel (the summary with the chat in it).
 function applyChat() {
-  const shown = chatShown();
-  $('chat').hidden = !shown;
-  $('chat').classList.toggle('dock', shown && !narrow);
-  if (!shown) $('chat').classList.remove('split-lower');
+  renderSummary();
 }
 
 function setChat(open) {
   chatOpen = open;
+  // Remembered for the session shown (research.js).
+  rememberAiOpen(open);
   if (open) rightHidden = false;
   if (!open) { archiveOpen = false; setModelMenu(false); }
   applyChat();
@@ -223,7 +222,6 @@ $('define-more').addEventListener('click', () => {
   setChat(true);
 });
 
-$('chat-close').addEventListener('click', () => setAi(false));
 $('chat-new').addEventListener('click', () => {
   const t = activeTab();
   if (t) chats.set(t.id, newChat(t.url ? t.url.full : ''));

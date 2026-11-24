@@ -116,6 +116,7 @@
       },
       tapText: (l, on, cx, cy) => texts.tap(l, on, cx, cy),
       edit: (l) => texts.edit(l),
+      toast: (m) => (env.toast ? env.toast(m) : undefined),
     });
 
     const texts = createTextNotes({

@@ -280,3 +280,18 @@
 /* ⌥-click on a page: one button above what was picked (a hole, like the
    selection menu). */
 #nb-pop .nb-send { font-weight: 600; }
+/* A clip's copy buttons (text, picture), at the end of its foot: shown
+   while the clip is pointed at (always on touch-only devices). */
+.notepad-clip-copy {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 14px; height: 14px; color: var(--nb-dim); opacity: 0; cursor: pointer; transition: opacity .1s;
+}
+.notepad-clip-copy::before { content: ""; position: absolute; inset: -6px; }
+.notepad-clip-foot .notepad-link-page { flex: 1; min-width: 0; }
+.notepad-clip:hover .notepad-clip-copy, .notepad-clip:focus-within .notepad-clip-copy { opacity: .6; }
+.notepad-clip .notepad-clip-copy:hover { opacity: 1; }
+@media (any-hover: none) { .notepad-clip .notepad-clip-copy { opacity: .6; } }
+.notepad-link.fixed .notepad-clip-copy { pointer-events: auto; }
+/* The size grip holds the clip's bottom-right corner: the foot's buttons
+   end before it. */
+.notepad-clip .notepad-clip-foot { padding-right: 18px; }

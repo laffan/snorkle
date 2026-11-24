@@ -83,7 +83,11 @@ hidden there is no drag area; ⌘\ shows it. ⌘Q quits (a shortcut taken by the
 page could swallow it, then `terminate:` as the menu's Quit; macOS only). The chrome detects macOS
 by `navigator.maxTouchPoints == 0` with a Macintosh user agent (an iPad reports touch points, also
 in desktop mode). On iPadOS the status bar is hidden (2026-11-23; tao's root view controller,
-`setPrefersStatusBarHidden:`), so the sidebar and pages reach the top of the window.
+`setPrefersStatusBarHidden:`), so the sidebar and pages reach the top of the window. iPadOS 26
+drags (and un-fullscreens) a window by its top ~30 pt, so since 2026-11-24 nothing the chrome drags
+sits there on iPadOS: the sidebar's rows and the right panels start 30 pt down (`IPAD_TOP_STRIP`,
+`html.ipados`); pages still reach the top. A drag of the notebook's quote button begun there went to
+the system, which shrank the window out of full screen (owner report 2026-11-24).
 
 **Data at rest.** macOS has no `NSFileProtectionComplete`; the profile and website data are in the
 user's Library (`~/Library/Application Support/<identifier>` and WebKit's stores), protected by
@@ -530,7 +534,8 @@ alike (`storage::clean_emoji`; kept when a pin moves into the bookmarks, dropped
 a tab the title is its own name (`Tab::name`, shown instead of the page's title; empty follows the
 page), the emoji `Tab::emoji` (both saved with the session, `Browser::set_tab_label`), and a changed
 URL loads in the tab like the address bar. Bookmark rows are one line, like tabs. **Pins:** up to 12
-(three rows of four); their menu adds Return to Bookmark (moves it to the top of the bookmarks). **Appearance**
+(three rows of four); their menu adds Return to Bookmark (moves it to the top of the bookmarks). A
+pin's × asks first (2026-11-24: "Unpin …?", beside the pin; its tab stays open as an ordinary tab). **Appearance**
 (Settings → General: System, Light, Dark) sets the chrome's colours (`data-theme`) and the
 window's `overrideUserInterfaceStyle`, so system UI follows it. Pages do not (2026-11-15): a
 content view is light over a white canvas unless dark pages mode is on for it (until then a view
@@ -617,19 +622,23 @@ record (interrupted downloads, earlier private ones) are deleted when the app st
 Native page views sit above the chrome's webview, so the chrome cannot draw over a page except
 in holes (§5f). Panels that should leave the page visible dock beside it instead: the chrome
 reports `right` and `bottom` insets and the host shrinks the content area. Site scripts dock on
-the right, full height; otherwise the summary (§5j), the page chat and the Notebook (§5i) do,
-in that order from the top, sharing the height when several are open (in narrow windows site scripts and chat overlay and hide
-the page). The right panels' width is dragged at their left edge (260–640 pt, at most 60% of the
+the right, full height; otherwise the AI panel (the summary with the page chat in it, §5j, §5g)
+and the Notebook (§5i) do, in that order from the top, sharing the height when both are open (in
+narrow windows site scripts and the AI panel overlay and hide the page). Each session (everyday
+browsing and each research session, §5l) has its own: whether the AI panel and the Notebook are open
+(remembered across launches) and whether ⌘⇧\ hid them. The right panels' width is dragged at their left edge (260–640 pt, at most 60% of the
 area, remembered); ⌘⇧\ hides them without turning them off and shows them again. The console
-docks at the bottom. A ring around the `{ }` row (and the ⋯ button while its popup is closed) marks
-pages an enabled site script applies to. When the content area grows (a panel closes), the
+docks at the bottom. A ring around the `{ }` row in the ⋯ popup marks pages an enabled site script
+applies to (until 2026-11-24 also a ring on the ⋯ button, which read as a stray white circle in the
+dark appearance). When the content area grows (a panel closes), the
 host checks after 0.35 s whether WebKit left the page drawn narrower than the view (a zoom scale
 kept from the narrower layout) and zooms it to fill the width.
 
 ## 5g. Page chat
 
 The AI button in the URL bar (2026-11-23; before, a chat button beside the summary button) opens
-the chat docked right of the page, under the summary (§5j): a model menu
+the AI panel (§5j); since 2026-11-24 the chat is part of it: its conversation follows the summary in
+the same scrolling column, and its box is at the bottom of the panel, over a line with a model menu
 (the models of every connected provider, as listed by Settings → AI → Test; it sets the "Ask
 Selection" use), the conversation,
 and an estimate of what it has cost so far (provider-reported tokens × published prices,
@@ -796,10 +805,14 @@ address as a link). The paste is caught in a hidden field so the system's own pa
 text; no clipboard permission is asked.
 
 Bringing things in (C23): a constant watcher in every page's client world reports
-- ⌥-click on a selection, or on text (it selects that sentence, `Intl.Segmenter`), or on an image:
-  "Send to Notebook" appears above it (a hole); pressed, text is read as the selection menu reads
-  it (C20) and becomes a quote linking back with a text fragment (`#:~:text=`), an image becomes
-  a clip of its box;
+- ⌥ held (2026-11-24): the element under the pointer is outlined with the clip stage's dashed
+  border: an image, video or canvas, else a link, else the innermost element laid out as a block (at
+  least 16 × 12 pt, no larger than the view; nothing is outlined over a larger one). ⌥-click clips
+  it at once (the clip's report, as a drawn stage's), or sends the link (below);
+- ⌥-click on a selection: "Send to Notebook" appears above it (a hole); pressed, the text is read
+  as the selection menu reads it (C20) and becomes a quote linking back with a text fragment
+  (`#:~:text=`). Over text with no outlined element, ⌥-click selects the sentence the same way
+  (`Intl.Segmenter`); until 2026-11-24 it always did, and an image got "Send to Notebook" too;
 - ⌥-drag, or a drag while the scissors are on (clip mode, which then ends): while ⌥ is held over
   a page (key events, or the modifier state of pointer moves), and in clip mode, a cover lies over
   the page: a crosshair, and every press goes to it, so no text is selected and nothing is
@@ -825,6 +838,12 @@ Bringing things in (C23): a constant watcher in every page's client world report
   chrome's window (`dragDropEnabled: false`), since it swallows every drag into the chrome; the
   chrome cancels any drop it does not take (outside text fields), so nothing dropped navigates it.
 
+A clip in the notebook has two copy buttons at the end of its foot (2026-11-24; shown while it is
+pointed at, always on touch-only devices): Copy Text puts the text kept with it for search (the
+page's text in its region and what text recognition read in its picture) on the clipboard, or says
+there is none; Copy Picture puts its picture there as a PNG (redrawn from the clip's JPEG in the
+chrome, through the Clipboard API with the press's activation). Neither moves nor follows the clip.
+
 A clip is a JPEG the app draws from its own web view (`takeSnapshotWithConfiguration` with the
 region; the page is shown without its view modes for 0.32 s first, so black and white, hidden media
 and the dark inversion are not in it); the chrome makes its white-on-black copy (zotero-helper's
@@ -843,8 +862,11 @@ rebuilt field by field in Rust on every write and read (`snorkle_core::notebook:
 Replaces the headers view (its outline, Detect Headers and the per-site heading rules; channel
 C14 is retired and `heading-rules.json` is deleted when the store opens). The AI button
 in the URL bar (2026-11-23; before, a summary button per tab and a separate chat button) opens the
-summary and the chat together, docked right of the page, the summary on top (the Notebook below
-them when open), with one close button. The summary is no longer per tab: it follows the tab shown.
+AI panel docked right of the page (the Notebook below it when open): since 2026-11-24 one panel, the
+summary followed by the chat about the page in one scrolling column, the chat's box at the bottom,
+under it the model, effort and cost line with New Chat (+) and Earlier Chats (an icon; the archive
+takes the panel's place while open), and one close button (until then the chat was a second
+panel under the summary's). The summary is no longer per tab: it follows the tab shown.
 Pressing the AI button on a page that has no summary yet asks for one at once (opened another way,
 Ask AI on a selection, a definition's follow-up or ⌘⇧\, or on another tab, it asks "Summarize
 “title”?" first); the panel then shows the summary as bullet points, the model and an estimate of
@@ -917,7 +939,8 @@ entered at once with an empty tab) and puts its topic in place to be typed. Its 
 list beside a back button to everyday browsing (`enter_research(None)`: the tab used there last, a
 pin's or bookmark's included); pointing at it shows a pencil, and the topic itself is a button that
 renames in place. Every session is a row at the foot of the sidebar, above its buttons, with no line
-above them (its name and tab count; a click enters it, or leaves it when it is shown). Each session
+above them, shown with the foot's buttons (while the sidebar is pointed at, has the focus, one of
+its menus is open or a row is dragged; always on touch-only devices) (its name and tab count; a click enters it, or leaves it when it is shown). Each session
 has a menu (≡: on its row while it is pointed at, always right of its topic inside the session, and
 on right-click on its row): **Export Notebook** (below), **Send Tabs to Main** (every tab of the
 session with a page goes to everyday browsing; from inside the session, everyday browsing is then

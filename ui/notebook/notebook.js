@@ -505,6 +505,7 @@
         toolChanged: (t) => { tool = t; renderBar(); },
         lassoBorrowed: (b) => { borrowed = b; renderBar(); },
         searchChanged: (r) => { if (!searchRow.hidden) showCount(r); },
+        toast: (m) => env.toast(m),
         flush,
       });
       surface.setColor(color);

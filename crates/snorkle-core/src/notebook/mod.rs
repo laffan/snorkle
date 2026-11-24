@@ -6,11 +6,17 @@
 //! From the page (channel C23, posting to C19's client-world handler, so
 //! page scripts cannot call it): a constant watcher ([`watch_js`]) in the
 //! client world, main frame, every page, reports
-//! - ⌥-click on a selection, or on text (it selects that sentence):
-//!   `{"nb":"text","r":[x,y,w,h],"vw":w}`; the text is then read as the
-//!   selection menu reads it (C20);
-//! - ⌥-click on an image, video or canvas: `{"nb":"img", ...}` with its
-//!   box (cut to what is in view);
+//! - ⌥-click on a selection: `{"nb":"text","r":[x,y,w,h],"vw":w}`; the
+//!   text is then read as the selection menu reads it (C20);
+//! - while ⌥ is held (2026-11-24), the element under the pointer is
+//!   outlined with the clip stage's dashed border: an image, video or
+//!   canvas, else a link, else the innermost element laid out as a block
+//!   (at least 16 × 12, no larger than the view; none if it is larger);
+//!   ⌥-click clips it at once (`{"nb":"clip", ...}` with its box, cut to
+//!   what is in view), or sends the link (below). Text with no such element
+//!   under it still selects its sentence (`text`, as before); until
+//!   2026-11-24 ⌥-click on text always did, and an image gave
+//!   `{"nb":"img", ...}` and a "Send to Notebook" button;
 //! - ⌥-drag, or a drag while the notebook's scissors are on (clip mode):
 //!   `{"nb":"clip", ...}` with the box drawn;
 //! - Escape in clip mode: `{"nb":"end"}`; a press or a scroll after a
@@ -108,7 +114,9 @@ pub enum Report {
 /// keys select word by word as usual (owner request 2026-11-16). The cover
 /// is clear while ⌥ is only held (2026-11-16): the page dims once a drag
 /// begins (the stage's shade around its box); in clip mode the cover also
-/// fades the page slightly. A drag on the cover draws a box; let go, the
+/// fades the page slightly. While ⌥ is held the element under the pointer
+/// is outlined, and ⌥-click clips it (see the module docs; 2026-11-24).
+/// A drag on the cover draws a box; let go, the
 /// box stays as a stage (zotero-helper's clip mode): its corners size it,
 /// a press inside moves it, a press outside draws another, and Clip (or
 /// ↩) clips it, × (or Escape) drops it. A click without a drag is ⌥-click.
@@ -143,6 +151,10 @@ function under(fn){if(ov)at(ov,'pointer-events','none');try{return fn();}finally
 var MEDIA=/^(IMG|VIDEO|CANVAS|PICTURE)$/;
 function mediaAt(x,y){var l=document.elementsFromPoint?document.elementsFromPoint(x,y):[];for(var i=0;i<l.length&&i<12;i++){var e=l[i];if(MEDIA.test(e.tagName)||e.hasAttribute('data-snorkle-video-box'))return e;if(e.tagName==='svg'&&e.getBoundingClientRect().width>40)return e;}return null;}
 function linkAt(x,y){var l=document.elementsFromPoint?document.elementsFromPoint(x,y):[];for(var i=0;i<l.length&&i<12;i++){var a=l[i].closest?l[i].closest('a[href]'):null;if(a)return /^https?:/i.test(a.href||'')?a:null;}return null;}
+function boxAt(x,y){var e=document.elementFromPoint(x,y),v=vp();for(var i=0;e&&i<40&&e!==document.body&&e!==document.documentElement;i++,e=e.parentElement){
+var r=e.getBoundingClientRect();if(r.width>v[2]+1||r.height>v[3]+1)return null;if(r.width<16||r.height<12)continue;
+var d=getComputedStyle(e).display;if(MEDIA.test(e.tagName)||d!=='inline'&&d!=='contents')return e;}return null;}
+function pickAt(x,y){var m=mediaAt(x,y);if(m)return {e:m,k:'clip'};var a=linkAt(x,y);if(a)return {e:a,k:'link'};var b=boxAt(x,y);return b?{e:b,k:'clip'}:null;}
 function blockOf(n){var e=n.nodeType===1?n:n.parentElement;while(e&&e!==document.body&&e!==document.documentElement){var d=getComputedStyle(e).display;if(d!=='inline'&&d!=='contents'&&d.indexOf('inline-')!==0)return e;e=e.parentElement;}return document.body||document.documentElement;}
 function sentenceAt(x,y){var c=document.caretRangeFromPoint?document.caretRangeFromPoint(x,y):null;if(!c||!c.startContainer||c.startContainer.nodeType!==3)return null;
 var node=c.startContainer,off=c.startOffset,hit=document.elementFromPoint(x,y);if(!hit||!hit.contains(node))return null;
@@ -158,16 +170,20 @@ function inSelection(x,y){var s=window.getSelection();if(!s||!s.rangeCount||s.is
 for(var i=0;i<l.length;i++){var q=l[i];if(x>=q.left-4&&x<=q.right+4&&y>=q.top-4&&y<=q.bottom+4)return r;}return null;}
 function quoteAt(x,y){var s=inSelection(x,y);return s?s.cloneRange():sentenceAt(x,y);}
 function optionClick(x,y){return under(function(){var r=inSelection(x,y);if(r){post('text',r.getBoundingClientRect());return true;}
-var m=mediaAt(x,y);if(m){post('img',m.getBoundingClientRect());return true;}
-var a=linkAt(x,y);if(a){var b=a.getBoundingClientRect(),q=rectOf('link',b.width&&b.height?b:{left:x,top:y,right:x+1,bottom:y+1});if(q){q.url=String(a.href).slice(0,4096);picked=1;report(q);}return true;}
+var p=pickAt(x,y);if(p&&p.k==='clip'){var q=p.e.getBoundingClientRect();spent=true;outline();requestAnimationFrame(function(){post('clip',q);});return true;}
+var a=p&&p.k==='link'?p.e:null;if(a){var b=a.getBoundingClientRect(),q=rectOf('link',b.width&&b.height?b:{left:x,top:y,right:x+1,bottom:y+1});if(q){q.url=String(a.href).slice(0,4096);picked=1;report(q);}return true;}
 r=sentenceAt(x,y);if(!r)return false;var s=window.getSelection();s.removeAllRanges();s.addRange(r);post('text',r.getBoundingClientRect());return true;});}
-var alt=false,spent=false,stage=null,drag=null,swallow=0,MIN=12;
+var alt=false,spent=false,stage=null,drag=null,swallow=0,MIN=12,hl=null;
+function outline(){var want=alt&&!spent&&!nb.clip&&!stage&&!drag&&!selPress&&!pass&&lastX>=0,p=want?under(function(){return pickAt(lastX,lastY);}):null;
+if(!p){if(hl){hl.remove();hl=null;}return;}var r=p.e.getBoundingClientRect();
+if(!hl)hl=el({position:'fixed','z-index':Z,'pointer-events':'none',margin:'0',padding:'0',border:'2px dashed #ff3b30','box-sizing':'border-box','border-radius':'3px',background:'transparent',opacity:'.75'});
+at(hl,'left',r.left+'px');at(hl,'top',r.top+'px');at(hl,'width',r.width+'px');at(hl,'height',r.height+'px');}
 function cover(on){if(on&&!ov){ov=el({position:'fixed',left:'0',top:'0',width:'100vw',height:'100vh',margin:'0',padding:'0',border:'0','z-index':Z,background:'transparent',cursor:'crosshair','touch-action':'none','-webkit-user-select':'none','user-select':'none'});ov.addEventListener('pointerdown',down,true);}
 else if(!on&&ov){ov.remove();ov=null;}}
 function noSelect(on){if(on&&!noSel){noSel=document.createElement('style');noSel.textContent='*{-webkit-user-select:none!important;user-select:none!important}';(document.head||document.documentElement).appendChild(noSel);}
 else if(!on&&noSel){noSel.remove();noSel=null;}}
 function sync(){var on=(alt&&!spent)||nb.clip||!!stage||!!drag;cover(on);if(ov)at(ov,'background',nb.clip?'rgba(128,128,128,.14)':'transparent');
-pass=!!(on&&alt&&!nb.clip&&!stage&&!drag&&!selPress&&lastX>=0&&inSelection(lastX,lastY))||(!!selPress&&on);if(ov)at(ov,'pointer-events',pass?'none':'auto');noSelect(!!stage||!!drag);}
+pass=!!(on&&alt&&!nb.clip&&!stage&&!drag&&!selPress&&lastX>=0&&inSelection(lastX,lastY))||(!!selPress&&on);if(ov)at(ov,'pointer-events',pass?'none':'auto');noSelect(!!stage||!!drag);outline();}
 function ours(t){return !!t&&(t===ov||(!!stage&&(t===stage.box||(!!stage.bar&&stage.bar.contains(t))||stage.handles.some(function(p){return p[1]===t;}))));}
 function setAlt(v){if(v===alt)return;alt=v;if(!v)spent=false;sync();}
 function norm(b){return [Math.min(b[0],b[2]),Math.min(b[1],b[3]),Math.max(b[0],b[2]),Math.max(b[1],b[3])];}
@@ -213,7 +229,7 @@ document.addEventListener('pointerup',up,true);document.addEventListener('pointe
 document.addEventListener('pointerdown',function(e){if(ok(e)&&pass&&optKey(e)&&!nb.clip&&!stage){var s=window.getSelection();
 selPress=s&&s.rangeCount?{id:e.pointerId,x:e.clientX,y:e.clientY,r:s.getRangeAt(0).cloneRange(),dragged:false}:null;return;}
 if(!ok(e)||optKey(e)||nb.clip)return;var t=e.target;if(ov&&(t===ov||(stage&&(t===stage.box||(stage.bar&&stage.bar.contains(t))))))return;unpick();},true);
-window.addEventListener('scroll',function(){unpick();},{passive:true,capture:true});
+window.addEventListener('scroll',function(){unpick();if(alt)outline();},{passive:true,capture:true});
 ['click','mousedown','mouseup','dblclick','auxclick','contextmenu'].forEach(function(t){document.addEventListener(t,function(e){if(!ok(e))return;
 var own=swallow&&Date.now()-swallow<400;if(t==='mousedown'&&selPress){e.stopPropagation();return;}
 if(t==='click'&&stage&&stage.bar&&stage.bar.contains(e.target)){e.preventDefault();return;}

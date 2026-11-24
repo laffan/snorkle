@@ -98,7 +98,6 @@
 .page-actions { display: flex; align-items: center; gap: 2px; }
 #actions { position: relative; }
 #actions.open #actions-toggle { background: var(--field); }
-#actions-toggle.has-script { box-shadow: 0 0 0 2px var(--fg) inset; }
 #toolbar .pillbtn { margin: 0 2px; }
 .icon.text { font-size: 15px; font-weight: 700; padding: 0 8px; }
 .icon:active { background: var(--field); }
