@@ -66,8 +66,11 @@ body.research #pins, body.research #bookmarks, body.research #side-scroll > .sid
 .tgroup.active.collapsed > .group-head { background: var(--tab-active); }
 :is(.tgroup, .bgroup) > :is(.tab, .bm, .tab-group).child { margin-left: 14px; }
 :is(.tgroup, .bgroup).collapsed > :is(.tab, .bm, .tab-group) { display: none; }
-/* A thin line down the side of a group's rows. */
-:is(.tgroup, .bgroup):not(.collapsed) { box-shadow: inset 2px 0 0 0 var(--line); }
+/* Chosen rows dragged together: their number on the dragged row. */
+.ghost .drag-count {
+  position: absolute; right: -6px; top: -6px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+  background: var(--fg); color: var(--bar); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
 .group-head:focus-within > .row-actions { opacity: 1; pointer-events: auto; }
 @media (any-hover: hover) { .group-head:hover > .row-actions { opacity: 1; pointer-events: auto; } }
 @media (any-hover: none) { .group-head > .row-actions { opacity: 1; pointer-events: auto; } }

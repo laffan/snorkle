@@ -327,10 +327,8 @@ fn adding_a_pattern_hides_open_pages_at_once() {
 #[test]
 fn url_bar_attachment_is_per_tab_and_restored() {
     let mut b = browser(4);
-    let (first, _) = b.new_tab(Profile::Default, 0);
-    let (second, _) = b.new_tab(Profile::Default, 0);
-    webkit_load(&mut b, first, "https://a.example/");
-    webkit_load(&mut b, second, "https://b.example/");
+    let (first, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (second, _) = open_and_load(&mut b, "https://b.example/", 0);
     b.set_url_bar_attached(first, true);
     assert!(b.tab(first).unwrap().url_bar_attached);
     assert!(!b.tab(second).unwrap().url_bar_attached);

@@ -15,7 +15,7 @@
   //   invoke(cmd, args) → Promise; toast(text);
   //   place() → { url, title } of the page shown (null: none, or private);
   //   goTo(target) — open a link's page; openLink(href) — a typed link;
-  //   setClipMode(on) → Promise<boolean>; dragLink(phase, x, y, fromY)
+  //   setClipMode(on) → Promise<boolean>; dragLink(phase, x, y, fromX, fromY)
   //   → Promise<target|null> on 'end'; close().
   function create(root, env) {
     let pad = emptyPad();
@@ -274,10 +274,15 @@
     const lineEnd = document.createElementNS(SVG_NS, 'circle');
     lineEnd.setAttribute('r', '5');
     lineSvg.append(line, lineEnd);
+    // Not while the page shown is loading (2026-11-24): its sentences
+    // still move under the line. A load that starts mid-drag ends it.
+    let pageLoading = false;
+    let endQuoteDrag = null;
     quoteBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (pageLoading) { env.toast('Wait for the page to finish loading.'); return; }
       const r = quoteBtn.getBoundingClientRect();
       const x1 = r.left + r.width / 2;
       const y1 = r.top + r.height / 2;
@@ -293,19 +298,21 @@
         line.setAttribute('x2', String(ev.clientX)); line.setAttribute('y2', String(ev.clientY));
         lineEnd.setAttribute('cx', String(ev.clientX)); lineEnd.setAttribute('cy', String(ev.clientY));
         if (!lineSvg.isConnected) document.body.appendChild(lineSvg);
-        env.dragLink('move', ev.clientX, ev.clientY, y1);
+        env.dragLink('move', ev.clientX, ev.clientY, x1, y1);
       };
       const up = (ev) => {
+        endQuoteDrag = null;
         quoteBtn.removeEventListener('pointermove', move);
         quoteBtn.removeEventListener('pointerup', up);
         quoteBtn.removeEventListener('pointercancel', up);
         quoteBtn.classList.remove('on');
         lineSvg.remove();
-        if (!moved || ev.type === 'pointercancel') { env.dragLink('cancel', 0, 0, 0); return; }
-        env.dragLink('end', ev.clientX, ev.clientY, y1).then((target) => {
+        if (!moved || ev.type === 'pointercancel') { env.dragLink('cancel', 0, 0, 0, 0); return; }
+        env.dragLink('end', ev.clientX, ev.clientY, x1, y1).then((target) => {
           if (target && surface) surface.addLink(target);
         });
       };
+      endQuoteDrag = () => up({ type: 'pointercancel' });
       quoteBtn.addEventListener('pointermove', move);
       quoteBtn.addEventListener('pointerup', up);
       quoteBtn.addEventListener('pointercancel', up);
@@ -542,6 +549,14 @@
       // Clip mode ended in the page (a clip made there, Escape), or the
       // page changed under it.
       clipEnded() { clipping = false; renderBar(); },
+      // The page shown is loading (or done): the quote button waits.
+      setPageLoading(on) {
+        if (pageLoading === !!on) return;
+        pageLoading = !!on;
+        quoteBtn.classList.toggle('waiting', pageLoading);
+        quoteBtn.setAttribute('aria-disabled', String(pageLoading));
+        if (pageLoading && endQuoteDrag) endQuoteDrag();
+      },
       clipping: () => clipping,
       // Something from a page: a quote (target only), or a clip.
       addQuote(target) { whenReady(() => surface.addLink(target)); },

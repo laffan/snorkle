@@ -9,7 +9,10 @@
 // another tab: split view; → the top or bottom edge of one (or below the
 // last): moved there. A tab of a split pair → anywhere off its pair:
 // unsplit.
-// Bookmark → bookmarks bar: reorder.
+// Bookmark → bookmarks bar: reorder. Bookmark (or a bookmark group's
+// heading) → the tab list: unbookmarked there (2026-11-24; a group becomes
+// a tab group). Rows chosen together (⌘/⇧-click) go together between the
+// two lists and when tabs are moved.
 //
 // Mouse drags used to start on a 120 ms timer even without movement, and
 // every ended drag swallowed the click. A click held a little longer, or
@@ -27,6 +30,11 @@ function armDrag(ev, node, item) {
   // ⌘- and ⇧-clicks choose rows (groups.js); they never start a drag.
   if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
   cancelPending();
+  // A chosen row brings the other chosen rows with it.
+  const key = item.kind === 'tab' ? item.id : item.url;
+  if ((item.kind === 'tab' || item.kind === 'bookmark') && isChosen(item.kind, key) && chosen.keys.length > 1) {
+    item = { ...item, many: chosen.keys.slice() };
+  }
   const mouse = ev.pointerType === 'mouse';
   pendingDrag = { node, item, mouse, x: ev.clientX, y: ev.clientY, timer: mouse ? null : setTimeout(startDrag, DRAG_DELAY_MS) };
 }
@@ -43,6 +51,7 @@ function startDrag() {
   const rect = p.node.getBoundingClientRect();
   const ghost = p.node.cloneNode(true);
   ghost.classList.add('ghost');
+  if (p.item.many) ghost.appendChild(el('span', 'drag-count', String(p.item.many.length)));
   ghost.style.width = rect.width + 'px';
   ghost.style.left = rect.left + 'px';
   ghost.style.top = rect.top + 'px';
@@ -58,6 +67,13 @@ function startDrag() {
 // 2026-11-23), which is all an empty list shows.
 function showDropZone(item) {
   const list = $('bookmarks');
+  // Bookmarks can go back into the tab list: it opens a target too.
+  if (item.kind === 'bookmark' || item.kind === 'bgroup') {
+    const tabsZone = el('div', 'drop-zone');
+    tabsZone.setAttribute('aria-label', 'Drop here to make it a tab again');
+    $('tabs').appendChild(tabsZone);
+    if (item.kind === 'bgroup') return;
+  }
   if (item.kind === 'tab' && item.private) return; // never persist private tabs
   if (item.kind === 'bgroup' || (item.kind === 'tgroup' && privateGroup(item.group))) return;
   const zone = el('div', 'drop-zone');
@@ -90,8 +106,10 @@ function dropTargetAt(x, y) {
   const page = (hit.closest('#notebook') || hit.closest('.rs-row')) && draggedPage(dragState.item);
   if (page && hit.closest('#notebook')) return { kind: 'notebook', page, x, y };
   if (page && hit.closest('.rs-row')) return { kind: 'rs-notebook', page, row: hit.closest('.rs-row'), space: hit.closest('.rs-row').dataset.space };
-  // A group's heading goes only into the bookmarks bar (a tab group
-  // becomes a bookmark group, 2026-11-24).
+  // Bookmarks (one, chosen ones, a group's heading) into the tab list.
+  if ((kind === 'bookmark' || kind === 'bgroup') && hit.closest('#tabs')) return tabListSpot(hit, x, y);
+  // A group's heading goes only into the other list (a tab group becomes
+  // a bookmark group, 2026-11-24, and back).
   if (kind === 'bgroup') return null;
   if (kind === 'tgroup') {
     const list = hit.closest('#bookmarks');
@@ -165,6 +183,37 @@ function dropTargetAt(x, y) {
   return group ? { kind: 'unsplit', group } : null;
 }
 
+// Where a bookmark dropped in the tab list goes: before the row it is over
+// (after it, past the row's middle), in that row's tab group; a group's
+// heading puts it before the group (top half) or first in it; below the
+// rows (the end zone), at the end.
+function tabListSpot(hit, x, y) {
+  const head = hit.closest('.tgroup > .group-head');
+  if (head) {
+    const box = head.parentElement;
+    const first = box.querySelector('.tab[data-tab]');
+    const r = head.getBoundingClientRect();
+    const inside = y > r.top + r.height / 2;
+    if (first) return { kind: 'unbookmark', before: Number(first.dataset.tab), node: inside ? first : head, edge: 'top', group: inside ? Number(box.dataset.group) : null };
+  }
+  const node = hit.closest('#tabs .tab');
+  if (node) {
+    const id = Number(node.dataset.tab);
+    const r = node.getBoundingClientRect();
+    const box = node.closest('.tgroup');
+    const group = box ? Number(box.dataset.group) : null;
+    // After a row: before the next row shown (pins' tabs and other
+    // sessions' tabs are not in this list).
+    const rows = [...$('tabs').querySelectorAll('.tab[data-tab]')];
+    const next = rows[rows.indexOf(node) + 1];
+    return y < r.top + r.height / 2
+      ? { kind: 'unbookmark', before: id, node, edge: 'top', group }
+      : { kind: 'unbookmark', before: next ? Number(next.dataset.tab) : null, node, edge: 'bottom', group };
+  }
+  const zone = $('tabs').querySelector('.drop-zone');
+  return { kind: 'unbookmark', before: null, node: zone || $('tabs'), edge: 'top', group: null, atEnd: true, zone };
+}
+
 // Share of a tab row's height, at its top and at its bottom, where a
 // dropped tab is moved instead of paired.
 const REORDER_EDGE = 0.3;
@@ -177,6 +226,7 @@ function tabAfter(id) {
 
 function showDropFeedback(target) {
   document.querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+  document.querySelectorAll('.drop-zone.hot').forEach((n) => n.classList.remove('hot'));
   $('notebook').classList.toggle('nb-drop', !!target && target.kind === 'notebook');
   if (target && target.kind === 'rs-notebook') target.row.classList.add('drop-target');
   document.querySelectorAll('.tab-group.leaving').forEach((n) => n.classList.remove('leaving'));
@@ -187,7 +237,10 @@ function showDropFeedback(target) {
     return;
   } else if (target.kind === 'tab') {
     target.node.classList.add('drop-target');
-  } else if (target.kind === 'reorder') {
+  } else if (target.kind === 'unbookmark' && target.atEnd) {
+    if (target.zone) target.zone.classList.add('hot');
+    $('tabs').classList.add('drop-target');
+  } else if (target.kind === 'reorder' || target.kind === 'unbookmark') {
     const r = target.node.getBoundingClientRect();
     const lr = (target.node.closest('.tgroup') || target.node.closest('.tablist')).getBoundingClientRect();
     line.style.left = lr.left + 6 + 'px';
@@ -233,12 +286,24 @@ function endDrag(commit) {
     ensureNotebook().then((nb) => { nb.addLinkAt(t.page, { x: t.x, y: t.y }); toast('Added to the notebook.'); });
   } else if (t.kind === 'rs-notebook') {
     addToSessionNotebook(t.space, d.item, t.page);
+  } else if (t.kind === 'unbookmark') {
+    const g = d.item.kind === 'bgroup' ? bookmarkGroups.find((x) => x.id === d.item.group) : null;
+    const urls = g ? bookmarkGroupMembers(g.id) : d.item.many || [d.item.url];
+    clearChosen();
+    T.core.invoke('unbookmark_to_tabs', { urls, before: t.before, group: t.group, groupName: g ? g.name : null })
+      .then(loadBookmarks)
+      .catch((e) => toast(String(e)));
   } else if (d.item.kind === 'tab' && t.kind === 'tab') {
     invoke('split_tabs', { tab: d.item.id, with: t.id });
   } else if (d.item.kind === 'tab' && t.kind === 'reorder') {
-    // A half of a split pair dragged elsewhere in the list leaves its pair.
-    const unpair = d.item.paired ? invoke('unsplit', { tab: d.item.id }) : Promise.resolve();
-    unpair.then(() => invoke('move_tab', { tab: d.item.id, before: t.before, group: t.group === undefined ? null : t.group }));
+    // A half of a split pair dragged elsewhere in the list leaves its pair;
+    // chosen tabs move together, in their order.
+    const group = t.group === undefined ? null : t.group;
+    const ids = d.item.many || [d.item.id];
+    const unpair = d.item.paired && !d.item.many ? invoke('unsplit', { tab: d.item.id }) : Promise.resolve();
+    unpair.then(async () => {
+      for (const tab of ids) if (tab !== t.before) await T.core.invoke('move_tab', { tab, before: t.before, group }).catch(() => {});
+    });
   } else if (t.kind === 'unsplit') {
     invoke('unsplit', { tab: d.item.id });
   } else if (d.item.kind === 'tgroup' && t.kind === 'bookmarks') {
@@ -246,9 +311,17 @@ function endDrag(commit) {
       .then((id) => { if (!id) toast('Nothing to bookmark yet.'); return loadBookmarks(); })
       .catch((e) => toast(String(e)));
   } else if (d.item.kind === 'tab' && t.kind === 'bookmarks') {
-    T.core.invoke('bookmark_tab', { tab: d.item.id, index: t.index, group: t.group || null })
-      .then((added) => { if (!added) toast('Already bookmarked, or nothing to bookmark yet.'); return loadBookmarks(); })
-      .catch((e) => toast(String(e)));
+    // Chosen tabs are bookmarked together, in their order.
+    const ids = (d.item.many || [d.item.id]).filter((id) => { const x = state.tabs.find((tb) => tb.id === id); return x && !x.private; });
+    clearChosen();
+    (async () => {
+      let added = 0;
+      for (const tab of ids) {
+        if (await T.core.invoke('bookmark_tab', { tab, index: t.index + added, group: t.group || null }).catch(() => false)) added++;
+      }
+      if (!added) toast('Already bookmarked, or nothing to bookmark yet.');
+      return loadBookmarks();
+    })().catch((e) => toast(String(e)));
   } else if (d.item.kind === 'bookmark' && t.kind === 'bookmarks') {
     const to = t.index > d.item.index ? t.index - 1 : t.index;
     const group = t.group || null;

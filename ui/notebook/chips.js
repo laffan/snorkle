@@ -119,7 +119,7 @@
       foot.append(
         pin(l),
         el('span', 'notepad-link-page', siteOf(l.target.url) || l.target.title || ''),
-        copyButton(COPY_TEXT_ICON(), 'Copy the text in this clip', () => copyClipText(l)),
+        textButton(l),
         copyButton(COPY_IMAGE_ICON(), 'Copy this clip as a picture', () => copyClipImage(l)),
       );
       e.appendChild(foot);
@@ -133,14 +133,68 @@
       b.setAttribute('aria-label', title);
       b.title = title;
       b.appendChild(svg);
-      onPress(b, act);
+      if (act) onPress(b, act);
+      return b;
+    }
+
+    // The copy-text button also drags (owner request 2026-11-24): pressed
+    // and moved, a quote of the clip's text follows the pointer and is
+    // put on the pad where it is let go; pressed and let go in place, the
+    // text is copied.
+    function textButton(l) {
+      const b = copyButton(COPY_TEXT_ICON(), 'Copy the text in this clip (drag it out for a quote)', null);
+      b.setAttribute('aria-label', 'Copy the text in this clip');
+      b.classList.add('notepad-clip-text');
+      b.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        const x0 = e.clientX;
+        const y0 = e.clientY;
+        let ghost = null;
+        let text = '';
+        capture(b, e.pointerId);
+        const move = (ev) => {
+          if (!ghost) {
+            if (Math.hypot(ev.clientX - x0, ev.clientY - y0) <= CHIP_TAP_PX) return;
+            text = clipText(l);
+            if (!text) { off(); env.toast('No text was found in this clip.'); return; }
+            ghost = el('div', 'notepad-quote-ghost', `“${text.replace(/\s+/g, ' ').slice(0, 80)}${text.length > 80 ? '…' : ''}”`);
+            document.body.appendChild(ghost);
+          }
+          ghost.style.left = `${ev.clientX + 8}px`;
+          ghost.style.top = `${ev.clientY + 8}px`;
+        };
+        const up = (ev) => {
+          off();
+          if (ev.type === 'pointercancel') { if (ghost) ghost.remove(); return; }
+          if (!ghost) { copyClipText(l); return; }
+          ghost.remove();
+          const r = host.getBoundingClientRect();
+          const inside = ev.clientX >= r.left && ev.clientX < r.right && ev.clientY >= r.top && ev.clientY < r.bottom;
+          if (!inside) { env.toast('Let go on the notebook to place the quote.'); return; }
+          env.quoteAt({ kind: 'quote', url: l.target.url, title: l.target.title || '', text: text.slice(0, 4000) }, { x: ev.clientX, y: ev.clientY });
+        };
+        const off = () => {
+          b.removeEventListener('pointermove', move);
+          b.removeEventListener('pointerup', up);
+          b.removeEventListener('pointercancel', up);
+        };
+        b.addEventListener('pointermove', move);
+        b.addEventListener('pointerup', up);
+        b.addEventListener('pointercancel', up);
+      });
+      b.addEventListener('click', (e) => { if (e.detail === 0) copyClipText(l); });
       return b;
     }
 
     // The clip's text: what the page had in its region and what text
     // recognition read in its picture (kept for search, `target.text`).
+    function clipText(l) {
+      return (l.target.text || '').trim();
+    }
     function copyClipText(l) {
-      const text = (l.target.text || '').trim();
+      const text = clipText(l);
       if (!text) { env.toast('No text was found in this clip.'); return; }
       navigator.clipboard.writeText(text).then(() => env.toast('Text copied.'), () => env.toast('Could not copy (clipboard unavailable).'));
     }

@@ -1402,3 +1402,34 @@ The live sites were not reachable or not signed in from this environment.
   without the AI panel.
 - **[verify] Copy Picture** uses the Clipboard API (`ClipboardItem` with a PNG promise) from the
   chrome's web view; WebKit should allow it on a press. Checked only in Chromium.
+
+## Round 4: one quote line, bookmarks back to tabs, one New Tab (2026-11-24)
+
+- **[verify] One quote line.** The two lines of round 3 were the chrome's (red, from the quote
+  button) and the page's (from the page's right edge at the button's height, so not where the
+  chrome's line crossed it; and grey, because the page's black-and-white filter on `<html>`
+  recoloured it). The page's segment now starts where the chrome's line crosses the page's right
+  edge, and the page draws it and its dot as manual popovers in its top layer, which root filters do
+  not reach (checked in Chromium with `html{filter:grayscale(1)}`; WebKit has had popovers since
+  Safari 17 and should behave the same). In split view the chrome's line passes under the other half
+  without showing there.
+- **[decide] The iPad strip in the notebook.** The dark band above the right panels is gone: they
+  reach the top of the window. The notebook's bar (when it is the top panel) still keeps its buttons
+  below the ~30 pt window-drag strip, filled with the notebook's own background, because a quote
+  drag begun in that strip is what took the window out of full screen. Putting the buttons flush at
+  the top would bring that back unless a native fix is found (see Round 3). Not run on an iPad.
+- **[decide] The quote button while a page loads** is dimmed and says to wait when pressed; a load
+  that starts during a drag ends it. A page still loading in the other half of a split is not marked
+  either.
+- **[decide] Bookmarks dragged into the tab list** are removed as bookmarks (the owner's
+  "unbookmark"), not copied. Their tabs keep any page already loaded in them. Pinned items are not
+  part of this (they have their own drag into the bookmarks bar).
+- **[decide] One New Tab.** An empty New Tab (never loaded, no notice, not a pin's or bookmark's
+  tab, not half of a split) closes when another tab is chosen; ⌘T in such a tab of the same profile
+  only focuses its field (⌘⇧N in a normal empty tab still opens a private one). Restoring a session
+  still adds its start-page tab.
+- **[decide] Copy Text dragged out** makes a quote of the clip's whole text (up to 4,000 characters)
+  linking the clip's page without a text fragment, since text recognition's words may not match the
+  page's text exactly.
+- **[decide] Night vision** is now Menu → Turn On/Off Night Vision (and ⌘⇧R, and Settings); the
+  sidebar's eye is gone and a book in its place starts a research session.

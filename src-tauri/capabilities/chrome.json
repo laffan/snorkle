@@ -147,6 +147,7 @@
     "allow-edit-bookmark-group",
     "allow-remove-bookmarks",
     "allow-export-notebook",
-    "allow-notebook-add-page"
+    "allow-notebook-add-page",
+    "allow-unbookmark-to-tabs"
   ]
 }

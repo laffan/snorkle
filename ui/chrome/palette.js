@@ -157,9 +157,17 @@ function loadPaletteHistory() {
 }
 
 // ⌘T and New Tab: a new empty tab, which shows the start page (focused).
+// There is only ever one start page (2026-11-24; Rust leaves a blank tab
+// shown as it is, and closes one that is left): on it, ⌘T only gives its
+// field the focus.
 function openNewTab(priv) {
   closeMenu();
   if (narrow) setSidebar(false);
+  const t = activeTab();
+  if (t && !t.url && !t.loading && !t.notice && !t.saved && t.launcher === null && !!t.private === !!priv) {
+    focusInput($('palette-input'), true);
+    return;
+  }
   invoke('new_tab', { private: !!priv });
 }
 

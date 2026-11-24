@@ -85,9 +85,12 @@ by `navigator.maxTouchPoints == 0` with a Macintosh user agent (an iPad reports 
 in desktop mode). On iPadOS the status bar is hidden (2026-11-23; tao's root view controller,
 `setPrefersStatusBarHidden:`), so the sidebar and pages reach the top of the window. iPadOS 26
 drags (and un-fullscreens) a window by its top ~30 pt, so since 2026-11-24 nothing the chrome drags
-sits there on iPadOS: the sidebar's rows and the right panels start 30 pt down (`IPAD_TOP_STRIP`,
-`html.ipados`); pages still reach the top. A drag of the notebook's quote button begun there went to
-the system, which shrank the window out of full screen (owner report 2026-11-24).
+sits there on iPadOS: the sidebar's rows start 30 pt down, and the right panels reach the top but
+the notebook's bar (when it is the top one, `.dock-first`) keeps its buttons below the strip, which
+is filled with the notebook's own background (`IPAD_TOP_STRIP`, `html.ipados`; until the fourth
+round the panels themselves started 30 pt down, leaving a dark band). Pages still reach the top. A
+drag of the notebook's quote button begun there went to the system, which shrank the window out of
+full screen (owner report 2026-11-24).
 
 **Data at rest.** macOS has no `NSFileProtectionComplete`; the profile and website data are in the
 user's Library (`~/Library/Application Support/<identifier>` and WebKit's stores), protected by
@@ -275,8 +278,9 @@ are applied asynchronously on the main queue, so WebKit callbacks never re-enter
   paused when they start unless pointed at (their `play` events do not leave the shadow tree, so
   each root is listened to).
   Inverted dark pages keep using dark mode's media box, which also covers the players.
-- **Night vision** (2026-11-17; Settings → General → Appearance, a checkbox, the eye button at
-  the sidebar's foot beside the menu, pressed while on, and ⌘⇧R since 2026-11-23): the browser and every
+- **Night vision** (2026-11-17; Settings → General → Appearance, a checkbox, Menu → Turn On/Off
+  Night Vision since 2026-11-24 (before, an eye button at the sidebar's foot), and ⌘⇧R since
+  2026-11-23): the browser and every
   page drawn in shades of red only, no blue or green light, for keeping dark-adapted eyes adapted.
   It is `viewmodes::Kind::Night`, stored with the launch modes and set through `set_launch_mode`,
   so a launch's first page already has it; the chrome offers no per-tab exemption. Pages get one
@@ -761,7 +765,7 @@ script navigations and redirects out of the archive go nowhere. "+" opens the sa
 a bar above the pill: each link tapped on the page (same host, at most 30 pages) is chosen or
 unchosen in the core instead of navigating; Add loads each chosen page live in that tab, captures
 it the same way into the same archive (resources shared), and shows the saved copy again.
-Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto the middle of another pairs them in split view, onto the top or bottom 30% of a row (or below the last) moves it there (2026-11-09, `Browser::move_tab`; the session keeps the order), and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input. **Define** (single words only, `ai::clean_word`) shows the chat's model's dictionary-style definition in a card above the input (2026-11-09; before, it opened the chat panel), after asking which word was meant if the model thinks it is misspelt (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, History, Downloads, Console, Settings), night vision, dark pages, colour, and show images and video; with a pointer its buttons show only while the sidebar is pointed at or has focus (2026-11-23). Pins are bare icons (a dot under the one whose tab is shown); empty pins and bookmarks take no room and show no explainer text, and open up as dashed drop targets while a row is dragged (2026-11-23). The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto the middle of another pairs them in split view, onto the top or bottom 30% of a row (or below the last) moves it there (2026-11-09, `Browser::move_tab`; the session keeps the order), and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input; its placeholder is "search / url" (2026-11-24). There is at most one empty New Tab (2026-11-24): ⌘T or the menu in an empty tab of the same profile only focuses its input, and an empty tab left for another (never loaded, not half of a split, no pin's or bookmark's) closes (`Browser::new_tab`, `abandoned_blank`). **Define** (single words only, `ai::clean_word`) shows the chat's model's dictionary-style definition in a card above the input (2026-11-09; before, it opened the chat panel), after asking which word was meant if the model thinks it is misspelt (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, Turn On/Off Night Vision, History, Downloads, Console, Settings), New Research Session (a book), dark pages, colour, and show images and video; with a pointer its buttons show only while the sidebar is pointed at or has focus (2026-11-23). Pins are bare icons (a dot under the one whose tab is shown); empty pins and bookmarks take no room and show no explainer text, and open up as dashed drop targets while a row is dragged (2026-11-23). The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both
@@ -843,13 +847,20 @@ pointed at, always on touch-only devices): Copy Text puts the text kept with it 
 page's text in its region and what text recognition read in its picture) on the clipboard, or says
 there is none; Copy Picture puts its picture there as a PNG (redrawn from the clip's JPEG in the
 chrome, through the Clipboard API with the press's activation). Neither moves nor follows the clip.
+Copy Text pressed and dragged (more than 6 px) carries a quote of that text instead: let go on the
+notebook, it is a quote chip there (the clip's page, the text as its words, up to 4,000 characters);
+elsewhere, nothing.
 
 A clip is a JPEG the app draws from its own web view (`takeSnapshotWithConfiguration` with the
 region; the page is shown without its view modes for 0.32 s first, so black and white, hidden media
 and the dark inversion are not in it); the chrome makes its white-on-black copy (zotero-helper's
 `darkPagesCopy`). The quote button dragged onto a page: the page marks the sentence under the
-pointer and draws the line on from its edge (constant code with two numbers); let go, that sentence
-is read back and quoted (or the page linked when there is none). Only the sentence under the
+pointer and draws the line on from where the chrome's line crosses its right edge, so the two read
+as one (constant code with three numbers; the line and its dot are manual popovers in the page's
+top layer, so the view modes' root filters leave them red; 2026-11-24); let go, that sentence
+is read back and quoted (or the page linked when there is none). While the page shown is loading the
+quote button is dimmed and does nothing (a load that starts mid-drag ends the drag), and a page still
+loading under the pointer is not marked (2026-11-24: sentences still move while a page loads). Only the sentence under the
 pointer is marked (one highlight, cleared on drop and when the pointer leaves the page; a mark
 call still under way when the drag ends is followed by one that clears it). Links open the page shown in an
 open tab or in a new one, through the navigation policy. Nothing comes from private tabs (every
@@ -934,7 +945,8 @@ the address is both, removing either leaves the tab bound to the other.
 A research session is a fresh sidebar (no pins, no bookmarks: only its own tabs) and its own
 notebook. Every tab belongs to everyday browsing (`Tab::space` `None`) or to one session; the session
 shown is the active tab's (`Browser::space`), so choosing a tab of another session switches to it.
-Menu → New Research Session makes one (`new_research`: an id `r` + the wall-clock time, a topic,
+The book button at the sidebar's foot makes one (2026-11-24; before, Menu → New Research
+Session; `new_research`: an id `r` + the wall-clock time, a topic,
 entered at once with an empty tab) and puts its topic in place to be typed. Its topic heads the tab
 list beside a back button to everyday browsing (`enter_research(None)`: the tab used there last, a
 pin's or bookmark's included); pointing at it shows a pencil, and the topic itself is a button that
@@ -1007,7 +1019,14 @@ session (`Session::groups`, `SessionTab::group`), private tabs' groups never.
 A **bookmark group** (store: `bookmark-groups.json`, `Bookmark::group`, ids `g` + digits) is the same
 in the bookmarks bar: its bookmarks stay together (`tidy_bookmark_groups`, on every change and when
 read), dragging a bookmark (or a tab) into its box puts it there, and its heading offers Rename,
-Ungroup, Remove (its bookmarks) and Send to (copies). The pinned grid has no groups. Same-site
+Ungroup, Remove (its bookmarks) and Send to (copies). The pinned grid has no groups. Bookmarks go
+back to being tabs by dragging them into the tab list (2026-11-24; `unbookmark_to_tabs`): one
+bookmark, the chosen ones together, or a group's heading (the group becomes a tab group of the
+same name); the list opens a dashed target at its end and a line shows where they go (before or
+after a row, in that row's group). Each becomes its bookmark's tab when it has one (no longer a
+bookmark's, so it is listed), else a new unloaded tab; the bookmarks are removed. Rows chosen
+together are also dragged together the other way (tabs into the bookmarks bar, and tabs within the
+list), with their number on the dragged row. Groups have no side line (2026-11-24). Same-site
 headings (§5b) are unchanged and apply only to tabs outside a group.
 
 ## 6. Credentials

@@ -362,6 +362,11 @@ impl Browser {
         self.tabs.iter().filter(|t| !t.view_exempt.is_empty()).map(|t| (t.id, t.view_exempt.clone())).collect()
     }
 
+    /// The tab that belongs to the pin or bookmark `key`, if it has one.
+    pub fn launcher_tab(&self, key: &str) -> Option<TabId> {
+        self.tabs.iter().find(|t| t.launcher.as_deref() == Some(key) && !t.is_private()).map(|t| t.id)
+    }
+
     /// The pin or bookmark `key` was removed: its tab becomes an ordinary
     /// tab (listed again), so nothing the user had open is lost.
     pub fn release_launcher(&mut self, key: &str) -> Vec<Effect> {

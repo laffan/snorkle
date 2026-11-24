@@ -144,10 +144,11 @@ function sendLinkHover() {
     requestAnimationFrame(sendLinkHover);
   });
 }
-function dragLink(phase, x, y, fromY) {
+function dragLink(phase, x, y, fromX, fromY) {
   linkDrag.ended = phase !== 'move';
   const pane = phase === 'cancel' ? null : paneAt(x, y);
-  const usable = pane && state.tabs.some((t) => t.id === pane.tab && !t.private && t.url);
+  const tab = pane && state.tabs.find((t) => t.id === pane.tab);
+  const usable = !!tab && !tab.private && !!tab.url && !tab.loading;
   if (linkDrag.tab !== null && (!usable || linkDrag.tab !== pane.tab)) {
     linkDrag.next = { tab: linkDrag.tab, fx: -1, fy: 0, fromY: 0 };
     sendLinkHover();
@@ -155,14 +156,18 @@ function dragLink(phase, x, y, fromY) {
   }
   if (phase === 'cancel') return Promise.resolve(null);
   if (!usable) {
-    if (phase === 'end') toast(pane ? 'Private tabs don’t send anything to the notebook.' : 'Let go over a page to quote it.');
+    if (phase === 'end') toast(!pane ? 'Let go over a page to quote it.' : tab && tab.loading ? 'Wait for the page to finish loading.' : 'Private tabs don’t send anything to the notebook.');
     return Promise.resolve(null);
   }
   const fx = (x - pane.x) / pane.w;
   const fy = (y - pane.y) / pane.h;
   if (phase === 'move') {
     linkDrag.tab = pane.tab;
-    linkDrag.next = { tab: pane.tab, fx, fy, fromY: (fromY - pane.y) / pane.h };
+    // The chrome's line is hidden under the page: the page draws it on
+    // from where it crosses the page's right edge, so the two meet.
+    const edge = pane.x + pane.w;
+    const cross = fromX > edge && x < edge ? fromY + (y - fromY) * (fromX - edge) / (fromX - x) : fromY;
+    linkDrag.next = { tab: pane.tab, fx, fy, fromY: (cross - pane.y) / pane.h };
     sendLinkHover();
     return Promise.resolve(null);
   }
@@ -338,6 +343,7 @@ let notebookPage = '';
 function notebookTrack() {
   if (!notebook || !state) return;
   const t = activeTab();
+  notebook.setPageLoading(!!(t && t.loading));
   const key = t ? `${t.id} ${t.url && !t.private ? t.url.full : ''}` : '';
   if (key === notebookPage) return;
   notebookPage = key;

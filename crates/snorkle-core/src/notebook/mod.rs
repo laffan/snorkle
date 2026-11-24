@@ -37,7 +37,10 @@
 //! app-made JPEGs. Dragging the notebook's quote button onto a page shows
 //! where it would land (constant code taking two numbers, [`hover_js`])
 //! and reads the sentence there when let go ([`drop_js`], read back like
-//! C20: [`parse_drop`]).
+//! C20: [`parse_drop`]). The page draws its part of the line (from where
+//! the chrome's crosses the page's right edge) and its dot as manual
+//! popovers, in the top layer, so the root filters of the view modes
+//! (black and white, dark) leave them red (2026-11-24).
 //!
 //! Storage (`notebook.json`): what the chrome sends is checked and
 //! rebuilt field by field ([`clean`]): ids, numbers, colours, http(s)
@@ -256,10 +259,13 @@ document.addEventListener('dragend',function(e){if(!ok(e))return;report({nb:'den
 var dot=null,line=null,mark=null,doneAt=0;
 function clearHover(){doneAt=Date.now();if(dot){dot.remove();dot=null;}if(line){line.remove();line=null;}if(mark){mark.clear();mark=null;}if(window.CSS&&CSS.highlights)CSS.highlights.delete('snorkle-nb');}
 function point(fx,fy){var o=vp();return [o[0]+fx*o[2],o[1]+fy*o[3]];}
+function lift(e){if(e.showPopover){try{e.setAttribute('popover','manual');e.showPopover();}catch(x){}}return e;}
+var HOV={position:'fixed',inset:'auto','z-index':Z,'pointer-events':'none',margin:'0',padding:'0',border:'0',overflow:'visible',opacity:'1',filter:'none'};
+function hov(extra){var s={},k;for(k in HOV)s[k]=HOV[k];for(k in extra)s[k]=extra[k];return lift(el(s));}
 nb.hover=function(fx,fy,fy0){if(Date.now()-doneAt<300)return;var p=point(fx,fy),o=vp();
-if(!dot)dot=el({position:'fixed','z-index':Z,'pointer-events':'none',width:'10px',height:'10px','border-radius':'5px',background:'#ff5f57',margin:'0',padding:'0'});
+if(!dot)dot=hov({width:'10px',height:'10px','border-radius':'5px',background:'#ff5f57'});
 at(dot,'left',(p[0]-5)+'px');at(dot,'top',(p[1]-5)+'px');
-if(!line)line=el({position:'fixed','z-index':Z,'pointer-events':'none',height:'0',margin:'0',padding:'0','border-top':'2px dashed #ff5f57','transform-origin':'0 0'});
+if(!line)line=hov({height:'0',background:'transparent','border-top':'2px dashed #ff5f57','transform-origin':'0 0'});
 var x0=o[0]+o[2],y0=o[1]+fy0*o[3],dx=p[0]-x0,dy=p[1]-y0;at(line,'left',x0+'px');at(line,'top',y0+'px');at(line,'width',Math.hypot(dx,dy)+'px');at(line,'transform','rotate('+Math.atan2(dy,dx)+'rad)');
 var r=under(function(){return quoteAt(p[0],p[1]);});
 if(window.CSS&&CSS.highlights&&window.Highlight){if(!mark){mark=new Highlight();CSS.highlights.set('snorkle-nb',mark);}mark.clear();if(r)mark.add(r);}};

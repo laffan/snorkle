@@ -139,4 +139,5 @@ pub const COMMANDS: &[&str] = &[
     "remove_bookmarks",
     "export_notebook",
     "notebook_add_page",
+    "unbookmark_to_tabs",
 ];

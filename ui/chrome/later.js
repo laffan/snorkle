@@ -239,8 +239,11 @@ function renderStart(tab) {
     paletteSel = 0;
     loadPaletteHistory();
   }
-  input.placeholder = tab.private ? 'Search or enter an address (private)'
-    : state.space ? 'Search this session’s tabs, or enter an address' : 'Search tabs and bookmarks, or enter an address';
+  // The field's words are short (owner request 2026-11-24); what it
+  // searches is in its label.
+  input.placeholder = 'search / url';
+  input.setAttribute('aria-label', tab.private ? 'Search or enter an address (private)'
+    : state.space ? 'Search this session’s tabs, or enter an address' : 'Search tabs and bookmarks, or enter an address');
   // Other tabs' titles and addresses are rows: re-render when they change
   // (not on every progress update, so a click is not lost to a rebuild).
   const key = JSON.stringify(state.tabs.map((t) => [t.id, t.title, t.url && t.url.full]));

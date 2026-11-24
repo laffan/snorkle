@@ -3,7 +3,7 @@
 // its own tabs) and its own notebook, shown open by default. Its topic
 // heads the tab list beside a back button to everyday browsing; pointing
 // at the topic offers Rename. Every session is a row at the foot of the
-// sidebar, above its buttons. Menu → New Research Session makes one. Each
+// sidebar, above its buttons. The book at the sidebar's foot makes one. Each
 // session has a menu (≡ on its row while pointed at, and right of its
 // topic): Export Notebook, Send Tabs to Main, Delete.
 'use strict';
@@ -222,7 +222,8 @@ async function sendResearchTabsHome(r) {
   }
 }
 
-$('menu-new-research').addEventListener('click', () => {
+// The book at the sidebar's foot (2026-11-24; it was a menu item).
+$('research-btn').addEventListener('click', () => {
   closeMenu();
   if (narrow) setSidebar(true);
   else if (!sidebarShown) setSidebarState(sidebarMode === 'flyout' ? 'attached' : sidebarMode, true);

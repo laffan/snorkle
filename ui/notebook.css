@@ -71,6 +71,13 @@
   -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
 }
 .notepad-quote-btn { padding-left: 2px; cursor: grab; touch-action: none; }
+/* While the page shown loads (2026-11-24): its sentences still move. */
+.notepad-quote-btn.waiting { opacity: 0.35; cursor: progress; }
+/* iPadOS: a drag begun in the window's top ~30 pt moves the window (or
+   leaves full screen), so the notebook's bar, at the top of the window,
+   keeps its buttons below that strip; the strip is the notebook's own
+   background (2026-11-24; core.js, IPAD_TOP_STRIP). */
+html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
 .notepad-clip-btn { padding-right: 2px; box-shadow: inset 1px 0 0 color-mix(in srgb, var(--nb-panel) 55%, transparent); }
 .notepad-quote-btn svg, .notepad-clip-btn svg { width: 13px; height: 13px; }
 .notepad-quote-btn:hover, .notepad-clip-btn:hover { background: rgb(0 0 0 / 0.08); }
@@ -292,6 +299,13 @@
 .notepad-clip .notepad-clip-copy:hover { opacity: 1; }
 @media (any-hover: none) { .notepad-clip .notepad-clip-copy { opacity: .6; } }
 .notepad-link.fixed .notepad-clip-copy { pointer-events: auto; }
+/* The copy-text button drags a quote out of the clip (2026-11-24). */
+.notepad-clip-text { touch-action: none; cursor: grab; }
+.notepad-quote-ghost {
+  position: fixed; z-index: 1000; max-width: 260px; padding: 4px 8px; pointer-events: none;
+  border: 1px dashed #ffd400; border-radius: 6px; background: var(--nb-panel); color: var(--nb-text);
+  font-size: 12px; line-height: 1.3; box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+}
 /* The size grip holds the clip's bottom-right corner: the foot's buttons
    end before it. */
 .notepad-clip .notepad-clip-foot { padding-right: 18px; }

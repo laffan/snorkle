@@ -440,6 +440,21 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
     }
 }
 
+/// A blank tab (the start page): no page committed or on its way, no
+/// notice, and not a pin's, bookmark's, popup or saved copy's tab.
+pub(super) fn is_blank(t: &Tab) -> bool {
+    t.committed_url.is_none()
+        && !t.loading
+        && !t.provisional
+        && t.notice.is_none()
+        && t.expected_load.is_none()
+        && t.saved.is_none()
+        && !t.sheet
+        && t.launcher.is_none()
+        && t.opener.is_none()
+        && t.life == Life::Unloaded
+}
+
 /// How a chosen link is listed while adding pages: its path and query.
 fn link_label(u: &Url) -> String {
     let mut s = u.path().to_string();

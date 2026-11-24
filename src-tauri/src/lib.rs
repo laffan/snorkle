@@ -168,6 +168,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::remove_bookmarks,
         commands::export_notebook,
         commands::notebook_add_page,
+        commands::unbookmark_to_tabs,
     ])
 }
 

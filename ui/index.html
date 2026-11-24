@@ -61,9 +61,9 @@
     <div id="research-list" role="tablist" aria-label="Research sessions" hidden></div>
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-      <!-- Night vision (Settings → General → Appearance, the same setting):
-           an eye with a small star above it, as in Hush and Zotero Helper. -->
-      <button id="night-btn" class="icon" aria-label="Night vision" title="Night vision: red only, no blue light" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 14C4.8 10 8.1 8 12 8s7.2 2 9.5 6c-2.3 4-5.6 6-9.5 6s-7.2-2-9.5-6Z"/><circle cx="12" cy="14" r="2.75"/><path d="M18.5 2.5v4M16.5 4.5h4"/></svg></button>
+      <!-- A new research session (2026-11-24: in the night vision eye's
+           place; night vision is in the menu). -->
+      <button id="research-btn" class="icon" aria-label="New research session" title="New research session"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5.2 8 4.5 5 4.5H3.5v14H5c3 0 5.3.7 7 2 1.7-1.3 4-2 7-2h1.5v-14H19c-3 0-5.3.7-7 2Z"/><path d="M12 6.5v14"/></svg></button>
       <span class="spacer"></span>
       <button id="dark" class="icon mode" aria-label="Dark pages" title="Dark pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="currentColor"><g class="sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g><path class="moon" d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg></button>
       <button id="color" class="icon mode" aria-label="Black and white pages" title="Black and white pages" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm2.5-4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm5 .5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/><path class="strike-gap" d="M4 3.5l16.5 16.5" fill="none"/><path class="strike" d="M4 3.5l16.5 16.5" fill="none"/></svg></button>
@@ -72,7 +72,9 @@
     <div id="menu-pop" class="popup" role="menu" hidden>
       <button id="menu-new-tab" role="menuitem">New Tab <span class="kbd">⌘T</span></button>
       <button id="menu-new-private" role="menuitem">New Private Tab <span class="kbd">⇧⌘N</span></button>
-      <button id="menu-new-research" role="menuitem">New Research Session</button>
+      <div class="menu-sep" role="separator"></div>
+      <!-- Night vision (Settings → General → Appearance, the same setting). -->
+      <button id="menu-night" role="menuitem">Turn On Night Vision <span class="kbd">⇧⌘R</span></button>
       <div class="menu-sep" role="separator"></div>
       <button id="menu-history" role="menuitem">History <span class="kbd">⇧⌘H</span></button>
       <button id="menu-downloads" role="menuitem">Downloads</button>
@@ -244,7 +246,7 @@
       </div>
       <div class="palette" role="search" aria-label="New tab">
         <input id="palette-input" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"
-               enterkeyhint="go" placeholder="Search tabs and bookmarks, or enter an address" aria-label="Search tabs and bookmarks, or enter an address"
+               enterkeyhint="go" placeholder="search / url" aria-label="Search tabs and bookmarks, or enter an address"
                role="combobox" aria-controls="palette-list" aria-expanded="true" aria-autocomplete="list">
         <ul id="palette-list" class="palette-list" role="listbox"></ul>
       </div>

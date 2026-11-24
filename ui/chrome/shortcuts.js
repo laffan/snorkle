@@ -87,7 +87,7 @@ function runShortcut(name, via = 'native') {
   } else if (name === 'toggle_images') {
     toggleMode('hide_media');
   } else if (name === 'night_vision') {
-    // ⌘⇧R (2026-11-23): as the eye at the sidebar's foot.
+    // ⌘⇧R (2026-11-23): as Menu → Turn On/Off Night Vision.
     setNightVision(!viewModes.modes.night);
   } else if (name === 'notebook_page') {
     // ⌘⇧D (2026-11-24): the page shown, to the notebook as a link.

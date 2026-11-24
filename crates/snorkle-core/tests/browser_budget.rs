@@ -374,7 +374,7 @@ fn split_with_self_is_ignored() {
 #[test]
 fn on_screen_is_the_active_tab_or_its_split_partner() {
     let mut b = browser(4);
-    let (a, _) = b.new_tab(Profile::Default, 0);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
     let (c, _) = b.new_tab(Profile::Default, 1);
     assert!(b.is_on_screen(c) && !b.is_on_screen(a));
     b.split(a, c, 2);

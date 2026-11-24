@@ -164,6 +164,7 @@ fn research_sessions_have_their_own_tabs() {
     webkit_load(&mut b, start, "https://r.example/");
     let (t2, _) = b.new_tab(Profile::Default, 11);
     assert_eq!(b.tab(t2).unwrap().space.as_deref(), Some(r.as_str()));
+    webkit_load(&mut b, t2, "https://r.example/t2");
     let (bg, _) = b.on_background_tab_request(start, &u("https://r.example/2"), 12);
     assert_eq!(b.tab(bg.unwrap()).unwrap().space.as_deref(), Some(r.as_str()));
     // Back to everyday browsing: the tab used last there.
@@ -335,4 +336,53 @@ fn groups_hold_one_kind_of_tab() {
     let (g, _) = b.group_tabs(&[x], "X").unwrap();
     b.bind_launcher(x, "https://x.example/");
     assert!(b.group_members(g).is_empty() && b.groups().is_empty());
+}
+
+// ---- one start page (2026-11-24) ----------------------------------------------
+
+#[test]
+fn there_is_only_ever_one_new_tab() {
+    let mut b = browser(6);
+    let (a, _) = open_and_load(&mut b, "https://a.example/", 0);
+    let (blank, _) = b.new_tab(Profile::Default, 1);
+    // ⌘T again on the start page: the same tab, nothing new.
+    let (again, _) = b.new_tab(Profile::Default, 2);
+    assert_eq!(again, blank);
+    assert_eq!(b.tab_ids().len(), 2);
+    // Left without going anywhere, it goes.
+    let out = b.activate(a, 3);
+    assert!(b.tab(blank).is_none(), "the abandoned start page is closed");
+    assert_eq!(b.active(), Some(a));
+    assert!(!out.iter().any(|e| matches!(e, Effect::CreateView { tab, .. } if *tab == blank)));
+    // One that went somewhere stays.
+    let (kept, _) = b.new_tab(Profile::Default, 4);
+    b.navigate_input(kept, "https://k.example/", 4).unwrap();
+    b.activate(a, 5);
+    assert!(b.tab(kept).is_some(), "loading: not blank");
+    // A private ⌘⇧N from a start page: the start page goes.
+    let (blank, _) = b.new_tab(Profile::Default, 6);
+    let (p, _) = b.new_tab(Profile::Private, 7);
+    assert_ne!(p, blank);
+    assert!(b.tab(blank).is_none());
+    // Half of a split stays empty until closed.
+    b.activate(a, 8);
+    assert!(b.tab(p).is_none(), "the private start page went too");
+    let (n, _) = b.split_new(SplitOrientation::Columns, 9);
+    let n = n.unwrap();
+    b.activate(a, 10);
+    assert!(b.tab(n).is_some(), "an empty pane stays");
+    // A split begun on a start page keeps it.
+    let mut b = browser(6);
+    let (blank, _) = b.new_tab(Profile::Default, 0);
+    let (n, _) = b.split_new(SplitOrientation::Rows, 1);
+    assert!(b.tab(blank).is_some() && n.is_some());
+    // A research session's start page, left, goes; the session stays.
+    let mut b = browser(6);
+    open_and_load(&mut b, "https://a.example/", 0);
+    let (r, _) = b.new_research("R", 1, 1).unwrap();
+    b.enter_space(None, 2);
+    assert_eq!(b.view().research[0].tabs, 0);
+    assert_eq!(b.research()[0].id, r);
+    b.enter_space(Some(&r), 3);
+    assert_eq!(b.space(), Some(r.as_str()));
 }

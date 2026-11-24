@@ -159,20 +159,22 @@ function reportLayout(opts) {
   $('chrome').style.left = left + 'px';
   $('chrome').style.right = right + 'px';
   const strip = Math.ceil(window.innerHeight - $('chrome').getBoundingClientRect().top);
-  // Several right panels share the height, one under the other; on iPadOS
-  // below the window's top strip (core.js, IPAD_TOP_STRIP).
-  const dockTop = top + (iPadOS ? IPAD_TOP_STRIP : 0);
-  const part = (window.innerHeight - dockTop) / Math.max(1, docks.length);
+  // Several right panels share the height, one under the other, from the
+  // top of the window. The first one's own background fills the iPadOS
+  // window strip (core.js, IPAD_TOP_STRIP): the notebook's bar keeps its
+  // buttons below it (notebook.css, `.dock-first`).
+  const part = (window.innerHeight - top) / Math.max(1, docks.length);
   docks.forEach((d, i) => {
-    d.style.top = Math.round(dockTop + part * i) + 'px';
+    d.style.top = Math.round(top + part * i) + 'px';
     d.style.bottom = (i === docks.length - 1 ? 0 : Math.round(window.innerHeight - top - part * (i + 1))) + 'px';
     d.style.width = right + 'px';
     d.classList.toggle('split-lower', i > 0);
+    d.classList.toggle('dock-first', i === 0);
   });
   const edge = $('right-resize');
   edge.hidden = !docks.length;
   edge.style.left = window.innerWidth - right + 'px';
-  edge.style.top = dockTop + 'px';
+  edge.style.top = top + (iPadOS ? IPAD_TOP_STRIP : 0) + 'px';
   // The docked console sits above the URL strip; while it is open the
   // page ends above it (the pill then floats over chrome, not the page).
   // An attached URL bar is not over the page: the page ends above it.

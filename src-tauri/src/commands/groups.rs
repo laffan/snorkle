@@ -238,6 +238,60 @@ pub async fn bookmark_tab_group(s: S<'_>, group: u64) -> Result<Option<String>, 
     store.group_bookmarks(&urls, &name, wall_ms()).map_err(|e| e.to_string())
 }
 
+/// Bookmarks dragged out of the bookmarks bar into the tab list (owner
+/// request 2026-11-24): each is unbookmarked and its tab listed (one is made,
+/// unloaded, for a bookmark without one), placed before tab `before` (or at
+/// the end), in tab group `group` if given; with `group_name` (a bookmark
+/// group dragged out) they become a tab group of that name. A bookmark that
+/// is also a pin keeps its tab, which stays the pin's: a new tab is made
+/// for it. Returns the tabs, in the bookmarks' order.
+#[tauri::command]
+pub async fn unbookmark_to_tabs(
+    s: S<'_>,
+    urls: Vec<String>,
+    before: Option<u64>,
+    group: Option<u64>,
+    group_name: Option<String>,
+) -> Result<Vec<u64>, String> {
+    let Some(store) = s.store.clone() else { return Ok(Vec::new()) };
+    let all = store.bookmarks();
+    let marks: Vec<snorkle_core::storage::Bookmark> =
+        urls.iter().take(MAX_IDS).filter_map(|u| all.iter().find(|b| b.url == *u).cloned()).collect();
+    let pins: Vec<String> = store.pins().into_iter().map(|p| p.url).collect();
+    let mut ids = Vec::new();
+    for b in &marks {
+        let existing = if pins.contains(&b.url) { None } else { s.browser().launcher_tab(&b.url) };
+        let id = match existing {
+            Some(id) => {
+                with_browser(&s, |br| br.release_launcher(&b.url));
+                Some(id)
+            }
+            None => {
+                let Ok(page) = Url::parse(&b.url) else { continue };
+                let (id, effects) = s.browser().send_page(page, &b.title, None, now_ms());
+                s.run(effects);
+                id
+            }
+        };
+        ids.extend(id);
+    }
+    let removed: Vec<String> = marks.iter().map(|b| b.url.clone()).collect();
+    store.remove_bookmarks(&removed).map_err(|e| e.to_string())?;
+    with_browser(&s, |br| {
+        let mut out = Vec::new();
+        for id in &ids {
+            out.extend(br.move_tab(*id, before.map(TabId), group));
+        }
+        if let Some(name) = group_name.as_deref().filter(|_| group.is_none() && !ids.is_empty()) {
+            if let Some((_, effects)) = br.group_tabs(&ids, name) {
+                out.extend(effects);
+            }
+        }
+        out
+    });
+    Ok(ids.into_iter().map(|t| t.0).collect())
+}
+
 // ---- bookmark groups -------------------------------------------------------------
 
 #[tauri::command]

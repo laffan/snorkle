@@ -117,6 +117,8 @@
       tapText: (l, on, cx, cy) => texts.tap(l, on, cx, cy),
       edit: (l) => texts.edit(l),
       toast: (m) => (env.toast ? env.toast(m) : undefined),
+      // A clip's text dragged out of it: a quote where it was let go.
+      quoteAt: (target, at) => (api ? api.addLink(target, null, at) : null),
     });
 
     const texts = createTextNotes({
@@ -457,7 +459,7 @@
 
     render();
 
-    return {
+    const api = {
       render,
       follow,
       tool: () => tool,
@@ -629,6 +631,7 @@
       stepSearch,
       endSearch,
     };
+    return api;
   }
 
   Object.assign(NB, { PEN_WIDTH, RED_INK, HIT_PX, TAP_PX, STILL_PX, LASSO_HOLD_MS, STALE_MS, ERASE_PX, ERASER_BUTTON, GLIDE_MS, createSurface });

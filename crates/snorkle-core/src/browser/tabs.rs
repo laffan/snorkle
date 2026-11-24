@@ -140,11 +140,23 @@ impl Browser {
         ids
     }
 
+    /// A new empty tab (the start page), activated. Never a second one
+    /// (owner request 2026-11-24): with a blank tab of that profile shown,
+    /// that tab is the answer and nothing changes.
     pub fn new_tab(&mut self, profile: Profile, now: u64) -> (TabId, Vec<Effect>) {
+        if let Some(t) = self.active.and_then(|a| self.tab(a)).filter(|t| t.profile == profile && is_blank(t)) {
+            return (t.id, vec![Effect::NotifyChrome]);
+        }
         let mut out = Vec::new();
         let id = self.new_tab_into(profile, now, &mut out);
         out.push(Effect::NotifyChrome);
         (id, out)
+    }
+
+    /// Whether `id` is a blank tab (see [`is_blank`]) that can go: not half
+    /// of a split pair (an empty pane is kept until it is closed).
+    pub(super) fn abandoned_blank(&self, id: TabId) -> bool {
+        self.tab(id).is_some_and(is_blank) && self.pair_of(id).is_none()
     }
 
     /// A new tab in the session shown, after the active tab (after its
@@ -195,6 +207,7 @@ impl Browser {
         if self.tab(id).is_none() {
             return;
         }
+        let prev = self.active.filter(|p| *p != id);
         self.active = Some(id);
         // Choosing a tab in a pair shows the pair, so its partner needs a
         // live view too; a sheet needs its opener underneath.
@@ -207,6 +220,11 @@ impl Browser {
         self.restore_if_unloaded(id, now, out);
         self.enforce_budget(now, out);
         self.sync_visibility(out);
+        // A new tab left without going anywhere goes (owner request
+        // 2026-11-24): there is never more than one start page.
+        if let Some(p) = prev.filter(|p| self.abandoned_blank(*p)) {
+            out.extend(self.close(p, now));
+        }
     }
 
     /// Pairs `dragged` with `target` (target left, dragged right) and
@@ -272,8 +290,14 @@ impl Browser {
         if t.sheet || self.budget.max_live < needs || !self.os.allows_browsing() {
             return (None, out);
         }
-        let profile = t.profile;
-        let id = self.new_tab_into(profile, now, &mut out);
+        let (profile, space) = (t.profile, t.space.clone());
+        // Paired before it is focused, so a blank tab split stays (an
+        // abandoned blank tab goes: `activate_into`).
+        let id = self.alloc_id();
+        let at = self.index_after(active);
+        let mut fresh = Tab::new(id, profile, now);
+        fresh.space = space;
+        self.tabs.insert(at, fresh);
         out.extend(self.split_oriented(id, active, orientation, now));
         (Some(id), out)
     }
