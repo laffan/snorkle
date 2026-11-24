@@ -1495,3 +1495,6 @@ The live sites were not reachable or not signed in from this environment.
 - **[verify] Pinterest and Substack icons.** Pinterest's country sites (a list of common ones),
   pin.it links and every *.substack.com publication match; Substack publications on their own
   domains show their favicon as before.
+- **[verify] Pins at the top on iPad.** The sidebar no longer leaves the window's top 30 pt empty
+  (owner request 2026-11-24), so the first row of pins is back in the strip iPadOS 26 drags windows
+  by; a long-press drag of a pin begun there may move the window instead.

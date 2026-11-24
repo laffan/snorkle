@@ -27,9 +27,10 @@ if (macOS) document.documentElement.classList.add('macos');
 // iPadOS (touch points, a Mac or iPad user agent). Since the status bar is
 // hidden (2026-11-23) the window's top ~30 pt is where iPadOS 26 drags,
 // shrinks or un-fullscreens the window: a drag begun there (the notebook's
-// quote button, a pin) went to the system. Nothing the chrome drags sits
-// there (`IPAD_TOP_STRIP`, html.ipados; owner report 2026-11-24); pages
-// still reach the top.
+// quote button, a pin) went to the system. The notebook's bar and the
+// right panels' resize edge keep out of it (`IPAD_TOP_STRIP`, html.ipados;
+// owner report 2026-11-24); the sidebar's pins no longer do (owner request
+// 2026-11-24: no gap above them); pages still reach the top.
 const iPadOS = navigator.maxTouchPoints > 0 && /Macintosh|iPad/.test(navigator.userAgent);
 const IPAD_TOP_STRIP = 30;
 if (iPadOS) document.documentElement.classList.add('ipados');
