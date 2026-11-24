@@ -226,6 +226,30 @@ pub fn get_page_text(s: S<'_>, url: String) -> Option<PageCopy> {
     Some(PageCopy { url: p.url, title: p.title, display, text: p.text, saved_ms: p.saved_ms })
 }
 
+/// History's preview (owner request 2026-11-24): the page at `url`
+/// (http/https without credentials, as history stores it) in the preview
+/// tab (`Browser::open_preview`: default profile, through the navigation
+/// policy, never listed, saved or written to history), shown in the
+/// chrome's dialog where `set_chrome_layout` says. Replaces a preview
+/// already open. Returns its tab, for Save for Later.
+#[tauri::command]
+pub fn open_preview(s: S<'_>, url: String) -> Result<u64, String> {
+    let url = snorkle_core::storage::storable_url(&url)
+        .and_then(|u| Url::parse(&u).ok())
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or("Not a web address.")?;
+    let (id, effects) = s.browser().open_preview(url, now_ms());
+    s.run(effects);
+    id.map(|t| t.0).ok_or_else(|| "This page can't be opened.".to_string())
+}
+
+/// Closes History's preview, if one is open.
+#[tauri::command]
+pub fn close_preview(s: S<'_>) {
+    let effects = s.browser().close_preview();
+    s.run(effects);
+}
+
 /// ⌘⇧T: reopens the most recently closed tab whose page is still in
 /// history (pages removed from history are skipped). False when there is
 /// none.

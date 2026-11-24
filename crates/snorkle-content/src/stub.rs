@@ -46,6 +46,11 @@ impl ContentHost {
         self.left = crate::clamp_inset(left, 1366.0);
     }
 
+    /// The History preview's rectangle (nothing to place without WebKit).
+    pub fn set_preview_frame(&mut self, frame: Option<(f64, f64, f64, f64)>) {
+        let _ = frame.and_then(|r| crate::preview_rect(r, 1366.0, 1024.0));
+    }
+
     /// Runs the conversion (so it is exercised in desktop builds) but has
     /// no WebKit to install into.
     pub fn install_rules(&mut self, _key: String, make: crate::MakeRuleLists, done: crate::RulesDone) {

@@ -5,6 +5,11 @@ use super::*;
 
 impl Browser {
     pub(super) fn desired_shown(&self) -> Vec<(TabId, Pane)> {
+        // The History preview, once it has a page to show, is shown alone
+        // (the chrome's dialog, with its overlay, covers the rest).
+        if let Some(p) = self.preview_tab().filter(|p| self.showable(*p)) {
+            return vec![(p, Pane::Preview)];
+        }
         if self.chrome_overlay {
             return Vec::new();
         }
@@ -72,7 +77,7 @@ impl Browser {
         let persistable: Vec<&Tab> = self
             .tabs
             .iter()
-            .filter(|t| !t.is_private() && !t.sheet && t.saved.is_none())
+            .filter(|t| !t.is_private() && !t.sheet && t.saved.is_none() && !t.preview)
             .filter(|t| t.committed_url.as_ref().map(|u| matches!(u.scheme(), "http" | "https")).unwrap_or(false))
             .collect();
         let active = self.active.and_then(|a| persistable.iter().position(|t| t.id == a));
@@ -144,7 +149,7 @@ impl Browser {
 
     pub fn view(&self) -> ChromeState {
         ChromeState {
-            tabs: self.tabs.iter().map(|t| tab_view(t, &self.adblock_allowed)).collect(),
+            tabs: self.tabs.iter().filter(|t| !t.preview).map(|t| tab_view(t, &self.adblock_allowed)).collect(),
             active: self.active,
             os: self.os,
             content_visible: !self.shown.is_empty(),
@@ -156,6 +161,7 @@ impl Browser {
             space: self.space().map(str::to_string),
             research: self.research_views(),
             groups: self.groups.clone(),
+            preview: self.preview_tab(),
         }
     }
 }

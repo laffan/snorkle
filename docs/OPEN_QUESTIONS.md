@@ -1453,3 +1453,21 @@ The live sites were not reachable or not signed in from this environment.
   menu, item menu, view-mode menu), a row being dragged, or a resize. The find bar and the URL bar's
   menus no longer count for the sidebar's rows (they never did in practice; they still show the
   foot's buttons, as before).
+
+## The History preview (2026-11-24)
+
+- **[verify] On a device.** The preview page is placed natively over the dialog's body
+  (`Pane::Preview`); checked only by type-checking the macOS and iPadOS hosts and with a fake
+  backend in Chromium. To check: it lines up with the body (corners included) as the window is
+  resized; it scrolls and takes clicks; the dialog's buttons stay clickable (they are not over the
+  page). Escape closes it only while the chrome has the keyboard: after a click into the page,
+  the page has it and Escape goes to the page (Close and a click beside the dialog still work).
+- **[decide] Every visit opens in the dialog,** not only visits with saved text (those used to
+  open in the current tab at once). Open Page in the dialog loads the visit in the current tab, as
+  before; it does not reuse the preview's loaded page.
+- **[decide] A preview is not a visit:** it is not written to history, so a visit does not jump to
+  the top of the list when opened in the dialog. Opening it with Open Page records it as usual.
+- **[decide] Save for Later closes the dialog** (saving a tab closes the tab; the preview's tab is
+  saved the same way). It reads Saved for a page already saved for later.
+- **[decide] A page that cannot show** (blocked, offline, another app's address) leaves the saved
+  text or "Loading…" in the dialog; Open Page shows the page's notice in the tab.

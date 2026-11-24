@@ -33,6 +33,8 @@
     "allow-remove-history",
     "allow-search-history",
     "allow-get-page-text",
+    "allow-open-preview",
+    "allow-close-preview",
     "allow-reopen-closed-tab",
     "allow-list-downloads",
     "allow-cancel-download",

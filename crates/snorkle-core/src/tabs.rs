@@ -222,6 +222,9 @@ pub struct Tab {
     pub gesture_ms: Option<u64>,
     /// A pin's tab: when it last sent pages to new tabs (rate limit).
     pub diverted_ms: Vec<u64>,
+    /// The History preview's tab (2026-11-24, `Browser::open_preview`):
+    /// never listed, saved, reopened, written to history or made active.
+    pub preview: bool,
 }
 
 /// A Save for Later archive shown in a tab (2026-11-09): which saved item,
@@ -327,6 +330,7 @@ impl Tab {
             group: None,
             gesture_ms: None,
             diverted_ms: Vec::new(),
+            preview: false,
         }
     }
 

@@ -89,7 +89,7 @@ impl Browser {
         t.landing = None;
         t.provisional = false;
         t.progress = 100;
-        if !t.is_private() && !t.history_recorded {
+        if !t.is_private() && !t.preview && !t.history_recorded {
             if let Some(u) = t.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https")) {
                 t.history_recorded = true;
                 out.push(Effect::RecordHistory { url: u, title: t.title.clone() });

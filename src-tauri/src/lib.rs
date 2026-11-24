@@ -53,6 +53,8 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::remove_history,
         commands::search_history,
         commands::get_page_text,
+        commands::open_preview,
+        commands::close_preview,
         commands::reopen_closed_tab,
         commands::list_downloads,
         commands::cancel_download,

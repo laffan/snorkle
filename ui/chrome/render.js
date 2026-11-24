@@ -29,6 +29,7 @@ function render() {
   if (confirmAction && confirmAction.tab !== null && confirmAction.tab !== state.active && confirmAction.tab !== state.sheet) closeConfirm();
   if (confirmAction && confirmAction.anchor) placeConfirm(); // its row may have been drawn again
   notebookTrack();
+  syncPreview();
   if (capture) renderCapture();
   reportLayout();
   // Timing (Menu → Console, 2026-11-23): slow renders only.

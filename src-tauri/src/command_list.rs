@@ -24,6 +24,8 @@ pub const COMMANDS: &[&str] = &[
     "remove_history",
     "search_history",
     "get_page_text",
+    "open_preview",
+    "close_preview",
     "reopen_closed_tab",
     "list_downloads",
     "cancel_download",

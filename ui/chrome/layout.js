@@ -221,12 +221,14 @@ function reportLayout(opts) {
   s.style.bottom = sBottom + 'px';
   contentBox = { left, top, right, bottom };
   const holes = overlay ? [] : floatingHoles();
-  const key = JSON.stringify([top, left, right, bottom, overlay, holes]);
+  // History's dialog shows its preview page over its body (history.js).
+  const preview = previewRect();
+  const key = JSON.stringify([top, left, right, bottom, overlay, holes, preview]);
   if (key === lastLayout) return;
   lastLayout = key;
   // When the sidebar slides, the host animates the page and its cut-outs
   // to match, starting from when the CSS transition did.
-  invoke('set_chrome_layout', { top, left, right, bottom, overlay, holes, animateSince: opts && opts.animate ? slideStartedAt : null });
+  invoke('set_chrome_layout', { top, left, right, bottom, overlay, holes, animateSince: opts && opts.animate ? slideStartedAt : null, preview });
 }
 
 // Chrome that floats over the page: the pill, its popup, toasts and

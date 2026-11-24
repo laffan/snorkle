@@ -118,6 +118,16 @@ pub fn dismiss_notice(s: S<'_>, tab: u64) {
     with_browser(&s, |b| b.dismiss_notice(TabId(tab)));
 }
 
+/// Where the History dialog shows its preview (CSS px = points, window
+/// coordinates from the top left).
+#[derive(Deserialize)]
+pub struct RectArg {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
 /// A rectangle where the chrome floats over the content area (CSS px =
 /// points, window coordinates) and its corner radius.
 #[derive(Deserialize)]
@@ -139,6 +149,8 @@ pub struct HoleArg {
 /// sidebar in narrow windows), so content must be hidden. `holes`: where
 /// the URL pill, its popups and toasts float over the content area; pages
 /// are cut out there (validated and bounded by the content host).
+/// `preview`: where History's dialog shows its preview page, while it is
+/// open (kept inside the window by the content host).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn set_chrome_layout(
@@ -150,6 +162,7 @@ pub fn set_chrome_layout(
     overlay: bool,
     holes: Vec<HoleArg>,
     animate_since: Option<f64>,
+    preview: Option<RectArg>,
 ) {
     // Seconds since the chrome began its slide (so the host can line up).
     let animate = animate_since.filter(|t| t.is_finite()).map(|since| {
@@ -171,6 +184,12 @@ pub fn set_chrome_layout(
             corners: h.c.unwrap_or(snorkle_content::ALL_CORNERS),
         })
         .collect();
-    snorkle_content::dispatch_main(move || with_host(|h| h.set_insets(top, left, right, bottom, holes, animate)));
+    let preview = preview.map(|r| (r.x, r.y, r.w, r.h));
+    snorkle_content::dispatch_main(move || {
+        with_host(|h| {
+            h.set_insets(top, left, right, bottom, holes, animate);
+            h.set_preview_frame(preview);
+        })
+    });
     with_browser(&s, |b| b.set_chrome_overlay(overlay));
 }

@@ -120,6 +120,9 @@ pub struct ContentHost {
     bottom: Cell<f64>,
     /// The first pane's share of a split (`Effect::SetSplitRatio`), 0.2–0.8.
     split_ratio: Cell<f64>,
+    /// Where the chrome's History dialog shows its preview (`Pane::Preview`,
+    /// `set_preview_frame`): window points from the top left.
+    preview: Cell<Option<(f64, f64, f64, f64)>>,
     views: HashMap<TabId, View>,
     /// `interactionState` of discarded tabs (in memory only).
     saved: HashMap<TabId, Retained<AnyObject>>,

@@ -198,6 +198,10 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spa
 .modal.page-copy .modal-head h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 #copy-meta { margin: 0 0 10px; }
 .page-copy-body { flex: 1; min-height: 0; overflow-y: auto; line-height: 1.5; font-size: 15px; -webkit-user-select: text; user-select: text; }
+/* The preview page covers the body (the host places it there, with the
+   same corners: snorkle-content PREVIEW_RADIUS); the saved text is under
+   it until it shows. */
+.modal.page-copy .page-copy-body { border-radius: 10px; background: var(--field); padding: 12px 14px; }
 .page-copy-body p { margin: 0 0 .7em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .modal h2 { margin: 16px 0 4px; }
 .clear-data.armed, #ai-usage-reset.armed { background: var(--fg); color: var(--bar); }

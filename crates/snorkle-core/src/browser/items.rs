@@ -15,7 +15,7 @@ impl Browser {
         let tab = self.tabs.remove(idx);
         // A saved copy's tab is not reopened by ⌘⇧T (it was never an
         // ordinary tab).
-        if !tab.is_private() && !tab.sheet && tab.saved.is_none() {
+        if !tab.is_private() && !tab.sheet && tab.saved.is_none() && !tab.preview {
             if let Some(url) = tab.committed_url.clone().filter(|u| matches!(u.scheme(), "http" | "https")) {
                 self.closed.retain(|c| *c != url);
                 self.closed.push(url);
@@ -44,7 +44,7 @@ impl Browser {
             // (everyday or research, 2026-11-24); a new one if none is left
             // (unless its research session was deleted).
             let space = tab.space.clone();
-            let same = |t: &&Tab| t.space == space;
+            let same = |t: &&Tab| t.space == space && !t.preview;
             let find = |want: Option<TabId>| want.and_then(|w| self.tabs.iter().find(|t| t.id == w)).filter(same);
             let next = find(partner)
                 .or_else(|| find(tab.opener))

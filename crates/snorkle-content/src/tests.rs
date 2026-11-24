@@ -186,3 +186,14 @@ fn clip_rects_are_cut_to_the_view() {
 fn store_id_nonzero() {
     assert!(DEFAULT_PROFILE_STORE_ID.iter().any(|b| *b != 0));
 }
+
+#[test]
+fn preview_rect_stays_in_the_window() {
+    assert_eq!(preview_rect((100.0, 80.0, 600.0, 500.0), 1200.0, 800.0), Some((100.0, 80.0, 600.0, 500.0)));
+    // Cut to the window, rounded.
+    assert_eq!(preview_rect((-20.4, 700.0, 300.0, 400.0), 1200.0, 800.0), Some((0.0, 700.0, 280.0, 100.0)));
+    // Not finite, or too small to show a page.
+    assert_eq!(preview_rect((f64::NAN, 0.0, 300.0, 300.0), 1200.0, 800.0), None);
+    assert_eq!(preview_rect((10.0, 10.0, 30.0, 300.0), 1200.0, 800.0), None);
+    assert_eq!(preview_rect((1190.0, 10.0, 300.0, 300.0), 1200.0, 800.0), None);
+}

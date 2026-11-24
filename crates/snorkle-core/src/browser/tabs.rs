@@ -191,6 +191,12 @@ impl Browser {
     }
 
     pub(super) fn activate_into(&mut self, id: TabId, now: u64, out: &mut Vec<Effect>) {
+        // The History preview is never the active tab; choosing another
+        // tab closes it.
+        if self.tab(id).is_some_and(|t| t.preview) {
+            return;
+        }
+        self.drop_preview(out);
         // A tab with a popup sheet open is shown with the sheet in front.
         let mut id = id;
         for _ in 0..self.tabs.len() {

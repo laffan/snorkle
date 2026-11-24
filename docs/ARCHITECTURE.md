@@ -439,7 +439,8 @@ skipped and forgotten) and opens it in a new tab through the navigation policy
 sidebar's contents (pins, bookmarks, tabs) with History, as Save for Later's list did before (× or
 Escape returns; a hidden sidebar is shown and hidden again with it). Its heading row (Select, Clear,
 ×) and search box stay at the top; then the pages saved for later (§5b), then the visits by day,
-each with its time. A visit opens in the current tab, and History stays open beside the page.
+each with its time. Clicking a visit opens it in a dialog (see the preview below); Open Page there
+loads it in the current tab, and History stays open beside the page.
 Pointing at a visit replaces its time with a tray (Save for Later, below) and an × that removes it;
 a visit of a page already saved shows a tray with a tick instead. Select turns rows into
 checkboxes (Shift-click selects a range) and Remove deletes the selection (`remove_history`, by
@@ -449,11 +450,27 @@ the 100 most recently visited pages is saved (`storage` `page-text/`, `SavedPage
 loading and on the same address, the host runs the constant `ai::PAGE_TEXT_JS` (C17) and
 the title and visible text (`innerText`, ≤ 48,000 characters, cleaned) are written if the tab still
 shows that page. The text is kept only while the page is in history: removing its last visit or
-clearing history deletes it. Rows with saved text show its size beside the address; clicking one
-opens a dialog with the text (paragraphs, `textContent` only, search matches marked) and Open
-Page; other rows open the page as before. Search (`search_history`) matches titles, addresses and
+clearing history deletes it. Rows with saved text show its size beside the address. Search (`search_history`) matches titles, addresses and
 the saved text (with a snippet), and filters the saved pages above by title and address. Images
 are not saved. Settings → Cache does not delete saved text (it belongs to history).
+
+**The History preview** (owner request 2026-11-24; before, the dialog showed only the saved text,
+and visits without it opened at once): clicking a visit opens a dialog with its title, address and
+Open Page, Save for Later and Close, and the page itself loads in it. The page is a tab of its own
+(`Browser::open_preview`, `open_preview`): default profile, loaded through the navigation policy as
+a typed address, at most one, never listed with the tabs (`ChromeState::preview` names it), never
+saved in the session, reopened by ⌘⇧T, written to history (opening a visit does not move it to the
+top) or made active. Once it has committed a page it is the only view on screen
+(`Pane::Preview`): the chrome hides the rest with its dialog's overlay and reports the dialog
+body's rectangle with its layout (`set_chrome_layout` `preview`; the host keeps it inside the
+window, `snorkle_content::preview_rect`, and rounds its corners to match). Until then, or if the
+page cannot show (a notice), the body shows the saved text (search matches marked) or "Loading…".
+When the page has loaded, History's search words are found in it as ⌘F does. Save for Later saves
+the page as shown (`save_for_later` on the preview tab, whose tab then closes, and the dialog with
+it; before the tab exists, `save_page_for_later`); it reads Saved for a page already saved. Close,
+a click beside the dialog, or Escape while the chrome has the keyboard (not after a click into the
+page, which then has it) close the preview (`close_preview`); choosing another tab
+closes it too, and so does a page it opens in a new tab (which stays, as an ordinary tab).
 
 **Save for Later from History** (2026-11-23, `save_page_for_later`): the visit's address (http(s),
 as history stores it) is loaded in a new tab of the default profile that is never shown

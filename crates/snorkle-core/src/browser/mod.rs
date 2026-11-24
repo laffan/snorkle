@@ -42,6 +42,7 @@ mod visibility;
 mod spaces;
 mod groups;
 mod pins;
+mod preview;
 
 pub use groups::{clean_group_name, TabGroup, MAX_GROUP_NAME_CHARS};
 pub use pins::{GESTURE_WINDOW_MS, MAX_DIVERTS};
@@ -139,6 +140,9 @@ pub enum Pane {
     Bottom,
     /// A popup window centred over its (dimmed, still running) opener.
     Sheet,
+    /// The History preview (2026-11-24): in the rectangle the chrome gives
+    /// for its dialog's body.
+    Preview,
 }
 
 /// How a page-opened window is presented.
@@ -317,6 +321,9 @@ pub struct ChromeState {
     pub research: Vec<ResearchView>,
     /// Every tab group (of every session; tabs name theirs).
     pub groups: Vec<TabGroup>,
+    /// The History preview's tab, while one is open (2026-11-24; it is not
+    /// in `tabs`).
+    pub preview: Option<TabId>,
 }
 
 const CRASH_WINDOW_MS: u64 = 60_000;

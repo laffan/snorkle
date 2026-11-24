@@ -84,6 +84,7 @@ impl ContentHost {
             right: Cell::new(0.0),
             bottom: Cell::new(0.0),
             split_ratio: Cell::new(0.5),
+            preview: Cell::new(None),
             views: HashMap::new(),
             saved: HashMap::new(),
             default_store,
@@ -153,6 +154,25 @@ impl ContentHost {
                     CGSize::new(w, h),
                 )
             }
+            // Where the chrome's dialog says; the content area until it has.
+            Pane::Preview => {
+                self.preview.get().map_or(area, |(x, y, w, h)| CGRect::new(CGPoint::new(x, y), CGSize::new(w, h)))
+            }
+        }
+    }
+
+    /// The chrome's rectangle for the History preview (window points from
+    /// the top left; `crate::preview_rect` keeps it in the window). A
+    /// preview on screen moves there.
+    pub fn set_preview_frame(&mut self, frame: Option<(f64, f64, f64, f64)>) {
+        let b = self.root.bounds().size;
+        let frame = frame.and_then(|r| crate::preview_rect(r, b.width, b.height));
+        if frame == self.preview.get() {
+            return;
+        }
+        self.preview.set(frame);
+        for v in self.views.values().filter(|v| v.pane.get() == Pane::Preview) {
+            self.place(&v.container, self.pane_frame(Pane::Preview), v.scale.get());
         }
     }
 

@@ -52,7 +52,14 @@ impl ContentHost {
                         self.place(&v.container, self.pane_frame(*pane), v.scale.get());
                         self.root.bringSubviewToFront(&v.container);
                         v.container.setHidden(false);
-                        set_corner_radius(&v.container, if *pane == Pane::Sheet { 12.0 } else { 0.0 });
+                        set_corner_radius(
+                            &v.container,
+                            match pane {
+                                Pane::Sheet => 12.0,
+                                Pane::Preview => crate::PREVIEW_RADIUS,
+                                _ => 0.0,
+                            },
+                        );
                     }
                     self.sync_backdrop();
                 }

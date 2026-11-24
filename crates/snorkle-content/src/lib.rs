@@ -509,6 +509,23 @@ pub fn sanitize_holes(raw: &[Hole], width: f64, height: f64) -> Vec<Hole> {
     out
 }
 
+/// Corner radius of the History preview's page (`Pane::Preview`), matching
+/// the chrome's dialog body (`ui/style/bar.css`, `.page-copy-body`).
+pub const PREVIEW_RADIUS: f64 = 10.0;
+
+/// The chrome's rectangle for the History preview (window points from the
+/// top left, `x, y, w, h`), kept inside a `width` × `height` window; `None`
+/// when it is not finite or too small to show a page (2026-11-24).
+pub fn preview_rect(r: (f64, f64, f64, f64), width: f64, height: f64) -> Option<(f64, f64, f64, f64)> {
+    let (x, y, w, h) = r;
+    if ![x, y, w, h].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let (x0, y0) = (x.clamp(0.0, width), y.clamp(0.0, height));
+    let (x1, y1) = ((x + w).clamp(0.0, width), (y + h).clamp(0.0, height));
+    (x1 - x0 >= 40.0 && y1 - y0 >= 40.0).then_some((x0.round(), y0.round(), (x1 - x0).round(), (y1 - y0).round()))
+}
+
 /// Largest accepted chrome inset (toolbar height, sidebar width) as a
 /// fraction of the window extent, so the chrome can never shrink the
 /// content area to nothing.

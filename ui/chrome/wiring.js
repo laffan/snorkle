@@ -173,6 +173,7 @@ T.event.listen('state', (e) => { state = e.payload; render(); });
 // A tab's load progress alone (no re-render of the rest).
 T.event.listen('progress', (e) => {
   const p = e.payload || {};
+  previewLoaded(p);
   const t = state && state.tabs.find((x) => x.id === p.tab);
   if (!t) return;
   t.loading = !!p.loading;
