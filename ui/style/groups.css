@@ -105,6 +105,6 @@ html.ipados #side-scroll, html.ipados #history-view { padding-top: 30px; }
    one of its menus is open or a row is being dragged (onto a session). */
 @media (any-hover: hover) {
   #sidebar #research-list { opacity: 0; transition: opacity .2s ease-in-out; }
-  #sidebar:is(:hover, :focus-within) #research-list, body.menu-open #sidebar #research-list,
+  body.sb-live #sidebar #research-list, #sidebar:has(:focus-visible) #research-list, body.menu-open #sidebar #research-list,
   body.dragging #sidebar #research-list { opacity: 1; }
 }

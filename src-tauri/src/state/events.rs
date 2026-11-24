@@ -158,6 +158,9 @@ impl ContentEvents for Events {
     fn edge_pointer(&self, at: Option<(f64, f64)>) {
         (self.shared.emit)(ChromeEvent::EdgePointer(at));
     }
+    fn chrome_pointer(&self, over: bool) {
+        (self.shared.emit)(ChromeEvent::ChromePointer(over));
+    }
     fn option_key(&self, down: bool) {
         (self.shared.emit)(ChromeEvent::OptionKey(down));
     }

@@ -378,6 +378,44 @@ $('sidebar').addEventListener('pointerleave', (ev) => {
 // The pointer may leave the chrome's web view straight onto the page.
 document.addEventListener('mouseout', (ev) => { if (!ev.relatedTarget && flyoutMode() && sidebarShown) hideFlyoutSoon(); });
 
+// ---- the sidebar in use (pointer over it) ----------------------------------
+//
+// With a pointer the sidebar's contents recede unless it is in use
+// (base.css, `body.sb-live`). That used to be `#sidebar:hover`, which is
+// WebKit's idea of where the pointer last was in the chrome; it could stay
+// on the sidebar after the pointer went to a page, and the sidebar stayed
+// opaque and in colour wherever the pointer was (owner report 2026-11-24).
+// Now: the chrome's own pointer events set it (over the sidebar or not);
+// leaving the sidebar, the chrome's web view or the app clears it; and so
+// does the host whenever the pointer is not over the chrome (over a page,
+// or out of the window: `chrome_pointer`, seen natively on every move).
+let sbLive = false;
+function setSbLive(on) {
+  if (on === sbLive) return;
+  sbLive = on;
+  document.body.classList.toggle('sb-live', on);
+}
+const sbPointerSeen = (ev) => {
+  if (ev.pointerType === 'touch') return;
+  setSbLive($('sidebar').contains(ev.target));
+};
+document.addEventListener('pointermove', sbPointerSeen, { passive: true, capture: true });
+document.addEventListener('pointerover', sbPointerSeen, { passive: true, capture: true });
+$('sidebar').addEventListener('pointerleave', () => setSbLive(false));
+document.addEventListener('mouseout', (ev) => { if (!ev.relatedTarget) setSbLive(false); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') setSbLive(false); });
+// Once per launch, the Console says whether WebKit's own hover state was
+// the stale one (to confirm the cause on a device).
+let sbStaleNoted = false;
+T.event.listen('chrome_pointer', (e) => {
+  if (e.payload !== false) return;
+  if (!sbStaleNoted && $('sidebar').matches(':hover')) {
+    sbStaleNoted = true;
+    chromeLog('info', 'sidebar: WebKit still had the pointer over the sidebar after it left the chrome (faded anyway)');
+  }
+  setSbLive(false);
+});
+
 // ---- menu, settings, history ----------------------------------------------
 
 function openMenu() { menuOpen = true; $('menu-pop').hidden = false; document.body.classList.add('menu-open'); }

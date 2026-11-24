@@ -290,6 +290,13 @@ pub trait ContentEvents: 'static {
     /// (throttled), and `None` once it leaves that strip or stops hovering.
     /// For the sidebar's edge tab, which shows only near the pointer.
     fn edge_pointer(&self, _at: Option<(f64, f64)>) {}
+    /// Whether the pointer (trackpad, mouse) is over the chrome: inside the
+    /// window and not over a page (a hole counts as the chrome). Sent when
+    /// it changes, and `false` once the pointer leaves the window or stops
+    /// hovering. The chrome's web view does not reliably see the pointer
+    /// leave it for a page, so the chrome uses `false` to know the pointer
+    /// is no longer over its sidebar (2026-11-24).
+    fn chrome_pointer(&self, _over: bool) {}
     /// ⌥ was pressed or let go, whatever has keyboard focus (macOS; the
     /// chrome marks what ⌥ changes, as the copy button's "to notebook").
     fn option_key(&self, _down: bool) {}

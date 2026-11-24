@@ -319,6 +319,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
                 handle.emit_to(CHROME_LABEL, "selection", serde_json::json!({ "tab": tab, "rect": rect }))
             }
             ChromeEvent::OptionKey(down) => handle.emit_to(CHROME_LABEL, "option_key", down),
+            ChromeEvent::ChromePointer(over) => handle.emit_to(CHROME_LABEL, "chrome_pointer", over),
             ChromeEvent::EdgePointer(at) => handle.emit_to(
                 CHROME_LABEL,
                 "edge_pointer",

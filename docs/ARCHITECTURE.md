@@ -351,6 +351,19 @@ Two exceptions keep the tabs reachable without a keyboard: narrow windows (the t
 overlaid sidebar) and touch-only devices with an attached sidebar hidden. The host still reports
 the pointer near the left edge (`edge_pointer`); the chrome no longer uses it.
 
+"Hovered", for the sidebar, is `body.sb-live` (2026-11-24), not CSS `:hover`: the chrome's own
+pointer events set it (pointer over the sidebar or not), and it is cleared when the pointer leaves
+the sidebar, the chrome's web view or the app, and whenever the host reports that the pointer is
+not over the chrome (`chrome_pointer`, a boolean sent when it changes: on macOS from the window's
+mouse monitor, a hit test of the content root on each move, `false` when the pointer leaves the
+window; on iPadOS from the root view's hover recognizer, a hit test for a page container, `false`
+when hovering ends). Before, the sidebar could stay opaque, its icons in colour, wherever the
+pointer was (owner report 2026-11-24): `:hover` is WebKit's idea of where the pointer last was in
+the chrome, and nothing guaranteed it was told when the pointer went to a page. Keyboard focus keeps
+the sidebar opaque only as `:focus-visible` (a field being typed in, or keyboard navigation), and
+an open sidebar menu, a drag of a row or a resize of the sidebar keeps it opaque too (the drag,
+resize and menu rules had lost to the fading rule on specificity until then).
+
 Page views are drawn above the chrome's web view, so the chrome cannot simply draw over a page.
 Instead it reports the rectangles of the pill, the open actions popup and any toast or banner as
 holes (`set_chrome_layout`, window coordinates with a corner radius). The host masks every

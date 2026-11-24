@@ -93,6 +93,8 @@ pub enum ChromeEvent<'a> {
     /// The image menu for an image in a tab's page (its URL, and where).
     /// The pointer near the window's left edge (`None`: away).
     EdgePointer(Option<(f64, f64)>),
+    /// Whether the pointer is over the chrome (`ContentEvents::chrome_pointer`).
+    ChromePointer(bool),
     /// ⌥ pressed or let go (macOS, `ContentEvents::option_key`).
     OptionKey(bool),
     /// `None`: close it (the page was touched or scrolled).

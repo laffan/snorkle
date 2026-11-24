@@ -48,11 +48,13 @@ body.private {
   --edge: #333333; --edge-hot: #e6e6e6;
 }
 /* All site artwork, including bundled Google icons, desaturates as the
-   sidebar recedes and returns to colour while the sidebar is in use. */
+   sidebar recedes and returns to colour while the sidebar is in use:
+   the pointer over it (`body.sb-live`, sidebar.js), keyboard focus in it,
+   or a drag. */
 .pin img, .pin .emoji, .tab-icon { filter: grayscale(1); transition: filter .3s; }
 @media (any-hover: hover) {
-  html:has(#sidebar:hover) :is(.pin img, .pin .emoji, .tab-icon),
-  html:has(#sidebar:focus-within) :is(.pin img, .pin .emoji, .tab-icon),
+  body.sb-live :is(.pin img, .pin .emoji, .tab-icon),
+  body:has(#sidebar :focus-visible) :is(.pin img, .pin .emoji, .tab-icon),
   body.dragging :is(.pin img, .pin .emoji, .tab-icon) { filter: none; }
 }
 * { box-sizing: border-box; }
@@ -144,20 +146,25 @@ body.sb-flyout #edge-tab::after {
 #edge-tab:hover::after { opacity: 1; }
 /* With a pointer (trackpad, mouse), the attached sidebar's contents and
    the URL bar recede to half opacity until the pointer is over them,
-   something in them has focus, or one of their menus or a drag is in
-   progress (the panel itself and its toggle stay opaque). Touch-only
-   devices have no hover, so there they stay fully visible. */
+   something in them has keyboard focus, or one of their menus or a drag is
+   in progress (the panel itself and its toggle stay opaque). Touch-only
+   devices have no hover, so there they stay fully visible. The sidebar's
+   "pointer over it" is `body.sb-live` (sidebar.js), not `:hover`, and its
+   focus counts only as `:focus-visible` (2026-11-24: the sidebar could
+   stay opaque and in colour wherever the pointer was). The drag, resize
+   and menu rules now outrank the receding rule (before, they lost to it
+   on specificity and did nothing for the sidebar). */
 @media (any-hover: hover) {
   body:not(.narrow):not(.sb-flyout) :is(#side-scroll, #history-view, #side-bottom) { opacity: .5; transition: opacity .3s ease-in-out; }
   /* The foot's buttons show only while the sidebar is pointed at, has the
      focus or one of its menus is open (2026-11-23), in every mode. */
   #sidebar #side-bottom { opacity: 0; transition: opacity .2s ease-in-out; }
   #toolbar { opacity: .5; transition: opacity .15s; }
-  body:not(.narrow) #sidebar:hover :is(#side-scroll, #history-view, #side-bottom),
-  body:not(.narrow) #sidebar:focus-within :is(#side-scroll, #history-view, #side-bottom),
-  body.dragging :is(#side-scroll, #history-view, #side-bottom), body.resizing :is(#side-scroll, #history-view, #side-bottom),
-  body.menu-open :is(#side-scroll, #history-view, #side-bottom), #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
-  #sidebar:is(:hover, :focus-within) #side-bottom, body.menu-open #sidebar #side-bottom { opacity: 1; }
+  body.sb-live:not(.narrow) #sidebar :is(#side-scroll, #history-view, #side-bottom),
+  body:not(.narrow) #sidebar:has(:focus-visible, .popup:not([hidden])) :is(#side-scroll, #history-view, #side-bottom),
+  body:is(.dragging, .resizing):not(.narrow) #sidebar :is(#side-scroll, #history-view, #side-bottom),
+  #toolbar:hover, #toolbar:focus-within, body.menu-open #toolbar { opacity: 1; }
+  body.sb-live #sidebar #side-bottom, #sidebar:has(:focus-visible) #side-bottom, body.menu-open #sidebar #side-bottom { opacity: 1; }
   /* The address field's share and copy buttons: only while the URL bar
      is pointed at (2026-11-23), or one of them has keyboard focus. */
   #toolbar .omni-share { opacity: 0; transition: opacity .15s; }

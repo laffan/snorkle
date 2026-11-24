@@ -1433,3 +1433,23 @@ The live sites were not reachable or not signed in from this environment.
   page's text exactly.
 - **[decide] Night vision** is now Menu → Turn On/Off Night Vision (and ⌘⇧R, and Settings); the
   sidebar's eye is gone and a book in its place starts a research session.
+
+## The sidebar stayed opaque and in colour (2026-11-24)
+
+- **[verify] Cause not reproduced.** Owner report: after a while the sidebar stopped fading and its
+  icons stayed in colour wherever the pointer was. Only `#sidebar:hover`, `#sidebar:focus-within`
+  or a drag could do both (the menu, drag and resize rules lost to the fading rule on specificity,
+  so they never made the sidebar opaque). WebKit gates `:focus-within` on its view being first
+  responder and does not focus buttons on click (checked in its source), so the likelier stuck
+  state is `:hover`: WebKit's last known pointer position in the chrome, which it may not update when
+  the pointer goes from the sidebar to a page view (on iPadOS hover follows hit testing, so the
+  chrome sees no events over pages). Not run on a Mac or iPad. The fade now follows `body.sb-live`,
+  cleared by the host's `chrome_pointer(false)` whenever the pointer is over a page or out of the
+  window, so it no longer depends on WebKit noticing. The Console notes, once per launch, when
+  WebKit still had `:hover` on the sidebar as the host reported the pointer gone ("sidebar: WebKit
+  still had the pointer over the sidebar…"): seeing it confirms the cause.
+- **[decide] What keeps the sidebar opaque:** the pointer over it, keyboard focus in it
+  (`:focus-visible`: a field being typed in, or keyboard navigation), an open sidebar menu (main
+  menu, item menu, view-mode menu), a row being dragged, or a resize. The find bar and the URL bar's
+  menus no longer count for the sidebar's rows (they never did in practice; they still show the
+  foot's buttons, as before).

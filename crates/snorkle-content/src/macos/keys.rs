@@ -182,6 +182,14 @@ pub struct Edge {
     last: Cell<Option<std::time::Instant>>,
 }
 
+/// Reports whether the pointer is over the chrome (see
+/// `ContentEvents::chrome_pointer`), only when that changes.
+fn chrome_pointer(state: &Cell<Option<bool>>, events: &Rc<dyn ContentEvents>, over: bool) {
+    if state.replace(Some(over)) != Some(over) {
+        events.chrome_pointer(over);
+    }
+}
+
 /// Reports the pointer near the window's left edge, at most every 33 ms,
 /// and once when it leaves the strip (`None`).
 fn pointer_at(edge: &Edge, events: &Rc<dyn ContentEvents>, at: Option<(f64, f64)>) {
@@ -259,6 +267,9 @@ pub fn install(
     let buttons: Retained<NSWindow> = objc2::Message::retain(window);
     let corner = Rc::new(Cell::new(false));
     let (buttons2, corner2) = (buttons.clone(), corner.clone());
+    // Whether the pointer was over the chrome when last reported.
+    let on_chrome: Rc<Cell<Option<bool>>> = Rc::default();
+    let on_chrome2 = on_chrome.clone();
     let mouse = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let e = unsafe { event.as_ref() };
         if !in_window(e) {
@@ -283,6 +294,17 @@ pub fn install(
                     set_window_buttons(&buttons2, inside);
                 }
                 pointer_at(&edge2, &ev, Some((p.x, height - p.y)));
+                // Over the chrome: in the window, and no page view (the
+                // root's subviews, holes left out) under the pointer.
+                if let Some(sup) = unsafe { root_ptr.superview() } {
+                    let local = sup.convertPoint_fromView(p, None);
+                    let f = root_ptr.frame();
+                    let in_window = local.x >= f.origin.x
+                        && local.y >= f.origin.y
+                        && local.x < f.origin.x + f.size.width
+                        && local.y < f.origin.y + f.size.height;
+                    chrome_pointer(&on_chrome2, &ev, in_window && root_ptr.hitTest(local).is_none());
+                }
             }
         }
         event.as_ptr()
@@ -301,6 +323,7 @@ pub fn install(
             set_window_buttons(&buttons, false);
         }
         pointer_at(&edge, &ev, None);
+        chrome_pointer(&on_chrome, &ev, false);
     }));
     window.setAcceptsMouseMovedEvents(true);
 

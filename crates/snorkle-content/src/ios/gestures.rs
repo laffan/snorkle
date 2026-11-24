@@ -10,7 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{define_class, msg_send, sel, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::NSObjectProtocol;
-use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState};
+use objc2_ui_kit::{UIGestureRecognizer, UIGestureRecognizerDelegate, UIGestureRecognizerState, UIView};
 
 use super::bindings::WKWebView;
 use crate::webkit::delegates::TabIvars;
@@ -110,11 +110,14 @@ pub struct HoverIvars {
     pub events: Rc<dyn ContentEvents>,
     near: Cell<bool>,
     last: Cell<Option<std::time::Instant>>,
+    /// Whether the pointer was over the chrome when last reported
+    /// (`ContentEvents::chrome_pointer`).
+    on_chrome: Cell<Option<bool>>,
 }
 
 impl HoverIvars {
     pub fn new(events: Rc<dyn ContentEvents>) -> Self {
-        HoverIvars { events, near: Cell::new(false), last: Cell::new(None) }
+        HoverIvars { events, near: Cell::new(false), last: Cell::new(None), on_chrome: Cell::new(None) }
     }
 }
 
@@ -146,6 +149,15 @@ define_class!(
             let state = g.state();
             let p = g.locationInView(g.view().as_deref());
             let hovering = matches!(state, UIGestureRecognizerState::Began | UIGestureRecognizerState::Changed);
+            // Over the chrome: hovering, and the view under the pointer is
+            // not in a page's container (holes leave the container out).
+            let on_chrome = hovering
+                && p.x.is_finite()
+                && p.y.is_finite()
+                && g.view().and_then(|root| root.hitTest_withEvent(p, None)).is_some_and(|hit| !in_page(&hit));
+            if i.on_chrome.replace(Some(on_chrome)) != Some(on_chrome) {
+                i.events.chrome_pointer(on_chrome);
+            }
             if hovering && p.x.is_finite() && p.y.is_finite() && p.x <= EDGE_ZONE {
                 let now = std::time::Instant::now();
                 if i.near.get() && i.last.get().is_some_and(|t| now.duration_since(t).as_millis() < 33) {
@@ -160,6 +172,19 @@ define_class!(
         }
     }
 );
+
+/// Whether `view` is a page's container or inside one (the chrome's web
+/// view is not).
+fn in_page(view: &UIView) -> bool {
+    let mut v: Option<Retained<UIView>> = Some(objc2::Message::retain(view));
+    while let Some(cur) = v {
+        if cur.downcast_ref::<super::keys::KeyContainer>().is_some() {
+            return true;
+        }
+        v = cur.superview();
+    }
+    false
+}
 
 impl HoverEdge {
     pub fn new(mtm: MainThreadMarker, ivars: HoverIvars) -> Retained<Self> {
