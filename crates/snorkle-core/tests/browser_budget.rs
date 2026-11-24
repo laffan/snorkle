@@ -91,9 +91,11 @@ fn session_restore_is_lazy() {
                 url_bar_attached: false,
                 name: None,
                 emoji: None,
+                ..Default::default()
             })
             .collect(),
         active: Some(3),
+        ..Default::default()
     };
     let out = b.restore_session(&s, 0);
     let creates = out.iter().filter(|e| matches!(e, Effect::CreateView { .. })).count();

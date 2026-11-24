@@ -45,6 +45,13 @@
 //!   the same handler; `notebook::parse_report` parses them strictly. The
 //!   notebook's quote button reads the sentence under a point with
 //!   [`read_now`] (`notebook::drop_js`, two numbers) when it is let go.
+//! - Pin guard (channel C25, every page, owner request 2026-11-24): a
+//!   constant watcher (`snorkle_core::pinguard::watch_js`) added with the
+//!   selection watcher, inert until the host sets one boolean in the
+//!   client world for a pin's tab (`pinguard::set_js`, with [`run_now`]);
+//!   then it stops real clicks on links to other pages and posts their
+//!   address, or `{"pin":"tap"}` for other real clicks, to the same
+//!   handler; `pinguard::parse_report` parses them strictly.
 //! - Save for Later (channel C22, owner request 2026-11-09): [`call_async`]
 //!   runs `snorkle_core::later`'s constant capture code in the client world
 //!   when the user saves a page or adds pages to a saved one, and reads
@@ -233,7 +240,8 @@ pub fn make_scripts(
             &NSString::from_str(
                 &(snorkle_core::selection::watch_js()
                     + &snorkle_core::imagemenu::watch_js()
-                    + &snorkle_core::notebook::watch_js()),
+                    + &snorkle_core::notebook::watch_js()
+                    + &snorkle_core::pinguard::watch_js()),
             ),
             WKUserScriptInjectionTime::AtDocumentEnd,
             true,

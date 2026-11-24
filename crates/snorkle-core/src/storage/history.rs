@@ -47,11 +47,19 @@ impl Store {
             Some(u) => {
                 b.url = u;
                 b.title = clean_title(&b.title);
+                b.group = None;
                 true
             }
             None => false,
         });
         pins.truncate(MAX_PINS);
+        let mut bookmark_groups: Vec<BookmarkGroup> = load_or_reset(&dir.join(groups::BOOKMARK_GROUPS_FILE));
+        let mut seen = BTreeSet::new();
+        bookmark_groups.retain_mut(|g| {
+            g.name = crate::browser::clean_group_name(&g.name);
+            valid_bookmark_group_id(&g.id) && seen.insert(g.id.clone())
+        });
+        groups::tidy_bookmark_groups(&mut bookmarks, &mut bookmark_groups);
         let mut ai_usage: Vec<AiUsageEvent> = load_or_reset::<Vec<AiUsageEvent>>(&dir.join(AI_USAGE_FILE))
             .into_iter()
             .filter(|e| crate::ai::validate_model(&e.model).is_ok())
@@ -84,6 +92,7 @@ impl Store {
                 user_scripts,
                 ai_usage,
                 pins,
+                bookmark_groups,
                 chats,
                 launch_modes,
                 blocked,

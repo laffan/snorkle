@@ -109,6 +109,9 @@ pub struct TabIcons {
     bookmarks: std::collections::HashMap<String, String>,
     /// Host → `data:image/png;base64,…`.
     icons: std::collections::HashMap<String, String>,
+    /// Host → the icon's copy for the dark appearance (2026-11-24), for
+    /// icons too dark to see there (sent with the icon).
+    dark: std::collections::HashMap<String, String>,
 }
 
 /// Hosts come from the core's committed URLs, not from the caller. Missing
@@ -129,28 +132,36 @@ pub async fn tab_icons(s: S<'_>, have: Vec<String>) -> Result<TabIcons, String> 
             })
             .collect()
     };
-    let mut out = TabIcons { tabs: Default::default(), bookmarks: Default::default(), icons: Default::default() };
+    let mut out = TabIcons {
+        tabs: Default::default(),
+        bookmarks: Default::default(),
+        icons: Default::default(),
+        dark: Default::default(),
+    };
     let Some(store) = s.store.clone() else { return Ok(out) };
-    let want = |host: &String, private: bool, icons: &mut std::collections::HashMap<String, String>| {
-        if have.contains(host) || icons.contains_key(host) {
+    let want = |host: &String, private: bool, out: &mut TabIcons| {
+        if have.contains(host) || out.icons.contains_key(host) {
             return;
         }
         match store.icon(host).and_then(|png| snorkle_core::storage::png_data_url(&png)) {
             Some(url) => {
-                icons.insert(host.clone(), url);
+                out.icons.insert(host.clone(), url);
+                if let Some(dark) = store.icon_dark(host).and_then(|png| snorkle_core::storage::png_data_url(&png)) {
+                    out.dark.insert(host.clone(), dark);
+                }
             }
             None if !private => crate::pins::fetch_icon(&s, host.clone()),
             None => {}
         }
     };
     for (id, host, private) in pages {
-        want(&host, private, &mut out.icons);
+        want(&host, private, &mut out);
         out.tabs.insert(id, host);
     }
     // Bookmarks are never private (private tabs cannot be bookmarked).
     for b in store.bookmarks() {
         if let Some(host) = snorkle_core::storage::favicon_host(&b.url) {
-            want(&host, false, &mut out.icons);
+            want(&host, false, &mut out);
             out.bookmarks.insert(b.url, host);
         }
     }

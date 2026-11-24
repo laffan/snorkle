@@ -25,6 +25,7 @@ pub mod input;
 pub mod later;
 pub mod notebook;
 pub mod os;
+pub mod pinguard;
 pub mod policy;
 pub mod selection;
 pub mod storage;

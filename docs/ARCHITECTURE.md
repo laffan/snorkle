@@ -94,7 +94,7 @@ processes as for Safari.
 
 | # | Boundary | Direction | Mechanism | Enforced by |
 |---|---|---|---|---|
-| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). Exception, only when the user sends a page-chat message: the result of one constant script (title, visible text, selection) is read back (§5g, C17). Exception, only when the user saves a page for later or adds pages to a saved one: constant capture code reads back the page's HTML, the URLs it loaded and those resources (§5b, C22; on AI chat sites the conversation's turns as node trees, C22b). Exception, the Notebook (§5i, C23): a client-world watcher reports ⌥-click and ⌥-drag geometry, and the sentence under the quote button is read back when it is let go. | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
+| B1 | Web content → app process | page → native | **None by design.** Content `WKWebView`s get no `WKScriptMessageHandler` or `WKURLSchemeHandler`, and are not Tauri webviews, so no Tauri IPC script, invoke key or `ipc:` scheme exists in them. The only data that crosses is WebKit-generated metadata in delegate callbacks (URL, frame, navigation type, NSError, title via KVO). The only injected code is the user's own scripts and the view-mode styles (black and white, hidden images), in the isolated client world with no way to send messages back (§5c). Exception, only while console recording is on: a console hook in the page world posts page console output to one message handler (§5d, SECURITY_REVIEW C13). Exception, only when the user sends a page-chat message: the result of one constant script (title, visible text, selection) is read back (§5g, C17). Exception, only when the user saves a page for later or adds pages to a saved one: constant capture code reads back the page's HTML, the URLs it loaded and those resources (§5b, C22; on AI chat sites the conversation's turns as node trees, C22b). Exception, the Notebook (§5i, C23): a client-world watcher reports ⌥-click and ⌥-drag geometry, and the sentence under the quote button is read back when it is let go. Exception, pins keep their page (§5k, C25): in a pin's tab only, a client-world watcher stops real clicks on links to other pages and reports their address (or that a real click happened). | `CONTENT_VIEW_SPEC` (compile-time assert in `ios/mod.rs`), `tests/content_view_spec.rs`, `src-tauri/tests/channel_tripwire.rs`, on-device `tests/device/ipc-probe.html` |
 | B2 | Chrome UI → Rust commands | chrome → native | Tauri IPC with app ACL manifest (`build.rs`): every app command and core plugin command is checked against `capabilities/chrome.json`, which grants every app command in `command_list.rs` and `event:listen/unlisten` to webview label `main`, local origin only. No `remote` URLs, no window-label grants, `dynamic-acl` feature compiled out. | Tauri runtime authority; `src-tauri/tests/ipc_isolation.rs`, `config_hardening.rs` |
 | B3 | Rust → chrome | native → chrome | `emit_to("main", "state" \| "toast" \| "progress" …)` (`progress`: a tab's load progress alone, 2026-11-23). Payload is core state. Page-derived strings (titles, hosts) are sanitised in Rust (`text::sanitize_page_text`: bidi and control characters removed, length capped) and rendered with `textContent` only. | `text.rs` tests, `channel_tripwire.rs` (no `innerHTML` and similar) |
 | B4 | Content pixels ↔ chrome pixels | visual | Content containers sit in their own UIViews inside the content area (between the status bar, the sidebar and any docked panel; down to the bottom of the window), `clipsToBounds`. The URL pill, its popup and toasts float over the content area as **holes**: every container is masked there and does not take touches there, so the chrome below shows through and a page can never draw over or under them (§5f). Element fullscreen is disabled. Interstitials, prompts and errors are drawn by the chrome while the content view is hidden, never inside page content. Other chrome overlays hide content (`set_chrome_layout(overlay)`). | `ios/mod.rs` (`apply_mask`), `ios/keys.rs` (`pointInside`), `snorkle_content::sanitize_holes`, `Browser::sync_visibility`, `browser_invariants.rs` |
@@ -367,7 +367,7 @@ returns its position, "3/12" (C18). Nothing is selected, so the selection menu s
 ↩ / ⇧↩ in the bar and ⌘G / ⌘⇧G anywhere step through the matches, wrapping (⌘G opens the bar
 if it is closed).
 
-Keyboard shortcuts (`snorkle_content::SHORTCUTS`) are key commands vended by the app delegate
+Keyboard shortcuts (`snorkle_content::SHORTCUTS`; since 2026-11-24 also ⌘⇧N New Private Tab, and ⌘D on a pin's tab bookmarks the pin, §5k) are key commands vended by the app delegate
 (`keyCommands`, added to tao's class at runtime), the last responder in every chain, so they
 work whatever has focus, including nothing (sidebar hidden, no page). They are not menu-bar
 items any more (as menu items they stopped working, apparently from the menu system's
@@ -444,7 +444,15 @@ tab is closed. Refused for a page already saved.
 
 **Tab and bookmark favicons** (2026-11-04): each tab and bookmark row shows its site's icon, fetched and stored the same way
 as pins' (F1: a sandboxed, script-free web view loads `https://<host>/favicon.ico`; the app keeps
-only a PNG it redrew itself, `icons-v3/`). The chrome asks `tab_icons` when its tabs' addresses
+only a PNG it redrew itself, `icons-v5/`). **Dark copies** (2026-11-24): an icon too dark to see on
+the dark chrome (what is visible of it has a mean brightness under 0.3 and under 10% of it is
+light; `favicon::needs_dark_variant`, on the app's own 128 × 128 bitmap) is drawn a second time with
+each pixel's lightness turned around and its hue, saturation and alpha kept
+(`favicon::make_dark_variant`; black becomes white, mid tones such as a pure red stay), and stored
+beside it (`icons-v5/dark/`). `list_pins` and `tab_icons` send both; the chrome shows the copy while
+it is dark (Settings → Appearance, the system's, or a private tab's always-dark chrome) and
+switches when that changes. The cache moved from `icons-v4` to `icons-v5`, so icons are fetched
+once more. The chrome asks `tab_icons` when its tabs' addresses
 change; Rust maps each tab to its host from the committed URL and returns stored icons the chrome
 lacks, and queues a fetch (once per host per session) only for non-private tabs, so a private
 visit is never fetched or written to disk. An `icons` event follows each stored icon. Bundled
@@ -509,9 +517,11 @@ smaller; sites that serve an enlarged layout to a narrow iPad window get their w
 2026-11-03 this was `WKWebView.pageZoom`, which scaled text and boxes inside the same viewport.)
 
 **Pins and bookmarks:** opening one returns to its tab as it was left (since 2026-11-03; before,
-it always loaded the item's page again). Right-click or ⌘-click on one opens its menu: Copy URL (the page its tab shows, or the saved
+it always loaded the item's page again). Right-click on one (⌘-click on a pin) opens its menu: Copy URL (the page its tab shows, or the saved
 address if it has no tab), Edit… and Return to Original URL (its tab loads the saved address);
-tabs get the same menu on right-click without Return to Original URL. **Edit** (2026-11-09) is one
+tabs get the same menu on right-click without Return to Original URL. Since 2026-11-24 the menu also
+has the group actions, Remove and Send to (§5l, §5m), and ⌘-click on a bookmark or tab chooses it
+instead (§5m). **Edit** (2026-11-09) is one
 dialog for tabs, pins and bookmarks: title, URL and an emoji shown instead of the favicon (typed, or
 chosen from a grid of common emoji). For a pin or bookmark the URL is read like the address bar
 (addresses only; place is kept, its tab follows via `Browser::rekey_launcher`, its offline copy is
@@ -864,6 +874,98 @@ taller than 60% of the view) and highlights each block briefly, as the headers v
 of the elements is gone (the page was reloaded, or a script redrew it), the page is read into
 blocks again the same way and those are used, so a reload of the same content still lands on
 the same text. Points the model gave no valid block are shown without a link.
+
+## 5k. Pins keep their page (2026-11-24)
+
+A pin's tab stays on the page it shows. Going elsewhere from it opens the page in a new ordinary tab
+(the pin's profile and session, at the end of the list, shown at once; Back there loads the pin's
+page), so the pin stays as it was and the new tab can be bookmarked or closed. The core knows the
+pins' URLs (`Browser::set_pins`, sent at launch and after every pin change) and acts only in a pin's
+own tab (not private, not a sheet or saved copy):
+
+- a link the user follows (`decide_navigation`, main frame, `LinkActivated`) whose address, fragment
+  aside, differs from the page shown: cancelled, opened in the new tab through
+  `on_background_tab_request` (the navigation policy as a link with a user gesture);
+- an address typed in the bar there (`navigate_input`), unless it is the page shown;
+- single-page apps (`history.pushState` from their own click handlers, no navigation): a constant
+  watcher in every page's client world (`pinguard::watch_js`, channel C25), inert until the host
+  turns the guard on for a pin's tab (`Effect::PinGuard`, after each commit and finished load; off
+  when the tab stops being a pin's), stops a real plain click on a link to another page before the
+  page's handlers see it and reports the address (`on_pin_link`); any other real click or Return /
+  space is reported as a tap (`on_pin_gesture`), and a same-origin address change within 1.5 s of
+  one (`on_url_changed`, `GESTURE_WINDOW_MS`) opens the new address in a new tab and sends the pin
+  back (`GoBack`, or a load of its previous address when it has no history).
+
+Left in the pin on purpose: redirects and address changes the page makes without a user action
+(a site moving to its real address, or rewriting it after loading), form submissions (a sign-in form
+posts there; its data cannot be sent again in another tab), back/forward and reload, fragment-only
+changes (Gmail's views), and the browser's own loads (opening the pin, Return to Original URL). A pin
+sends at most 10 pages a minute (`MAX_DIVERTS`); past that its links are followed in place. Bookmarks'
+tabs are not guarded.
+
+⌘D on a pin's tab (before: "This is a pinned site's tab.") bookmarks the pin's address and title; the
+pin stays, and since the bookmark has the same address, opening it comes back to the pin's tab. While
+the address is both, removing either leaves the tab bound to the other.
+
+## 5l. Research sessions (2026-11-24)
+
+A research session is a fresh sidebar (no pins, no bookmarks: only its own tabs) and its own
+notebook. Every tab belongs to everyday browsing (`Tab::space` `None`) or to one session; the session
+shown is the active tab's (`Browser::space`), so choosing a tab of another session switches to it.
+Menu → New Research Session makes one (`new_research`: an id `r` + the wall-clock time, a topic,
+entered at once with an empty tab) and puts its topic in place to be typed. Its topic heads the tab
+list beside a back button to everyday browsing (`enter_research(None)`: the tab used there last, a
+pin's or bookmark's included); pointing at it shows a pencil, and the topic itself is a button that
+renames in place. Every session is a row at the foot of the sidebar, above its buttons (its name and
+tab count; a click enters it, or leaves it when it is shown; its × or right-click → Delete Session…
+closes its tabs and deletes its notebook, after a confirmation; right-click → Rename).
+
+New tabs, popups and ⌘-clicked links open in their opener's session; closing a session's last tab
+opens an empty one there (the session stays until deleted). Pins' and bookmarks' tabs are everyday
+browsing's. The start page in a session offers its own tabs and history, not pins or bookmarks.
+History and Downloads are shared.
+
+**Send to** (every tab's, pin's and bookmark's menu; a group's too): everyday browsing, the other
+sessions and New Research Session. Tabs are moved (`send_tabs`: they leave their pair and group and go
+to the end of that session's list; a sheet goes with its opener; when the tab shown is sent away, the
+session shown stays and shows its last-used tab or a new one). A pin's or bookmark's page is copied
+(`send_page`: a new tab there, unloaded until chosen). Sent to a new session, the session is entered
+with the first tab sent shown.
+
+**Notebook**: one per session (`notebooks/<id>.json`; everyday browsing keeps `notebook.json`),
+checked the same way (`notebook::clean`). Moving between sessions saves the shown notebook and loads
+the other's; `load_notebook` / `save_notebook` name the session, and a session the core does not have
+is refused (a deleted session's late save is dropped). A session's notebook is open by default (the
+chrome remembers closing it there, `nbClosed:<id>`); everyday browsing's opens as last left.
+
+Saved with the session (`Session::research`, `SessionTab::space`); a launch greets the user in the
+session they were in. At most 50 sessions; topics are cleaned like titles (≤ 80 characters).
+
+## 5m. Tab groups and bookmark groups (2026-11-24)
+
+Rows are chosen with ⌘-click (adds or removes one; the tab shown is chosen with the first) and
+⇧-click (every row from the last clicked, folded groups skipped), tabs or bookmarks, one kind at a
+time; a plain click opens a row and ends the choice, as does Escape. Right-click on a chosen row acts
+on all of them: Group These Tabs / Bookmarks (one row: Add to New Group), Remove from Group, Remove
+(closes tabs, removes bookmarks) and Send to (§5l). A new group's name is ready to be typed.
+
+A **tab group** (core: `Browser::groups`, `Tab::group`) is a named, foldable run of tabs of one
+profile and one session; its tabs stay next to each other (`compact_groups`). Its heading shows the
+name and the number of tabs; a click folds or unfolds it, a double-click renames it in place, × closes
+its tabs (after a confirmation), and right-click offers Rename, Ungroup, Move to Bookmarks (each tab
+with a page is bookmarked and becomes that bookmark's tab, in one bookmark group of the same name;
+also by dragging the heading into the bookmarks bar), Remove and Send to. Tabs opened from a grouped
+tab join its group; ⌘T opens after the group. Dragging a tab next to a group's tab puts it in that
+group (the heading's top half: before the group; its bottom half: first in it); elsewhere, out of it.
+A tab leaving the list (bookmarked, sent to another session) leaves its group; a group without tabs
+goes. Pinned and bookmarked items' tabs, popups and saved copies are never in one. Saved with the
+session (`Session::groups`, `SessionTab::group`), private tabs' groups never.
+
+A **bookmark group** (store: `bookmark-groups.json`, `Bookmark::group`, ids `g` + digits) is the same
+in the bookmarks bar: its bookmarks stay together (`tidy_bookmark_groups`, on every change and when
+read), dragging a bookmark (or a tab) into its box puts it there, and its heading offers Rename,
+Ungroup, Remove (its bookmarks) and Send to (copies). The pinned grid has no groups. Same-site
+headings (§5b) are unchanged and apply only to tabs outside a group.
 
 ## 6. Credentials
 

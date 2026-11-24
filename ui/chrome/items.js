@@ -95,12 +95,14 @@ function renderPins() {
     } else if (p.icon && p.icon.startsWith('data:image/png;base64,')) {
       const img = el('img');
       img.alt = '';
+      // Too dark for a dark chrome: its light copy (2026-11-24).
+      const icon = chromeDark() && p.icon_dark && p.icon_dark.startsWith('data:image/png;base64,') ? p.icon_dark : p.icon;
       // Never show a broken image: fall back to the letter tile.
       img.addEventListener('error', () => {
         chromeLog('warn', `favicon for ${p.display.registrable} could not be displayed (${p.icon.length} chars)`);
         img.replaceWith(letterTile(p.display));
       });
-      img.src = p.icon;
+      img.src = icon;
       open.appendChild(img);
     } else {
       open.appendChild(letterTile(p.display));
@@ -110,7 +112,13 @@ function renderPins() {
       if (ev.metaKey) { openPinPop(p, node); return; } // ⌘-click: the pin menu
       openLink(p.url);
     });
-    node.addEventListener('contextmenu', (ev) => { ev.preventDefault(); cancelPending(); openPinPop(p, node); });
+    node.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      cancelPending();
+      openPinPop(p, node);
+      fillItemMore('pin', [p.url]);
+      placePinPop(node);
+    });
     const rm = el('button', 'unpin', '\u00D7');
     rm.setAttribute('aria-label', 'Unpin');
     rm.addEventListener('click', (ev) => {
@@ -138,6 +146,8 @@ function openPinPop(p, node, kind = 'pin') {
   for (const e of pop.querySelectorAll('.pin-only')) e.hidden = kind !== 'pin';
   for (const e of pop.querySelectorAll('.item-only')) e.hidden = kind === 'tab';
   $('item-copy').hidden = kind === 'tab' && !p.url;
+  $('item-edit').hidden = false;
+  $('item-more').replaceChildren();
   pop.hidden = false;
   syncMenuOpen();
 }
@@ -284,16 +294,30 @@ $('edit-form').addEventListener('submit', async (ev) => {
 
 // ---- bookmarks bar ------------------------------------------------------
 
+// Groups of bookmarks (2026-11-24): their bookmarks name them (`group`)
+// and are next to each other in the list.
+let bookmarkGroups = [];
 function loadBookmarks() {
-  return T.core.invoke('list_bookmarks').then((items) => { bookmarks = items; renderBookmarks(); }).catch(() => {});
+  return Promise.all([T.core.invoke('list_bookmarks'), T.core.invoke('list_bookmark_groups')])
+    .then(([items, groups]) => { bookmarks = items; bookmarkGroups = groups; renderBookmarks(); })
+    .catch(() => {});
 }
 
 function renderBookmarks() {
   const list = $('bookmarks');
   list.replaceChildren();
   if (!bookmarks.length) return; // see renderPins
+  let box = null;
   bookmarks.forEach((b, index) => {
-    const node = el('div', 'bm');
+    const g = b.group && bookmarkGroups.find((x) => x.id === b.group);
+    if (!g) box = null;
+    else if (!box || box.dataset.group !== g.id) {
+      const members = bookmarks.filter((x) => x.group === g.id);
+      box = groupNode('bookmark', g, members.length, members.some((x) => x.url === selectedLauncher()));
+      list.appendChild(box);
+    }
+    const node = el('div', 'bm' + (g ? ' child' : ''));
+    if (g) node.dataset.bgroup = g.id;
     node.dataset.index = String(index);
     node.dataset.url = b.url;
     node.appendChild(b.emoji ? emojiIcon(b.emoji) : rowIcon(b.url, b.display, tabIcons.bookmarks.get(b.url)));
@@ -303,10 +327,19 @@ function renderBookmarks() {
     open.title = b.display.registrable;
     open.addEventListener('click', (ev) => {
       if (suppressClick) return;
-      if (ev.metaKey) { openPinPop(b, node, 'bookmark'); return; } // ⌘-click: the item menu
+      // ⌘- and ⇧-click choose bookmarks (2026-11-24; until then ⌘-click
+      // opened the item menu, which right-click still does).
+      if (chooseClick(ev, node)) return;
       openLink(b.url);
     });
-    node.addEventListener('contextmenu', (ev) => { ev.preventDefault(); cancelPending(); openPinPop(b, node, 'bookmark'); });
+    node.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      cancelPending();
+      const keys = menuTargets('bookmark', b.url);
+      openPinPop(b, node, 'bookmark');
+      fillItemMore('bookmark', keys);
+      placePinPop(node);
+    });
     const rm = el('button', 'close', '×');
     rm.setAttribute('aria-label', 'Remove bookmark');
     rm.addEventListener('click', (ev) => {
@@ -316,9 +349,10 @@ function renderBookmarks() {
     const acts = el('span', 'row-actions');
     acts.appendChild(rm);
     node.append(open, acts);
-    node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'bookmark', url: b.url, index }));
-    list.appendChild(node);
+    node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'bookmark', url: b.url, index, group: b.group || null }));
+    (box || list).appendChild(node);
   });
   if (state) { renderLauncherSelection(); renderToolbar(activeTab()); }
   refreshTabIcons(false);
+  afterRender();
 }

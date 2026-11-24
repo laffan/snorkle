@@ -285,7 +285,7 @@ fn single_page_app_moving_to_a_blocked_address_is_hidden() {
     assert!(b.view().content_visible);
 
     // pushState to a blocked address: the page is hidden behind the notice.
-    let out = b.on_url_changed(t, u("https://www.youtube.com/shorts/abc"));
+    let out = b.on_url_changed(t, u("https://www.youtube.com/shorts/abc"), 0);
     assert!(out.contains(&Effect::HideView(t)));
     assert!(user_blocked(&b, t));
 
@@ -300,8 +300,8 @@ fn single_page_app_moving_to_a_blocked_address_is_hidden() {
 
     // The page leaves the blocked address: shown again.
     block(&mut b, &["youtube\\.com/shorts"]);
-    b.on_url_changed(t, u("https://www.youtube.com/shorts/abc"));
-    let out = b.on_url_changed(t, u("https://www.youtube.com/"));
+    b.on_url_changed(t, u("https://www.youtube.com/shorts/abc"), 0);
+    let out = b.on_url_changed(t, u("https://www.youtube.com/"), 0);
     assert!(out.contains(&Effect::ShowView { tab: t, pane: Pane::Full }));
     assert_eq!(notice(&b, t), None);
 }
@@ -354,12 +354,12 @@ fn tabs_reorder_and_keep_their_labels_across_launches() {
     let (d, _) = b.new_tab(Profile::Default, 0);
     webkit_load(&mut b, d, "https://d.example/");
     let order = |b: &Browser| b.view().tabs.iter().map(|t| t.id).collect::<Vec<_>>();
-    let out = b.move_tab(d, Some(a));
+    let out = b.move_tab(d, Some(a), None);
     assert_eq!(order(&b), vec![d, a, c]);
     assert!(out.iter().any(|e| matches!(e, Effect::PersistSession(s) if s.tabs[0].url == "https://d.example/")));
-    b.move_tab(d, None);
+    b.move_tab(d, None, None);
     assert_eq!(order(&b), vec![a, c, d], "None moves to the end");
-    assert!(b.move_tab(a, Some(a)).is_empty() && b.move_tab(a, Some(TabId(999))).is_empty());
+    assert!(b.move_tab(a, Some(a), None).is_empty() && b.move_tab(a, Some(TabId(999)), None).is_empty());
     assert_eq!(order(&b), vec![a, c, d]);
 
     b.set_tab_label(c, Some("  Reading \u{202e}list "), Some("📚")).unwrap();

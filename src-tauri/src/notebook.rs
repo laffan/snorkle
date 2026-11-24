@@ -53,23 +53,37 @@ fn wait<T>(rx: mpsc::Receiver<T>, limit: Duration) -> Option<T> {
 
 /// The notebook as stored (checked again as it is read), or `None`.
 #[tauri::command]
-pub async fn load_notebook(s: S<'_>) -> Result<Option<String>, String> {
+pub async fn load_notebook(s: S<'_>, space: Option<String>) -> Result<Option<String>, String> {
+    if !known_space(&s, space.as_deref()) {
+        return Ok(None);
+    }
     let shared = s.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || shared.store.as_ref().and_then(|st| st.notebook()))
+    // A research session's own notebook (2026-11-24), or everyday browsing's.
+    tauri::async_runtime::spawn_blocking(move || shared.store.as_ref().and_then(|st| st.notebook_in(space.as_deref())))
         .await
         .map_err(|_| "Couldn't read the notebook.".to_string())
 }
 
+/// Everyday browsing (`None`) or a research session the core has.
+fn known_space(s: &S<'_>, space: Option<&str>) -> bool {
+    space.is_none_or(|id| s.browser().research().iter().any(|r| r.id == id))
+}
+
 /// Stores the notebook (checked and rebuilt: `notebook::clean`).
 #[tauri::command]
-pub async fn save_notebook(s: S<'_>, notebook: String) -> Result<(), String> {
+pub async fn save_notebook(s: S<'_>, notebook: String, space: Option<String>) -> Result<(), String> {
+    // A deleted session's last save (it can arrive after the delete) is
+    // dropped rather than writing its notebook again.
+    if !known_space(&s, space.as_deref()) {
+        return Ok(());
+    }
     if notebook.len() > notebook::MAX_NOTEBOOK_BYTES {
         return Err("The notebook is too large to save (64 MB). Delete some clips.".into());
     }
     let shared = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let store = shared.store.as_ref().ok_or("Saving is not available.")?;
-        match store.set_notebook(&notebook) {
+        match store.set_notebook_in(space.as_deref(), &notebook) {
             Ok(true) => Ok(()),
             Ok(false) => Err("The notebook could not be saved.".to_string()),
             Err(e) => Err(format!("The notebook could not be saved: {e}")),

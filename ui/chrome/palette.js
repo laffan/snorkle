@@ -42,15 +42,18 @@ function paletteCandidates() {
   const out = [];
   if (state) {
     for (const t of state.tabs) {
-      // Empty tabs (this one included) are not worth switching to.
-      if (t.sheet_over !== null || t.launcher !== null || t.saved || !t.url) continue;
+      // Empty tabs (this one included) are not worth switching to; a
+      // research session's start page offers its own tabs only.
+      if (!listedHere(t) || !t.url) continue;
       out.push({ kind: t.private ? 'Private' : 'Tab', title: t.name || t.title || t.url.registrable, host: t.url.registrable, run: (here) => leaveStart(here, invoke('activate_tab', { tab: t.id })) });
     }
   }
-  for (const p of pins) out.push({ kind: 'Pinned', title: p.title || p.display.registrable, host: p.display.registrable, run: (here) => leaveStart(here, openLink(p.url)) });
-  for (const b of bookmarks) out.push({ kind: 'Bookmark', title: b.title || b.display.registrable, host: b.display.registrable, run: (here) => leaveStart(here, openLink(b.url)) });
+  // Pins and bookmarks are everyday browsing's (2026-11-24).
+  const research = !!(state && state.space);
+  const items = research ? [] : [...pins.map((p) => ['Pinned', p]), ...bookmarks.map((b) => ['Bookmark', b])];
+  for (const [kind, p] of items) out.push({ kind, title: p.title || p.display.registrable, host: p.display.registrable, run: (here) => leaveStart(here, openLink(p.url)) });
   // History, after the rest; pages already pinned or bookmarked once.
-  const seen = new Set([...pins.map((p) => p.url), ...bookmarks.map((b) => b.url)]);
+  const seen = new Set(items.map(([, p]) => p.url));
   for (const h of paletteHistory) {
     if (seen.has(h.url)) continue;
     seen.add(h.url);
@@ -164,13 +167,22 @@ function openNewTab(priv) {
 // page (or nothing) has keyboard focus, and focusing inside the chrome's
 // web view does nothing until that web view is first responder: ask the
 // host for it, then focus again.
+// The input asked for last: an earlier request's retries never take the
+// focus from it (2026-11-24: the start page of a new research session
+// took it back from the topic being named).
+let focusWanted = null;
 function focusInput(input, select) {
-  const go = () => { input.focus({ preventScroll: true }); if (select) input.select(); };
+  focusWanted = input;
+  const go = () => {
+    if (focusWanted !== input) return;
+    input.focus({ preventScroll: true });
+    if (select) input.select();
+  };
   go();
   const ask = () => T.core.invoke('focus_chrome').catch(() => {}).finally(() => { go(); requestAnimationFrame(go); });
   // Right after the app returns from another app, the first request can
   // come too early for UIKit: ask once more if focus did not land.
-  ask().then(() => setTimeout(() => { if (!input.hidden && document.activeElement !== input) ask(); }, 150));
+  ask().then(() => setTimeout(() => { if (focusWanted === input && !input.hidden && document.activeElement !== input) ask(); }, 150));
 }
 
 // Back from another app: a shown start page or open find bar gets focus
@@ -211,6 +223,9 @@ function cycleTab(step) {
   for (const t of state.tabs) if (t.launcher !== null && t.sheet_over === null && !t.private) launcherTabs.set(t.launcher, t.id);
   const ids = [];
   for (const n of $('sidebar').querySelectorAll('.pin[data-url], .bm[data-url], .tab[data-tab]')) {
+    // Not the pins and bookmarks a research session hides, nor the tabs
+    // of a folded group (2026-11-24).
+    if ((state.space && !n.classList.contains('tab')) || n.closest('.collapsed')) continue;
     const id = n.dataset.tab !== undefined ? Number(n.dataset.tab) : launcherTabs.get(n.dataset.url);
     if (id !== undefined && !ids.includes(id)) ids.push(id);
   }

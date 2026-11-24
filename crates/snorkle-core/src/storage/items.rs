@@ -9,21 +9,14 @@ impl Store {
     /// again as it is read (`notebook::clean`); `None` when there is none
     /// or it cannot be read.
     pub fn notebook(&self) -> Option<String> {
-        let bytes = fs::read(self.dir.join(NOTEBOOK_FILE)).ok()?;
-        if bytes.len() > crate::notebook::MAX_NOTEBOOK_BYTES {
-            return None;
-        }
-        crate::notebook::clean(std::str::from_utf8(&bytes).ok()?)
+        self.notebook_in(None)
     }
 
     /// Writes the Notebook as the chrome sends it, checked and rebuilt
     /// (`notebook::clean`). `Ok(false)`: refused (not a notebook, too
     /// large). Writes are serialised (one temporary file).
     pub fn set_notebook(&self, json: &str) -> std::io::Result<bool> {
-        let Some(clean) = crate::notebook::clean(json) else { return Ok(false) };
-        let _one = self.notebook_lock.lock().unwrap_or_else(|e| e.into_inner());
-        atomic_write(&self.dir.join(NOTEBOOK_FILE), clean.as_bytes())?;
-        Ok(true)
+        self.set_notebook_in(None, json)
     }
 
     pub fn later(&self) -> &crate::later::LaterStore {
@@ -33,34 +26,29 @@ impl Store {
     /// Adds a bookmark; returns false if the URL is not storable or already
     /// bookmarked.
     pub fn add_bookmark(&self, url: &str, title: &str, now_ms: u64) -> std::io::Result<bool> {
-        let Some(url) = storable_url(url) else { return Ok(false) };
-        let snapshot = {
-            let mut d = self.data();
-            if d.bookmarks.iter().any(|b| b.url == url) || d.bookmarks.len() >= MAX_BOOKMARKS {
-                return Ok(false);
-            }
-            d.bookmarks.push(Bookmark { url, title: clean_title(title), created_ms: now_ms });
-            serde_json::to_vec(&d.bookmarks)?
-        };
-        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)?;
-        Ok(true)
+        self.insert_bookmark_in(url, title, usize::MAX, None, now_ms)
     }
 
     /// Bookmarks `url` at position `index` (clamped). Returns false if the
     /// URL is not storable or already bookmarked.
     pub fn insert_bookmark(&self, url: &str, title: &str, index: usize, now_ms: u64) -> std::io::Result<bool> {
+        self.insert_bookmark_in(url, title, index, None, now_ms)
+    }
+
+    /// Bookmarks `url` at `index` (clamped), in `group` if that group
+    /// exists (2026-11-24). False if the URL is not storable or already
+    /// bookmarked.
+    pub fn insert_bookmark_in(&self, url: &str, title: &str, index: usize, group: Option<&str>, now_ms: u64) -> std::io::Result<bool> {
         let Some(url) = storable_url(url) else { return Ok(false) };
-        let snapshot = {
-            let mut d = self.data();
+        self.change_bookmarks(|d| {
             if d.bookmarks.iter().any(|b| b.url == url) || d.bookmarks.len() >= MAX_BOOKMARKS {
-                return Ok(false);
+                return false;
             }
+            let group = group.filter(|g| d.bookmark_groups.iter().any(|x| x.id == *g)).map(str::to_string);
             let at = index.min(d.bookmarks.len());
-            d.bookmarks.insert(at, Bookmark { url, title: clean_title(title), created_ms: now_ms });
-            serde_json::to_vec(&d.bookmarks)?
-        };
-        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)?;
-        Ok(true)
+            d.bookmarks.insert(at, Bookmark { url, title: clean_title(title), created_ms: now_ms, group });
+            true
+        })
     }
 
     /// Changes the URL of a pin or bookmark ("Edit URL"), keeping its title,
@@ -136,16 +124,10 @@ impl Store {
     }
 
     /// Moves the bookmark for `url` to position `index` (clamped).
+    /// (Its group, if any, stays together: see [`Store::place_bookmark`].)
     pub fn move_bookmark(&self, url: &str, index: usize) -> std::io::Result<()> {
-        let snapshot = {
-            let mut d = self.data();
-            let Some(from) = d.bookmarks.iter().position(|b| b.url == url) else { return Ok(()) };
-            let b = d.bookmarks.remove(from);
-            let at = index.min(d.bookmarks.len());
-            d.bookmarks.insert(at, b);
-            serde_json::to_vec(&d.bookmarks)?
-        };
-        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)
+        let group = self.data().bookmarks.iter().find(|b| b.url == url).and_then(|b| b.group.clone());
+        self.place_bookmark(url, index, group.as_deref()).map(|_| ())
     }
 
     pub fn pins(&self) -> Vec<Bookmark> {
@@ -162,7 +144,7 @@ impl Store {
                 return Ok(false);
             }
             let at = index.min(d.pins.len());
-            d.pins.insert(at, Bookmark { url, title: clean_title(title), created_ms: now_ms });
+            d.pins.insert(at, Bookmark { url, title: clean_title(title), created_ms: now_ms, group: None });
             serde_json::to_vec(&d.pins)?
         };
         atomic_write(&self.dir.join(PINS_FILE), &snapshot)?;
@@ -314,13 +296,8 @@ impl Store {
 
     /// Removes a bookmark and returns it (to move it into the pinned grid).
     pub fn take_bookmark(&self, url: &str) -> std::io::Result<Option<Bookmark>> {
-        let (removed, snapshot) = {
-            let mut d = self.data();
-            let removed = d.bookmarks.iter().position(|b| b.url == url).map(|i| d.bookmarks.remove(i));
-            (removed, serde_json::to_vec(&d.bookmarks)?)
-        };
-        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)?;
-        Ok(removed)
+        let removed = self.change_bookmarks(|d| d.bookmarks.iter().position(|b| b.url == url).map(|i| d.bookmarks.remove(i)))?;
+        Ok(removed.map(|b| Bookmark { group: None, ..b }))
     }
 
     /// Cached favicon PNG for `host` (a validated ASCII host), if any.
@@ -333,13 +310,6 @@ impl Store {
     /// Stores a favicon PNG produced by the favicon fetcher. Rejects
     /// anything that is not a PNG or is too large.
     pub fn save_icon(&self, host: &str, png: &[u8]) -> std::io::Result<bool> {
-        let Some(host) = crate::blocking::normalise_site(host) else { return Ok(false) };
-        if !is_png(png) {
-            return Ok(false);
-        }
-        let dir = self.dir.join(ICONS_DIR);
-        fs::create_dir_all(&dir)?;
-        atomic_write(&dir.join(format!("{host}.png")), png)?;
-        Ok(true)
+        self.save_icons(host, png, None)
     }
 }

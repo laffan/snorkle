@@ -19,6 +19,14 @@ fn requested() -> &'static Mutex<HashMap<String, Instant>> {
     R.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Tells the core which URLs are pins (their tabs keep their page,
+/// `browser::pins`), after the pins changed and at launch.
+pub fn sync(shared: &Arc<Shared>) {
+    let keys: Vec<String> = shared.store.as_ref().map(|s| s.pins()).unwrap_or_default().into_iter().map(|p| p.url).collect();
+    let effects = shared.browser().set_pins(keys);
+    shared.run(effects);
+}
+
 /// Fetches favicons for pins that have none yet.
 pub fn refresh_icons(shared: &Arc<Shared>) {
     for pin in shared.store.as_ref().map(|s| s.pins()).unwrap_or_default() {
@@ -46,13 +54,16 @@ pub fn fetch_icon(shared: &Arc<Shared>, host: String) {
     }
     let s = shared.clone();
     let h = host.clone();
-    let done: snorkle_content::FaviconDone = Box::new(move |png| match png {
-        Some(png) if store.save_icon(&h, &png).unwrap_or(false) => {
-            s.log(Level::Info, None, &format!("favicon {h}: {}", png_summary(&png)));
+    // Icons too dark to see on the dark sidebar come with a copy for the
+    // dark appearance (2026-11-24; `favicon::make_dark_variant`).
+    let done: snorkle_content::FaviconDone = Box::new(move |icon| match icon {
+        Some(icon) if store.save_icons(&h, &icon.png, icon.dark.as_deref()).unwrap_or(false) => {
+            let dark = if icon.dark.is_some() { ", with a dark copy" } else { "" };
+            s.log(Level::Info, None, &format!("favicon {h}: {}{dark}", png_summary(&icon.png)));
             (s.emit)(ChromeEvent::PinsChanged);
             (s.emit)(ChromeEvent::IconsChanged);
         }
-        Some(png) => s.log(Level::Warn, None, &format!("favicon {h} refused: {}", png_summary(&png))),
+        Some(icon) => s.log(Level::Warn, None, &format!("favicon {h} refused: {}", png_summary(&icon.png))),
         None => s.log(Level::Info, None, &format!("favicon {h}: none (blank or timed out)")),
     });
     snorkle_content::dispatch_main(move || with_host(|host_view| host_view.fetch_favicon(host, done)));

@@ -8,6 +8,8 @@
 pub enum Shortcut {
     Reload,
     NewTab,
+    /// A new private tab (⌘⇧N, 2026-11-24).
+    NewPrivateTab,
     CloseTab,
     /// Reopen the most recently closed tab (⌘⇧T).
     ReopenTab,
@@ -113,6 +115,7 @@ pub(super) const fn def(
 /// Every native shortcut, with its default binding (⌘ plus `mods`).
 pub const SHORTCUTS: &[ShortcutDef] = &[
     def("new_tab", ShortcutMenu::File, "New Tab", "t", 0, Shortcut::NewTab),
+    def("new_private_tab", ShortcutMenu::File, "New Private Tab", "n", MOD_SHIFT, Shortcut::NewPrivateTab),
     def("reload", ShortcutMenu::View, "Reload Page", "r", 0, Shortcut::Reload),
     def("reopen_tab", ShortcutMenu::File, "Reopen Closed Tab", "t", MOD_SHIFT, Shortcut::ReopenTab),
     def("bookmark", ShortcutMenu::File, "Bookmark Page", "d", 0, Shortcut::Bookmark),
@@ -174,6 +177,7 @@ impl Shortcut {
         match self {
             Shortcut::Reload => "reload".into(),
             Shortcut::NewTab => "new_tab".into(),
+            Shortcut::NewPrivateTab => "new_private_tab".into(),
             Shortcut::CloseTab => "close_tab".into(),
             Shortcut::ReopenTab => "reopen_tab".into(),
             Shortcut::ToggleSidebar => "toggle_sidebar".into(),

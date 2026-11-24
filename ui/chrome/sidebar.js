@@ -29,6 +29,8 @@ function applyAppearance(mode) {
   else document.documentElement.dataset.theme = mode;
   $('appearance').value = mode;
   T.core.invoke('set_appearance', { mode }).catch(() => {});
+  // Favicons too dark for a dark chrome show their light copy.
+  if (typeof iconsThemeChanged === 'function') iconsThemeChanged();
 }
 applyAppearance(pref('appearance') || 'system');
 // Settings → General → Swipe between pages (WebKit's back/forward swipe

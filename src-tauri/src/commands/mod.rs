@@ -29,8 +29,10 @@ mod system;
 mod items;
 mod downloads;
 mod settings;
+mod groups;
 
 pub use tabs::*;
+pub use groups::*;
 pub use history::*;
 pub use page::*;
 pub use later::*;

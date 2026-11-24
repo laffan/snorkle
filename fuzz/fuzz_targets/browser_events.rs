@@ -73,7 +73,7 @@ fuzz_target!(|data: &[u8]| {
                     b.on_commit(id, u)
                 })
                 .unwrap_or_default(),
-            8 => pick(&tabs).map(|(id, p)| b.on_url_changed(id, url_for(p, c))).unwrap_or_default(),
+            8 => pick(&tabs).map(|(id, p)| b.on_url_changed(id, url_for(p, c), now)).unwrap_or_default(),
             9 => pick(&tabs).map(|(id, _)| b.on_finish(id)).unwrap_or_default(),
             10 => pick(&tabs)
                 .map(|(id, _)| {

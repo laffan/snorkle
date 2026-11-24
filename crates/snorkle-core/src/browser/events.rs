@@ -46,20 +46,23 @@ impl Browser {
         if !private {
             out.push(Effect::PersistSession(self.session()));
         }
+        out.extend(self.pin_guard_effect(id));
         self.sync_visibility(&mut out);
         out.push(Effect::NotifyChrome);
         out
     }
 
     /// KVO on `WKWebView.URL` outside of a commit (pushState, fragment).
-    /// Accepted only when same-origin with the committed URL.
-    pub fn on_url_changed(&mut self, id: TabId, url: Url) -> Vec<Effect> {
+    /// Accepted only when same-origin with the committed URL. In a pin's
+    /// tab, a change right after a real click is the user leaving the
+    /// pin's page (`pins.rs`).
+    pub fn on_url_changed(&mut self, id: TabId, url: Url, now: u64) -> Vec<Effect> {
         let Some(t) = self.tab_mut(id) else { return Vec::new() };
         if t.provisional {
             return Vec::new();
         }
-        match &t.committed_url {
-            Some(c) if url_display::same_origin(c, &url) && *c != url => {
+        match t.committed_url.clone() {
+            Some(c) if url_display::same_origin(&c, &url) && c != url => {
                 t.committed_url = Some(url);
                 let mut out = Vec::new();
                 // Single-page apps change address without a navigation
@@ -70,6 +73,7 @@ impl Browser {
                         t.notice = None;
                     }
                 }
+                self.pin_route_changed(id, c, now, &mut out);
                 self.sync_visibility(&mut out);
                 out.push(Effect::NotifyChrome);
                 out
@@ -91,6 +95,7 @@ impl Browser {
                 out.push(Effect::RecordHistory { url: u, title: t.title.clone() });
             }
         }
+        out.extend(self.pin_guard_effect(id));
         out.push(Effect::NotifyChrome);
         out
     }

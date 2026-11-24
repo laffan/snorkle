@@ -9,6 +9,16 @@ impl Browser {
         let target = match input::interpret(text, &self.search)? {
             Interpretation::Url(u) | Interpretation::Search(u) => u,
         };
+        // A pin's tab keeps its page (2026-11-24): another address typed
+        // there opens in a new tab at the end of the list.
+        if self.is_pin_tab(id) && self.leaves_page(id, &target) {
+            let mut out = Vec::new();
+            let space = self.tab(id).and_then(|t| t.space.clone());
+            let fresh = self.new_tab_in(Profile::Default, space, now, &mut out);
+            self.move_to_end(fresh);
+            out.extend(self.navigate_trusted(fresh, target, now));
+            return Ok(out);
+        }
         Ok(self.navigate_trusted(id, target, now))
     }
 
@@ -256,6 +266,14 @@ impl Browser {
                 return handled;
             }
         }
+        // A pin's tab keeps its page (2026-11-24): a link followed there
+        // opens in a new tab instead (`pins.rs`).
+        let pin_link = frame == Frame::Main && !own_load && kind == NavKind::LinkActivated;
+        if pin_link && self.is_pin_tab(id) && self.leaves_page(id, url) && self.divert_from_pin(id, url, now, &mut out).is_some() {
+            self.sync_visibility(&mut out);
+            out.push(Effect::NotifyChrome);
+            return (Verdict::Cancel, out);
+        }
         let Some(tab) = self.tab_mut(id) else { return (Verdict::Cancel, out) };
         let profile = tab.profile;
         let initiator = tab.committed_url.clone();
@@ -356,6 +374,7 @@ impl Browser {
                 Decision::Block(_) => return (None, out),
             }
         }
+        let (space, group) = (op.space.clone(), op.group);
         let id = self.alloc_id();
         let insert_at = self.tabs.iter().position(|t| t.id == opener).map(|i| i + 1).unwrap_or(self.tabs.len());
         let mut tab = Tab::new(id, profile, now);
@@ -363,6 +382,9 @@ impl Browser {
         tab.loading = true;
         tab.opener = Some(opener);
         tab.sheet = style == PopupStyle::Sheet;
+        // Its opener's session, and its group (it is put just after it).
+        tab.space = space;
+        tab.group = group.filter(|_| !tab.sheet);
         self.tabs.insert(insert_at, tab);
         out.push(Effect::AdoptPopup { tab: id });
         self.activate_into(id, now, &mut out);
@@ -394,6 +416,7 @@ impl Browser {
         }
         let profile = op.profile;
         let initiator = op.committed_url.clone();
+        let (space, group) = (op.space.clone(), op.group);
         let source = Source::Page { user_gesture: true };
         let req = Request { url, frame: Frame::Main, source, initiator: initiator.as_ref() };
         let (target, upgraded) = match policy::decide(&req, self.exceptions(profile)) {
@@ -406,6 +429,9 @@ impl Browser {
         // `last_active_ms = now`: most recently used after the shown tabs,
         // so the budget keeps it live (it discards older background tabs).
         let mut tab = Tab::new(id, profile, now);
+        // Its opener's session, and its group (it is put just after it).
+        tab.space = space;
+        tab.group = group;
         if upgraded {
             tab.https.http_url = Some(url.clone());
             tab.https.upgrades = 1;
@@ -432,7 +458,9 @@ impl Browser {
             return (None, out);
         }
         let id = self.alloc_id();
-        self.tabs.push(Tab::new(id, Profile::Default, now));
+        let mut tab = Tab::new(id, Profile::Default, now);
+        tab.space = self.space().map(str::to_string);
+        self.tabs.push(tab);
         out.extend(self.navigate_trusted(id, url, now));
         self.enforce_budget(now, &mut out);
         self.sync_visibility(&mut out);
@@ -444,6 +472,7 @@ impl Browser {
         let mut out = Vec::new();
         let Some(op) = self.tab(opener) else { return out };
         let profile = op.profile;
+        let space = op.space.clone();
         let initiator = op.committed_url.clone();
         let source = Source::Page { user_gesture: true };
         let req = Request { url, frame: Frame::Main, source, initiator: initiator.as_ref() };
@@ -457,7 +486,7 @@ impl Browser {
             Decision::Block(_) => None,
         };
         if let Some((target, upgraded)) = target {
-            let id = self.new_tab_into(profile, now, &mut out);
+            let id = self.new_tab_in(profile, space, now, &mut out);
             if upgraded {
                 if let Some(t) = self.tab_mut(id) {
                     t.https.http_url = Some(url.clone());

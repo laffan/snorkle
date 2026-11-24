@@ -239,7 +239,8 @@ function renderStart(tab) {
     paletteSel = 0;
     loadPaletteHistory();
   }
-  input.placeholder = tab.private ? 'Search or enter an address (private)' : 'Search tabs and bookmarks, or enter an address';
+  input.placeholder = tab.private ? 'Search or enter an address (private)'
+    : state.space ? 'Search this session’s tabs, or enter an address' : 'Search tabs and bookmarks, or enter an address';
   // Other tabs' titles and addresses are rows: re-render when they change
   // (not on every progress update, so a click is not lost to a rebuild).
   const key = JSON.stringify(state.tabs.map((t) => [t.id, t.title, t.url && t.url.full]));

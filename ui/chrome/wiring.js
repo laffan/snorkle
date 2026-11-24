@@ -5,8 +5,12 @@
 // The Notebook (ui/notebook/), in its panel; open as it was left. Its code
 // loads the first time it is opened or sent something (ensureNotebook).
 function createNotebook() {
+  // The notebook of the session shown (research.js): its loads and saves
+  // name that session.
+  const space = notebookSpace;
+  const own = (cmd) => cmd === 'load_notebook' || cmd === 'save_notebook';
   notebook = window.SnorkleNotebook.create($('notebook'), {
-    invoke: (cmd, args) => T.core.invoke(cmd, args),
+    invoke: (cmd, args) => T.core.invoke(cmd, own(cmd) ? { ...(args || {}), space } : args),
     toast,
     place: () => {
       const t = activeTab();

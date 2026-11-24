@@ -20,6 +20,9 @@ pub struct Entry {
     /// Bookmarks only: the emoji shown instead of the favicon.
     #[serde(skip_serializing_if = "Option::is_none")]
     emoji: Option<String>,
+    /// Bookmarks only: the bookmark group it is in (2026-11-24).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<String>,
 }
 
 pub(super) fn entry(url: &str, title: &str) -> Option<Entry> {
@@ -32,6 +35,7 @@ pub(super) fn entry(url: &str, title: &str) -> Option<Entry> {
         cache_bytes: None,
         snippet: None,
         emoji: None,
+        group: None,
     })
 }
 
@@ -42,7 +46,7 @@ pub fn list_bookmarks(s: S<'_>) -> Vec<Entry> {
         .map(|st| {
             st.bookmarks()
                 .iter()
-                .filter_map(|b| Some(Entry { emoji: st.pin_emoji(&b.url), ..entry(&b.url, &b.title)? }))
+                .filter_map(|b| Some(Entry { emoji: st.pin_emoji(&b.url), group: b.group.clone(), ..entry(&b.url, &b.title)? }))
                 .collect()
         })
         .unwrap_or_default()
@@ -52,8 +56,11 @@ pub fn list_bookmarks(s: S<'_>) -> Vec<Entry> {
 /// the tab becomes an ordinary tab ("removed"). Otherwise bookmarks the
 /// tab's committed URL and moves the tab into the bookmark, so opening the
 /// bookmark returns to it ("added"; "already" if another tab already is
-/// that bookmark's). A pin's tab is left alone ("pinned"). The URL comes
-/// from the core, not the caller; private tabs are never bookmarked.
+/// that bookmark's). On a pin's tab (2026-11-24; before, "pinned" and
+/// nothing): bookmarks the pin's address and title, the pin keeps its tab
+/// and the bookmark gets its own when opened ("from_pin"; "already" if it
+/// is bookmarked). The URL comes from the core and the store, not the
+/// caller; private tabs are never bookmarked.
 #[tauri::command]
 pub async fn toggle_bookmark(s: S<'_>, tab: u64) -> Result<&'static str, String> {
     let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
@@ -70,8 +77,17 @@ pub async fn toggle_bookmark(s: S<'_>, tab: u64) -> Result<&'static str, String>
     // The tab is a bookmark's own tab: un-bookmark it (it becomes a normal
     // tab). A pin's tab is left alone.
     if let Some(key) = launcher {
+        // A pin's tab: a bookmark of the pin (the same address, so opening
+        // the bookmark comes back to this tab).
+        if let Some(pin) = store.pins().into_iter().find(|p| p.url == key) {
+            if store.is_bookmarked(&key) {
+                return Ok("already");
+            }
+            let added = store.add_bookmark(&pin.url, &pin.title, wall_ms()).map_err(|e| e.to_string())?;
+            return Ok(if added { "from_pin" } else { "none" });
+        }
         if !store.is_bookmarked(&key) {
-            return Ok("pinned");
+            return Ok("none");
         }
         store.remove_bookmark(&key).map_err(|e| e.to_string())?;
         with_browser(&s, |b| b.release_launcher(&key));
@@ -90,7 +106,10 @@ pub async fn toggle_bookmark(s: S<'_>, tab: u64) -> Result<&'static str, String>
 
 #[tauri::command]
 pub async fn remove_bookmark(s: S<'_>, url: String) -> Result<(), String> {
-    with_browser(&s, |b| b.release_launcher(&url));
+    // Still a pin (a bookmark made from it): the tab stays the pin's.
+    if !s.store.as_ref().is_some_and(|st| st.pins().iter().any(|p| p.url == url)) {
+        with_browser(&s, |b| b.release_launcher(&url));
+    }
     match s.store.clone() {
         Some(store) => store.remove_bookmark(&url).map_err(|e| e.to_string()),
         None => Ok(()),

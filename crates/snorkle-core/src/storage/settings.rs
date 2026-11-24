@@ -143,13 +143,7 @@ impl Store {
     }
 
     pub fn remove_bookmark(&self, url: &str) -> std::io::Result<()> {
-        let snapshot = {
-            let mut d = self.data();
-            d.bookmarks.retain(|b| b.url != url);
-            serde_json::to_vec(&d.bookmarks)?
-        };
-        atomic_write(&self.dir.join(BOOKMARKS_FILE), &snapshot)?;
-        self.prune_item_emoji()
+        self.remove_bookmarks(&[url.to_string()]).map(|_| ())
     }
 
     pub fn bookmarks(&self) -> Vec<Bookmark> {
@@ -168,6 +162,8 @@ impl Store {
                 t.title = clean_title(&t.title);
                 t.name = t.name.as_deref().map(clean_title).filter(|n| !n.is_empty());
                 t.emoji = t.emoji.as_deref().and_then(clean_emoji);
+                t.space = t.space.take().filter(|r| s.research.iter().any(|x| x.id == *r));
+                t.group = t.group.filter(|g| s.groups.iter().any(|x| x.id == *g));
                 true
             }
             None => false,
@@ -176,6 +172,7 @@ impl Store {
         if s.active.map(|a| a >= s.tabs.len()).unwrap_or(false) {
             s.active = None;
         }
+        clean_session_lists(&mut s);
         atomic_write(&self.dir.join(SESSION_FILE), &serde_json::to_vec(&s)?)
     }
 
@@ -210,6 +207,29 @@ impl Store {
         if s.active.map(|a| a >= s.tabs.len()).unwrap_or(false) {
             s.active = None;
         }
+        clean_session_lists(&mut s);
         s
     }
+}
+
+/// Research sessions (valid ids, unique, cleaned topics, at most
+/// `browser::MAX_RESEARCH`) and tab groups (unique, cleaned names, with a
+/// tab) of a session; tabs keep only references to those kept.
+fn clean_session_lists(s: &mut Session) {
+    let mut seen = BTreeSet::new();
+    s.research.retain_mut(|r| {
+        r.name = crate::browser::clean_research_name(&r.name);
+        crate::browser::valid_research_id(&r.id) && seen.insert(r.id.clone())
+    });
+    s.research.truncate(crate::browser::MAX_RESEARCH);
+    let mut seen = BTreeSet::new();
+    s.groups.retain_mut(|g| {
+        g.name = crate::browser::clean_group_name(&g.name);
+        seen.insert(g.id)
+    });
+    for t in s.tabs.iter_mut() {
+        t.space = t.space.take().filter(|r| s.research.iter().any(|x| x.id == *r));
+        t.group = t.group.filter(|g| s.groups.iter().any(|x| x.id == *g));
+    }
+    s.groups.retain(|g| s.tabs.iter().any(|t| t.group == Some(g.id)));
 }

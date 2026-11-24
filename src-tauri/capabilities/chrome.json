@@ -120,7 +120,6 @@
     "allow-begin-conversation-capture",
     "allow-conversation-capture-count",
     "allow-cancel-conversation-capture",
-
     "allow-notebook-link-drop",
     "allow-notebook-link-hover",
     "allow-notebook-clip-mode",
@@ -131,6 +130,21 @@
     "allow-set-text-editing",
     "allow-save-page-for-later",
     "allow-passkey-status",
-    "allow-request-passkeys"
+    "allow-request-passkeys",
+    "allow-new-research",
+    "allow-enter-research",
+    "allow-rename-research",
+    "allow-delete-research",
+    "allow-send-tabs",
+    "allow-send-page",
+    "allow-group-tabs",
+    "allow-ungroup-tabs",
+    "allow-edit-tab-group",
+    "allow-close-tabs",
+    "allow-bookmark-tab-group",
+    "allow-list-bookmark-groups",
+    "allow-group-bookmarks",
+    "allow-edit-bookmark-group",
+    "allow-remove-bookmarks"
   ]
 }

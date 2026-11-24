@@ -23,7 +23,9 @@ let pendingDrag = null;
 let dragState = null;
 
 function armDrag(ev, node, item) {
-  if (ev.button > 0 || ev.target.closest('.close, .unpin, .row-actions')) return;
+  if (ev.button > 0 || ev.target.closest('.close, .unpin, .row-actions, input')) return;
+  // ⌘- and ⇧-clicks choose rows (groups.js); they never start a drag.
+  if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
   cancelPending();
   const mouse = ev.pointerType === 'mouse';
   pendingDrag = { node, item, mouse, x: ev.clientX, y: ev.clientY, timer: mouse ? null : setTimeout(startDrag, DRAG_DELAY_MS) };
@@ -57,14 +59,28 @@ function startDrag() {
 function showDropZone(item) {
   const list = $('bookmarks');
   if (item.kind === 'tab' && item.private) return; // never persist private tabs
+  if (item.kind === 'bgroup' || (item.kind === 'tgroup' && privateGroup(item.group))) return;
   const zone = el('div', 'drop-zone');
   zone.setAttribute('aria-label', item.kind === 'bookmark' ? 'Move to the end' : 'Drop here to bookmark');
   list.appendChild(zone);
 }
 
+// A tab group of private tabs (never bookmarked).
+function privateGroup(id) {
+  return !!state && state.tabs.some((t) => t.group === id && t.private);
+}
+
 function dropTargetAt(x, y) {
   const hit = document.elementFromPoint(x, y);
   if (!hit) return null;
+  const kind = dragState.item.kind;
+  // A group's heading goes only into the bookmarks bar (a tab group
+  // becomes a bookmark group, 2026-11-24).
+  if (kind === 'bgroup') return null;
+  if (kind === 'tgroup') {
+    const list = hit.closest('#bookmarks');
+    return list && !privateGroup(dragState.item.group) ? { kind: 'bookmarks', index: bookmarks.length, list, items: [], atEnd: true } : null;
+  }
   const grid = hit.closest('#pins');
   if (grid) {
     if (dragState.item.kind === 'tab' && dragState.item.private) return null; // never persist private tabs
@@ -75,18 +91,36 @@ function dropTargetAt(x, y) {
   const list = hit.closest('#bookmarks');
   if (list) {
     if (dragState.item.kind === 'tab' && dragState.item.private) return null; // never persist private tabs
-    const items = [...list.querySelectorAll('.bm')];
-    let index = items.length;
+    // Rows of folded groups are not on screen; `index` is the place in
+    // the whole list (each row's data-index). Dropped inside a group's
+    // box, the bookmark is in that group.
+    const items = [...list.querySelectorAll('.bm')].filter((n) => n.getBoundingClientRect().height > 0);
+    let at = items.length;
     for (let i = 0; i < items.length; i++) {
       const r = items[i].getBoundingClientRect();
-      if (y < r.top + r.height / 2) { index = i; break; }
+      if (y < r.top + r.height / 2) { at = i; break; }
     }
-    return { kind: 'bookmarks', index, list, items };
+    const index = at < items.length ? Number(items[at].dataset.index) : bookmarks.length;
+    const box = hit.closest('.bgroup');
+    const group = box && !box.classList.contains('collapsed') ? box.dataset.group : null;
+    return { kind: 'bookmarks', index, list, items, at, atEnd: at === items.length, group };
   }
   if (dragState.item.kind !== 'tab') return null;
   const item = dragState.item;
   const group = item.paired ? dragState.node.closest('.tab-group') : null;
   if (group && group.contains(hit)) return null; // still inside its own pair
+  // A tab group's heading: its top half puts the tab before the group,
+  // its bottom half first in it.
+  const head = hit.closest('.tgroup > .group-head');
+  if (head) {
+    const box = head.parentElement;
+    const first = box.querySelector('.tab[data-tab]');
+    const r = head.getBoundingClientRect();
+    const inside = y > r.top + r.height / 2;
+    if (first && Number(first.dataset.tab) !== item.id) {
+      return { kind: 'reorder', before: Number(first.dataset.tab), node: inside ? first : head, edge: 'top', group: inside ? Number(box.dataset.group) : null };
+    }
+  }
   const node = hit.closest('.tab');
   if (node) {
     const id = Number(node.dataset.tab);
@@ -97,17 +131,20 @@ function dropTargetAt(x, y) {
       // middle pairs the two tabs in split view, as before.
       const r = node.getBoundingClientRect();
       const at = (y - r.top) / Math.max(1, r.height);
-      if (at < REORDER_EDGE) return { kind: 'reorder', before: id, node, edge: 'top' };
-      if (at > 1 - REORDER_EDGE) return { kind: 'reorder', before: tabAfter(id), node, edge: 'bottom' };
+      // Next to a grouped tab, the dropped tab joins its group.
+      const box = node.closest('.tgroup');
+      const group = box ? Number(box.dataset.group) : null;
+      if (at < REORDER_EDGE) return { kind: 'reorder', before: id, node, edge: 'top', group };
+      if (at > 1 - REORDER_EDGE) return { kind: 'reorder', before: tabAfter(id), node, edge: 'bottom', group };
       return { kind: 'tab', id, node };
     }
   }
   // Below the last row of its own list: to the end.
   const tabList = hit.closest('#tabs, #private-tabs');
   if (tabList && (tabList.id === 'private-tabs') === !!item.private) {
-    const rows = [...tabList.querySelectorAll('.tab')].filter((n) => n !== dragState.node);
+    const rows = [...tabList.querySelectorAll('.tab')].filter((n) => n !== dragState.node && n.getBoundingClientRect().height > 0);
     const last = rows[rows.length - 1];
-    if (last && y > last.getBoundingClientRect().bottom) return { kind: 'reorder', before: null, node: last, edge: 'bottom' };
+    if (last && y > last.getBoundingClientRect().bottom) return { kind: 'reorder', before: null, node: last, edge: 'bottom', group: null };
   }
   return group ? { kind: 'unsplit', group } : null;
 }
@@ -132,7 +169,7 @@ function showDropFeedback(target) {
     target.node.classList.add('drop-target');
   } else if (target.kind === 'reorder') {
     const r = target.node.getBoundingClientRect();
-    const lr = target.node.closest('.tablist').getBoundingClientRect();
+    const lr = (target.node.closest('.tgroup') || target.node.closest('.tablist')).getBoundingClientRect();
     line.style.left = lr.left + 6 + 'px';
     line.style.width = lr.width - 12 + 'px';
     line.style.top = (target.edge === 'top' ? r.top - 1 : r.bottom + 1) + 'px';
@@ -144,11 +181,11 @@ function showDropFeedback(target) {
   } else {
     target.list.classList.add('drop-target');
     const zone = target.list.querySelector('.drop-zone');
-    if (zone) zone.classList.toggle('hot', target.index === target.items.length);
+    if (zone) zone.classList.toggle('hot', target.atEnd);
     const lr = target.list.getBoundingClientRect();
     let y;
     if (!target.items.length) y = lr.top + lr.height / 2;
-    else if (target.index < target.items.length) y = target.items[target.index].getBoundingClientRect().top - 1;
+    else if (!target.atEnd) y = target.items[target.at].getBoundingClientRect().top - 1;
     else y = target.items[target.items.length - 1].getBoundingClientRect().bottom + 1;
     line.style.left = lr.left + 6 + 'px';
     line.style.width = lr.width - 12 + 'px';
@@ -177,16 +214,21 @@ function endDrag(commit) {
   } else if (d.item.kind === 'tab' && t.kind === 'reorder') {
     // A half of a split pair dragged elsewhere in the list leaves its pair.
     const unpair = d.item.paired ? invoke('unsplit', { tab: d.item.id }) : Promise.resolve();
-    unpair.then(() => invoke('move_tab', { tab: d.item.id, before: t.before }));
+    unpair.then(() => invoke('move_tab', { tab: d.item.id, before: t.before, group: t.group === undefined ? null : t.group }));
   } else if (t.kind === 'unsplit') {
     invoke('unsplit', { tab: d.item.id });
+  } else if (d.item.kind === 'tgroup' && t.kind === 'bookmarks') {
+    T.core.invoke('bookmark_tab_group', { group: d.item.group })
+      .then((id) => { if (!id) toast('Nothing to bookmark yet.'); return loadBookmarks(); })
+      .catch((e) => toast(String(e)));
   } else if (d.item.kind === 'tab' && t.kind === 'bookmarks') {
-    T.core.invoke('bookmark_tab', { tab: d.item.id, index: t.index })
+    T.core.invoke('bookmark_tab', { tab: d.item.id, index: t.index, group: t.group || null })
       .then((added) => { if (!added) toast('Already bookmarked, or nothing to bookmark yet.'); return loadBookmarks(); })
       .catch((e) => toast(String(e)));
   } else if (d.item.kind === 'bookmark' && t.kind === 'bookmarks') {
     const to = t.index > d.item.index ? t.index - 1 : t.index;
-    if (to !== d.item.index) invoke('move_bookmark', { url: d.item.url, index: to }).then(loadBookmarks);
+    const group = t.group || null;
+    if (to !== d.item.index || group !== d.item.group) invoke('move_bookmark', { url: d.item.url, index: to, group }).then(loadBookmarks);
   } else if (t.kind === 'pins' && d.item.kind === 'pin') {
     const to = t.index > d.item.index ? t.index - 1 : t.index;
     if (to !== d.item.index) invoke('move_pin', { url: d.item.url, index: to }).then(loadPins);

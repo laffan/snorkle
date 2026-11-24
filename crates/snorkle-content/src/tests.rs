@@ -84,8 +84,10 @@ fn shortcuts_are_unique_and_rebindable() {
     );
     assert_eq!(Shortcut::NextTab.name(), "next_tab");
     assert_eq!(Shortcut::PreviousTab.name(), "prev_tab");
-    let b =effective_bindings(&[("new_tab".into(), "N".into(), MOD_SHIFT)]).unwrap();
-    assert_eq!(b[0], KeyBinding { key: "n".into(), mods: MOD_SHIFT });
+    let b = effective_bindings(&[("new_tab".into(), "Y".into(), MOD_SHIFT)]).unwrap();
+    assert_eq!(b[0], KeyBinding { key: "y".into(), mods: MOD_SHIFT });
+    // ⌘⇧N is New Private Tab's since 2026-11-24.
+    assert!(effective_bindings(&[("new_tab".into(), "n".into(), MOD_SHIFT)]).unwrap_err().contains("New Private Tab"));
     assert!(effective_bindings(&[("new_tab".into(), "w".into(), 0)]).unwrap_err().contains("Close Tab"));
     let ignored = effective_bindings(&[
         ("nope".into(), "x".into(), 0),
@@ -113,6 +115,7 @@ fn night_vision_history_and_quit_shortcuts() {
     for (id, key, mods, name) in [
         ("night_vision", "r", MOD_SHIFT, "night_vision"),
         ("history", "h", MOD_SHIFT, "history"),
+        ("new_private_tab", "n", MOD_SHIFT, "new_private_tab"),
         ("quit", "q", 0, "quit"),
     ] {
         let i = shortcut_index(id).unwrap();

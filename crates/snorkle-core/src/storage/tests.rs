@@ -449,7 +449,7 @@ fn icons_must_be_small_pngs() {
 }
 
 /// Signature + IHDR (+ a stand-in for the rest of the file).
-fn test_png(size: u32, depth: u8, color: u8) -> Vec<u8> {
+pub(super) fn test_png(size: u32, depth: u8, color: u8) -> Vec<u8> {
     let mut v = PNG_SIGNATURE.to_vec();
     v.extend_from_slice(&13u32.to_be_bytes());
     v.extend_from_slice(b"IHDR");
@@ -517,10 +517,12 @@ fn session_roundtrip() {
                 url_bar_attached: false,
                 name: None,
                 emoji: None,
+                ..Default::default()
             },
-            SessionTab { url: "file:///x".into(), title: "f".into(), launcher: None, exempt: vec![], zoom: None, url_bar_attached: false, name: None, emoji: None },
+            SessionTab { url: "file:///x".into(), title: "f".into(), ..Default::default() },
         ],
         active: Some(1),
+        ..Default::default()
     };
     s.save_session(&sess).unwrap();
     let loaded = s.load_session();

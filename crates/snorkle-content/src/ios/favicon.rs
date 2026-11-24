@@ -179,16 +179,31 @@ fn snapshot(generation: u64) {
         cfg.setRect(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(SIZE, SIZE)));
         cfg.setAfterScreenUpdates(true);
         let block = RcBlock::new(move |image: *mut UIImage, _err: *mut NSError| {
-            let png = image.as_ref().map(plain_png).filter(|bytes| !bytes.is_empty());
+            let png = image.as_ref().and_then(icon_pngs);
             finish_snapshot(generation, png);
         });
         web.takeSnapshotWithConfiguration_completionHandler(Some(&cfg), &block);
     }
 }
 
+/// The icon as PNG and, when it is too dark for the dark appearance, a
+/// light copy (2026-11-24): drawn a second time, turned light in the
+/// renderer's bitmap before it is encoded (`favicon::make_dark_variant`).
+fn icon_pngs(image: &UIImage) -> Option<crate::FaviconPngs> {
+    let dark_needed = std::rc::Rc::new(Cell::new(false));
+    let png = plain_png(image, false, Some(dark_needed.clone()));
+    if png.is_empty() {
+        return None;
+    }
+    let dark = dark_needed.get().then(|| plain_png(image, true, None)).filter(|d| !d.is_empty());
+    Some(crate::FaviconPngs { png, dark })
+}
+
 /// Redraws `image` into a standard-range (8-bit sRGB) bitmap at 2× and
 /// encodes it as PNG, whatever pixel format the snapshot had.
-fn plain_png(image: &UIImage) -> Vec<u8> {
+/// `make_dark`: turn the drawn icon light before encoding. `dark_needed`:
+/// set to whether the drawn icon needs a light copy.
+fn plain_png(image: &UIImage, make_dark: bool, dark_needed: Option<std::rc::Rc<Cell<bool>>>) -> Vec<u8> {
     let format = UIGraphicsImageRendererFormat::preferredFormat();
     format.setScale(2.0);
     format.setOpaque(false);
@@ -222,8 +237,14 @@ fn plain_png(image: &UIImage) -> Vec<u8> {
             && (512..=4096).contains(&stride)
         {
             // The renderer owns this bitmap and keeps it alive throughout this callback.
-            let pixels = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), stride * height) };
+            let pixels = unsafe { std::slice::from_raw_parts_mut(data.cast::<u8>(), stride * height) };
             detail.set(snorkle_core::favicon::has_detail(pixels, width, height, stride));
+            if let Some(d) = &dark_needed {
+                d.set(snorkle_core::favicon::needs_dark_variant(pixels, width, height, stride));
+            }
+            if make_dark {
+                snorkle_core::favicon::make_dark_variant(pixels, width, height, stride);
+            }
         }
     });
     let png = unsafe { renderer.PNGDataWithActions(RcBlock::as_ptr(&draw)) }.to_vec();
@@ -234,7 +255,7 @@ fn plain_png(image: &UIImage) -> Vec<u8> {
     }
 }
 
-fn finish_snapshot(generation: u64, png: Option<Vec<u8>>) {
+fn finish_snapshot(generation: u64, png: Option<crate::FaviconPngs>) {
     if png.is_none() {
         let retry = FETCHER.with(|f| {
             let mut f = f.borrow_mut();
@@ -250,7 +271,7 @@ fn finish_snapshot(generation: u64, png: Option<Vec<u8>>) {
     finish(generation, png);
 }
 
-fn finish(generation: u64, png: Option<Vec<u8>>) {
+fn finish(generation: u64, png: Option<crate::FaviconPngs>) {
     let job = FETCHER.with(|f| {
         let mut f = f.borrow_mut();
         match &f.current {

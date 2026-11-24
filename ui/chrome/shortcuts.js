@@ -10,12 +10,14 @@
 
 function sidebarItems() {
   const items = [];
-  for (const p of pins) items.push({ link: p });
-  for (const b of bookmarks) items.push({ link: b });
+  // A research session's sidebar has its tabs only (2026-11-24).
+  if (state && !state.space) {
+    for (const p of pins) items.push({ link: p });
+    for (const b of bookmarks) items.push({ link: b });
+  }
   if (state) {
-    const listed = (t) => t.sheet_over === null && t.launcher === null;
-    for (const t of state.tabs) if (!t.private && listed(t)) items.push({ tab: t });
-    for (const t of state.tabs) if (t.private && listed(t)) items.push({ tab: t });
+    for (const t of state.tabs) if (!t.private && listedHere(t)) items.push({ tab: t });
+    for (const t of state.tabs) if (t.private && listedHere(t)) items.push({ tab: t });
   }
   return items;
 }
@@ -46,6 +48,9 @@ function runShortcut(name, via = 'native') {
   chromeLog('debug', `shortcut ${name} via ${via}`);
   if (name === 'new_tab') {
     openNewTab(false);
+  } else if (name === 'new_private_tab') {
+    // ⌘⇧N (2026-11-24), as Menu → New Private Tab.
+    openNewTab(true);
   } else if (name === 'next_tab' || name === 'prev_tab') {
     cycleTab(name === 'next_tab' ? 1 : -1);
   } else if (name === 'reload') {
@@ -225,12 +230,13 @@ $('confirm-cancel').addEventListener('click', closeConfirm);
 
 // ⌘D (and the ⋯ menu's Bookmark row): bookmarks the page, moving this
 // tab into the bookmark; on a bookmark's own tab, removes the bookmark
-// and the tab becomes an ordinary tab again.
+// and the tab becomes an ordinary tab again; on a pin's tab (2026-11-24),
+// bookmarks the pin (its address and title; the pin stays).
 const BOOKMARK_RESULT = {
   added: 'Bookmarked',
   removed: 'Bookmark removed',
   already: 'Already bookmarked',
-  pinned: 'This is a pinned site’s tab.',
+  from_pin: 'Bookmarked the pin',
   none: 'Nothing to bookmark yet.',
 };
 function toggleBookmark(t) {

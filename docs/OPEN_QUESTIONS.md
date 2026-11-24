@@ -1309,3 +1309,56 @@ The live sites were not reachable or not signed in from this environment.
   chrome updates the bar and its copy of the tab. Anything else that changes during a load still
   sends the whole state.
 
+
+## Pins keep their page, research sessions, groups, dark favicons (2026-11-24)
+
+- **[decide] What counts as leaving a pin's page.** Any other address once the fragment is set
+  aside: a different path *or query*. So a pinned Google Calendar opens a new tab for each week the
+  user moves to (its route changes after a click), and a pinned search page for each new search; a
+  pinned Gmail does not (its views are fragments). Alternatives: compare origin and path only (query
+  changes stay), or same-site navigations stay and only other sites open new tabs.
+- **[decide] What stays in the pin.** Form submissions (a sign-in form must post in place; a search
+  form also stays), redirects, script navigations without a click (`location = …` from a timer),
+  and address changes the page makes on its own after loading. A script navigation started from a
+  button's click handler (not a link) *is* followed in place: WebKit's public API does not say
+  whether a navigation had a user gesture (`_isUserInitiated` is private), so only links
+  (`LinkActivated`) and same-document route changes after a reported click are caught.
+- **[verify] The guard's ordering.** A single-page app's route change is caught only if the watcher's
+  tap report (posted before the app's own click handler runs) reaches the core before WebKit's KVO
+  `URL` change (both come from the same web process, assumed in order), and within 1.5 s. If the URL
+  change comes first, the pin follows the route. Also unverified: that `evaluateJavaScript` right
+  after `didCommitNavigation` runs in the new document (the guard is set again after
+  `didFinishNavigation` in case not), and that `GoBack` makes apps restore their previous view
+  (they handle `popstate`); with no back history the pin's page is loaded again.
+- **[verify] Stopped clicks.** The watcher stops the click in the capture phase on the window, before
+  React's and other routers' listeners on the document or root. A page that registered its own
+  window capture listener first still sees the click (and may route); the KVO path then applies.
+  Links inside frames are not watched (main frame only).
+- **[decide] A bookmark made from a pin** has the pin's address, so it shares the pin's tab (tabs are
+  keyed by address): opening the bookmark shows the pin's tab, guarded as a pin's. Separate tabs
+  would need item ids instead of addresses as keys.
+- **[decide] Research sessions in the start page**: a session's start page lists its own tabs and
+  history only, not pins, bookmarks or other sessions' tabs. History, Downloads, Save for Later and
+  page chats are shared by all sessions.
+- **[decide] Remove** in the tab menu closes the tabs (as the owner's word for the menu item); for
+  bookmarks it removes them. Closing a tab group's tabs and removing a bookmark group's bookmarks
+  ask first; Remove on chosen rows does not.
+- **[decide] ⌘-click on a bookmark** now chooses it (it opened the item menu since 2026-11-09);
+  right-click still opens the menu, and ⌘-click on a pin still does. On iPadOS without a keyboard
+  there is no way to choose several rows (no long-press choice yet).
+- **[verify] ⌘⇧N.** New default for New Private Tab. A user binding that already used it (Settings →
+  Keyboard) is refused at launch as a clash, and, as for ⌘⇧R and ⌘⇧H, `applyBindings` then restores
+  all defaults.
+- **[verify] Dark favicon copies.** The core assumes the platforms draw premultiplied 8-bit pixels
+  with alpha in the fourth byte (macOS `NSBitmapImageRep`: RGBA; iPadOS `UIGraphicsImageRenderer`:
+  BGRA assumed); the brightness test weighs the first and third channels alike so the order does not
+  matter. On iPadOS the icon is drawn twice (the second time turned light before encoding). Not run
+  on either platform. The threshold (mean brightness < 0.3, < 10% light) may need tuning against real
+  icons (GitHub, X, Notion, Apple). The light chrome has no mirror case (white icons on transparency
+  stay as they are).
+- **[verify] Notebook per session.** Moving between sessions flushes the notebook shown and loads the
+  other's; a save still on its way for a deleted session is refused by the core. Not tried with a
+  large notebook (64 MB) or while a clip is being made.
+- **[gap] Not done:** moving tab groups as a whole by dragging (only into the bookmarks bar), groups
+  in the pinned grid (not wanted), choosing pins, colours for groups, and sending a whole research
+  session's tabs back at once (choose them, then Send to).

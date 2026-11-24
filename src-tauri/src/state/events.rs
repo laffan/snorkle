@@ -20,6 +20,18 @@ impl ContentEvents for Events {
             (self.shared.emit)(ChromeEvent::PageEditing(tab, on));
             return;
         }
+        // The pin guard's watcher (C25) posts to the same handler.
+        if snorkle_core::pinguard::is_report(&body) {
+            match snorkle_core::pinguard::parse_report(&body) {
+                Some(snorkle_core::pinguard::PinReport::Tap) => self.shared.browser().on_pin_gesture(tab, now_ms()),
+                Some(snorkle_core::pinguard::PinReport::Link(url)) => {
+                    self.shared.log(console::Level::Info, Some(tab), &format!("pin: link {url} -> a new tab"));
+                    self.apply(|b| b.on_pin_link(tab, &url, now_ms()));
+                }
+                None => self.shared.log(console::Level::Warn, Some(tab), "pin guard: malformed report ignored"),
+            }
+            return;
+        }
         // The notebook's watcher (C23) posts to the same handler.
         if snorkle_core::notebook::is_report(&body) {
             match snorkle_core::notebook::parse_report(&body) {
@@ -113,7 +125,7 @@ impl ContentEvents for Events {
         }
     }
     fn url_changed(&self, tab: TabId, url: Url) {
-        self.apply(|b| b.on_url_changed(tab, url));
+        self.apply(|b| b.on_url_changed(tab, url, now_ms()));
     }
     fn title_changed(&self, tab: TabId, title: String) {
         self.apply(|b| b.on_title(tab, &title));

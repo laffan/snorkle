@@ -21,6 +21,10 @@ impl Browser {
             adblock_status: AdblockStatus::Off,
             closed: Vec::new(),
             blocklist: BlockList::default(),
+            pins: BTreeSet::new(),
+            groups: Vec::new(),
+            next_group: 1,
+            research: Vec::new(),
         }
     }
 
@@ -66,7 +70,7 @@ impl Browser {
         match session.active.and_then(|i| ids.get(i)).or(ids.last()).copied() {
             Some(id) => self.activate_into(id, now, &mut out),
             None => {
-                self.new_tab_into(Profile::Default, now, &mut out);
+                self.new_tab_in(Profile::Default, None, now, &mut out);
             }
         }
         out.push(Effect::NotifyChrome);
@@ -86,7 +90,11 @@ impl Browser {
             .map(|i| i + 1)
             .unwrap_or(self.tabs.len());
         let id = self.alloc_id();
-        self.tabs.insert(at, Tab::new(id, Profile::Default, now));
+        let mut start = Tab::new(id, Profile::Default, now);
+        // In the session the saved active tab is in (not in its group).
+        start.space = after.and_then(|a| self.tab(a)).and_then(|t| t.space.clone());
+        let at = after.filter(|a| self.tab(*a).is_some_and(|t| t.group.is_some())).map_or(at, |a| self.index_after(a));
+        self.tabs.insert(at, start);
         self.activate_into(id, now, &mut out);
         out.push(Effect::NotifyChrome);
         (id, out)
@@ -94,6 +102,8 @@ impl Browser {
 
     /// Adds a saved session's tabs, unloaded; their ids in session order.
     pub(super) fn restore_tabs(&mut self, session: &Session, now: u64) -> Vec<TabId> {
+        self.restore_research(session);
+        let groups = self.restore_groups(session);
         let mut ids = Vec::new();
         for st in &session.tabs {
             let Ok(url) = Url::parse(&st.url) else { continue };
@@ -110,9 +120,23 @@ impl Browser {
             tab.zoom = st.zoom.map(crate::tabs::clean_zoom).unwrap_or(crate::tabs::DEFAULT_ZOOM);
             tab.name = st.name.as_deref().and_then(clean_tab_name);
             tab.emoji = st.emoji.as_deref().and_then(crate::storage::clean_emoji);
+            // Pins' and bookmarks' tabs are everyday browsing's.
+            tab.space = st.space.clone().filter(|s| tab.launcher.is_none() && self.research.iter().any(|r| r.id == *s));
+            tab.group = st.group.and_then(|g| groups.get(&g).copied()).filter(|_| tab.launcher.is_none());
             self.tabs.push(tab);
             ids.push(id);
         }
+        // A group's tabs are of one session and together.
+        let spaces: Vec<(u64, Option<String>)> = self.tabs.iter().filter_map(|t| t.group.map(|g| (g, t.space.clone()))).collect();
+        for t in self.tabs.iter_mut() {
+            if let Some(g) = t.group {
+                if spaces.iter().find(|(x, _)| *x == g).is_some_and(|(_, s)| *s != t.space) {
+                    t.group = None;
+                }
+            }
+        }
+        self.compact_groups();
+        self.prune_groups();
         ids
     }
 
@@ -123,16 +147,20 @@ impl Browser {
         (id, out)
     }
 
+    /// A new tab in the session shown, after the active tab (after its
+    /// group), activated.
     pub(super) fn new_tab_into(&mut self, profile: Profile, now: u64, out: &mut Vec<Effect>) -> TabId {
-        let id = self.alloc_id();
-        let insert_at = self
-            .active
-            .and_then(|a| self.tabs.iter().position(|t| t.id == a))
-            .map(|i| i + 1)
-            .unwrap_or(self.tabs.len());
-        self.tabs.insert(insert_at, Tab::new(id, profile, now));
-        self.activate_into(id, now, out);
-        id
+        let space = self.space().map(str::to_string);
+        self.new_tab_in(profile, space, now, out)
+    }
+
+    /// Moves a tab to the end of the list (keeping groups together).
+    pub(super) fn move_to_end(&mut self, id: TabId) {
+        if let Some(at) = self.tabs.iter().position(|t| t.id == id) {
+            let t = self.tabs.remove(at);
+            self.tabs.push(t);
+        }
+        self.compact_groups();
     }
 
     pub(super) fn alloc_id(&mut self) -> TabId {

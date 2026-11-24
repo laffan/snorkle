@@ -12,6 +12,8 @@ pub struct PinEntry {
     icon: Option<String>,
     /// Emoji chosen to show instead of the favicon.
     emoji: Option<String>,
+    /// The favicon's copy for the dark appearance, if it needs one.
+    icon_dark: Option<String>,
 }
 
 #[tauri::command]
@@ -22,11 +24,12 @@ pub fn list_pins(s: S<'_>) -> Vec<PinEntry> {
         .into_iter()
         .filter_map(|p| {
             let display = url_display::display(&Url::parse(&p.url).ok()?);
-            let icon = snorkle_core::storage::favicon_host(&p.url)
-                .and_then(|h| store.icon(&h))
-                .and_then(|png| snorkle_core::storage::png_data_url(&png));
+            let host = snorkle_core::storage::favicon_host(&p.url);
+            let icon = host.as_ref().and_then(|h| store.icon(h)).and_then(|png| snorkle_core::storage::png_data_url(&png));
+            let icon_dark =
+                host.as_ref().and_then(|h| store.icon_dark(h)).and_then(|png| snorkle_core::storage::png_data_url(&png));
             let emoji = store.pin_emoji(&p.url);
-            Some(PinEntry { url: p.url, title: p.title, display, icon, emoji })
+            Some(PinEntry { url: p.url, title: p.title, display, icon, emoji, icon_dark })
         })
         .collect()
 }
@@ -48,6 +51,7 @@ pub async fn pin_tab(s: S<'_>, tab: u64, index: usize) -> Result<bool, String> {
     let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
     let added = store.insert_pin(&url, &title, index, wall_ms()).map_err(|e| e.to_string())?;
     crate::pins::refresh_icons(&s);
+    crate::pins::sync(&s);
     Ok(added)
 }
 
@@ -65,6 +69,7 @@ pub async fn pin_bookmark(s: S<'_>, url: String, index: usize) -> Result<bool, S
         store.insert_bookmark(&b.url, &b.title, usize::MAX, b.created_ms).map_err(|e| e.to_string())?;
     }
     crate::pins::refresh_icons(&s);
+    crate::pins::sync(&s);
     Ok(added)
 }
 
@@ -91,6 +96,7 @@ pub async fn edit_item_url(s: S<'_>, url: String, new_url: String, title: Option
         .map_err(|e| e.to_string())?
         .ok_or("That address is already pinned or bookmarked, or the item is gone.")?;
     with_browser(&s, |b| b.rekey_launcher(&url, &stored));
+    crate::pins::sync(&s);
     Ok(stored)
 }
 
@@ -106,13 +112,16 @@ pub async fn set_pin_emoji(s: S<'_>, url: String, emoji: Option<String>) -> Resu
 /// at that position instead of dropping it.
 #[tauri::command]
 pub async fn unpin(s: S<'_>, url: String, bookmark_index: Option<usize>) -> Result<(), String> {
-    // Moved into the bookmarks, it keeps its tab; removed, the tab is listed again.
-    if bookmark_index.is_none() {
+    // Moved into the bookmarks, it keeps its tab; removed, the tab is listed
+    // again (unless the address is also bookmarked: then it is that
+    // bookmark's tab).
+    if bookmark_index.is_none() && !s.store.as_ref().is_some_and(|st| st.is_bookmarked(&url)) {
         with_browser(&s, |b| b.release_launcher(&url));
     }
     let Some(store) = s.store.clone() else { return Ok(()) };
     if let (Some(p), Some(i)) = (store.remove_pin(&url).map_err(|e| e.to_string())?, bookmark_index) {
         store.insert_bookmark(&p.url, &p.title, i, p.created_ms).map_err(|e| e.to_string())?;
     }
+    crate::pins::sync(&s);
     store.prune_item_emoji().map_err(|e| e.to_string())
 }

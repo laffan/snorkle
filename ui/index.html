@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="style/base.css">
   <link rel="stylesheet" href="style/bar.css">
   <link rel="stylesheet" href="style/panels.css">
+  <link rel="stylesheet" href="style/groups.css">
   <link rel="stylesheet" href="notebook.css">
   <script src="load.js" defer></script>
 </head>
@@ -25,6 +26,8 @@
          (double-click zooms it). -->
     <div id="titlebar" data-tauri-drag-region aria-hidden="true"></div>
     <div id="side-scroll">
+      <!-- A research session (2026-11-24): back, and its topic (renamed in place). -->
+      <div id="research-head" hidden></div>
       <div id="pins" class="pingrid" aria-label="Pinned sites"></div>
       <div class="side-gap" aria-hidden="true"></div>
       <div id="bookmarks" class="droplist" aria-label="Bookmarks"></div>
@@ -55,6 +58,7 @@
       </section>
       <ul id="history-list" class="history-list" aria-label="Visits"></ul>
     </div>
+    <div id="research-list" role="tablist" aria-label="Research sessions" hidden></div>
     <div id="side-bottom">
       <button id="menu" class="icon" aria-label="Menu" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <!-- Night vision (Settings → General → Appearance, the same setting):
@@ -67,7 +71,8 @@
     </div>
     <div id="menu-pop" class="popup" role="menu" hidden>
       <button id="menu-new-tab" role="menuitem">New Tab <span class="kbd">⌘T</span></button>
-      <button id="menu-new-private" role="menuitem">New Private Tab</button>
+      <button id="menu-new-private" role="menuitem">New Private Tab <span class="kbd">⇧⌘N</span></button>
+      <button id="menu-new-research" role="menuitem">New Research Session</button>
       <div class="menu-sep" role="separator"></div>
       <button id="menu-history" role="menuitem">History <span class="kbd">⇧⌘H</span></button>
       <button id="menu-downloads" role="menuitem">Downloads</button>
@@ -79,16 +84,15 @@
       <div id="vm-title" class="vm-title"></div>
       <button id="vm-tab" role="menuitem"></button>
     </div>
-    <!-- Right-click or ⌘-click on a pin, bookmark or tab: Copy URL, Edit…
-         (one dialog for every kind: title, URL, emoji), and for pins and
-         bookmarks Return to Original URL; for pins also Return to
-         Bookmark. -->
+    <!-- Right-click on a pin, bookmark or tab (⌘-click on a pin); groups,
+         Remove and Send to are built in #item-more (chrome/groups.js). -->
     <div id="pin-pop" class="popup pin-pop" role="menu" hidden>
       <button id="item-copy" role="menuitem">Copy URL</button>
       <button id="item-edit" role="menuitem">Edit…</button>
       <button id="item-original" class="item-only" role="menuitem">Return to Original URL</button>
       <div class="menu-sep pin-only" role="separator"></div>
       <button id="pin-to-bookmark" class="pin-only" role="menuitem">Return to Bookmark</button>
+      <div id="item-more"></div>
     </div>
     <div id="sidebar-resize" class="resize-edge" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
     <!-- The sidebar's toggle, attached to its right edge (it moves with

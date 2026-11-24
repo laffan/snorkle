@@ -4,6 +4,7 @@
 
 pub use snorkle_core::browser::{
     AfterCreate, Browser, Effect, NavErrorKind, NavKind, Pane, PopupStyle, SplitOrientation, SplitView, Verdict,
+    GESTURE_WINDOW_MS, MAX_DIVERTS,
 };
 pub use snorkle_core::os::{OsSupport, OsVersion};
 pub use snorkle_core::policy::Frame;

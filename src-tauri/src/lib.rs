@@ -151,6 +151,21 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         commands::save_page_for_later,
         commands::passkey_status,
         commands::request_passkeys,
+        commands::new_research,
+        commands::enter_research,
+        commands::rename_research,
+        commands::delete_research,
+        commands::send_tabs,
+        commands::send_page,
+        commands::group_tabs,
+        commands::ungroup_tabs,
+        commands::edit_tab_group,
+        commands::close_tabs,
+        commands::bookmark_tab_group,
+        commands::list_bookmark_groups,
+        commands::group_bookmarks,
+        commands::edit_bookmark_group,
+        commands::remove_bookmarks,
     ])
 }
 
@@ -338,6 +353,8 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     window.open_devtools();
 
     pins::refresh_icons(&shared);
+    // The pins' tabs keep their page (2026-11-24): known before restoring.
+    pins::sync(&shared);
     // Injected scripts first, so restored views are created with them.
     let capture = shared.capturing();
     snorkle_content::dispatch_main(move || state::with_host(|h| h.set_console_capture(capture)));

@@ -142,8 +142,10 @@ fn snapshot(generation: u64) {
 }
 
 /// Redraws `image` into a 128×128, 8-bit RGBA bitmap and encodes it as PNG,
-/// whatever pixel format the snapshot had.
-fn plain_png(image: &NSImage) -> Option<Vec<u8>> {
+/// whatever pixel format the snapshot had; an icon too dark for the dark
+/// appearance is then turned light in the same bitmap and encoded again
+/// (2026-11-24, `favicon::make_dark_variant`).
+fn plain_png(image: &NSImage) -> Option<crate::FaviconPngs> {
     const PX: isize = 2 * SIZE as isize;
     unsafe {
         let rep = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
@@ -177,13 +179,22 @@ fn plain_png(image: &NSImage) -> Option<Vec<u8>> {
         if !snorkle_core::favicon::has_detail(pixels, PX as usize, PX as usize, stride) {
             return None;
         }
+        let needs_dark = snorkle_core::favicon::needs_dark_variant(pixels, PX as usize, PX as usize, stride);
 
-        let png = rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())?;
-        Some(png.to_vec())
+        let png = rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())?.to_vec();
+        let dark = if needs_dark {
+            // The same app-allocated bitmap, now written to.
+            let pixels = std::slice::from_raw_parts_mut(data, stride * PX as usize);
+            snorkle_core::favicon::make_dark_variant(pixels, PX as usize, PX as usize, stride);
+            rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new()).map(|d| d.to_vec())
+        } else {
+            None
+        };
+        Some(crate::FaviconPngs { png, dark })
     }
 }
 
-fn finish_snapshot(generation: u64, png: Option<Vec<u8>>) {
+fn finish_snapshot(generation: u64, png: Option<crate::FaviconPngs>) {
     if png.is_none() {
         let retry = FETCHER.with(|f| {
             let mut f = f.borrow_mut();
@@ -199,7 +210,7 @@ fn finish_snapshot(generation: u64, png: Option<Vec<u8>>) {
     finish(generation, png);
 }
 
-fn finish(generation: u64, png: Option<Vec<u8>>) {
+fn finish(generation: u64, png: Option<crate::FaviconPngs>) {
     let job = FETCHER.with(|f| {
         let mut f = f.borrow_mut();
         match &f.current {

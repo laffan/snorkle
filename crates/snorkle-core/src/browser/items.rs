@@ -33,20 +33,28 @@ impl Browser {
             self.http_ok_private.clear();
             out.push(Effect::ReleasePrivateData);
         }
+        if tab.group.is_some() {
+            self.prune_groups();
+        }
         if self.active == Some(id) {
             self.active = None;
             // A closing split half leaves the other half on screen (full
             // width), not the tab after it in the list; a closing popup
-            // returns to its opener.
-            let find = |want: Option<TabId>| want.and_then(|w| self.tabs.iter().find(|t| t.id == w));
+            // returns to its opener. Always a tab of the same session
+            // (everyday or research, 2026-11-24); a new one if none is left
+            // (unless its research session was deleted).
+            let space = tab.space.clone();
+            let same = |t: &&Tab| t.space == space;
+            let find = |want: Option<TabId>| want.and_then(|w| self.tabs.iter().find(|t| t.id == w)).filter(same);
             let next = find(partner)
                 .or_else(|| find(tab.opener))
-                .or_else(|| self.tabs.get(idx))
-                .or_else(|| idx.checked_sub(1).and_then(|i| self.tabs.get(i)));
+                .or_else(|| self.tabs[idx.min(self.tabs.len())..].iter().find(same))
+                .or_else(|| self.tabs[..idx.min(self.tabs.len())].iter().rev().find(same));
             match next.map(|t| t.id) {
                 Some(n) => self.activate_into(n, now, &mut out),
                 None => {
-                    self.new_tab_into(Profile::Default, now, &mut out);
+                    let space = space.filter(|s| self.research.iter().any(|r| r.id == *s));
+                    self.new_tab_in(Profile::Default, space, now, &mut out);
                 }
             }
         }
@@ -119,7 +127,8 @@ impl Browser {
             return (id, out);
         }
         let mut out = Vec::new();
-        let id = self.new_tab_into(Profile::Default, now, &mut out);
+        // Pins' and bookmarks' tabs are everyday browsing's.
+        let id = self.new_tab_in(Profile::Default, None, now, &mut out);
         if let Some(t) = self.tab_mut(id) {
             t.launcher = Some(key.to_string());
             t.landing = Some(key.to_string());
@@ -140,10 +149,21 @@ impl Browser {
         if !ok {
             return (false, Vec::new());
         }
+        let mut out = Vec::new();
         if let Some(t) = self.tab_mut(id) {
             t.launcher = Some(key.to_string());
+            // Out of the list: out of its group; and into everyday
+            // browsing, where pins and bookmarks are.
+            t.group = None;
+            t.space = None;
+            if t.life == Life::Live && self.pins.contains(key) {
+                out.push(Effect::PinGuard { tab: id, on: true });
+            }
         }
-        (true, vec![Effect::PersistSession(self.session()), Effect::NotifyChrome])
+        self.prune_groups();
+        out.push(Effect::PersistSession(self.session()));
+        out.push(Effect::NotifyChrome);
+        (true, out)
     }
 
     /// The view modes turned off for a tab ("Disable for this tab"). Saved
@@ -345,15 +365,22 @@ impl Browser {
     /// The pin or bookmark `key` was removed: its tab becomes an ordinary
     /// tab (listed again), so nothing the user had open is lost.
     pub fn release_launcher(&mut self, key: &str) -> Vec<Effect> {
+        let pin = self.pins.contains(key);
+        let mut out = Vec::new();
         let mut changed = false;
         for t in self.tabs.iter_mut().filter(|t| t.launcher.as_deref() == Some(key)) {
             t.launcher = None;
             changed = true;
+            if pin && t.life == Life::Live {
+                out.push(Effect::PinGuard { tab: t.id, on: false });
+            }
         }
         if !changed {
-            return Vec::new();
+            return out;
         }
-        vec![Effect::PersistSession(self.session()), Effect::NotifyChrome]
+        out.push(Effect::PersistSession(self.session()));
+        out.push(Effect::NotifyChrome);
+        out
     }
 
     /// A pin's or bookmark's URL changed from `old` to `new` ("Edit URL"):
@@ -395,8 +422,9 @@ impl Browser {
     /// just before `before`, or to the end of the list. Only the order
     /// changes (pairs, pins' and bookmarks' tabs stay as they are); private
     /// and other tabs are listed separately, so their relative order does
-    /// not matter.
-    pub fn move_tab(&mut self, id: TabId, before: Option<TabId>) -> Vec<Effect> {
+    /// not matter. Since 2026-11-24 the tab joins `group` (dropped next to
+    /// one of its tabs) or leaves its group (`None`).
+    pub fn move_tab(&mut self, id: TabId, before: Option<TabId>, group: Option<u64>) -> Vec<Effect> {
         if before == Some(id) {
             return Vec::new();
         }
@@ -408,6 +436,7 @@ impl Browser {
         let at = before.and_then(|b| self.tabs.iter().position(|t| t.id == b)).unwrap_or(self.tabs.len());
         let private = tab.is_private();
         self.tabs.insert(at, tab);
+        self.regroup_moved(id, group);
         let mut out = Vec::new();
         if !private {
             out.push(Effect::PersistSession(self.session()));

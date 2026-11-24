@@ -23,11 +23,16 @@ function applyNotebook() {
 }
 
 // The notebook, its code loaded and created on first use (2026-11-23).
+// `notebookEpoch` counts switches between sessions' notebooks
+// (research.js): a load begun for another session's makes nothing.
 let notebookLoading = null;
+let notebookEpoch = 0;
 function ensureNotebook() {
   if (notebook) return Promise.resolve(notebook);
   if (!notebookLoading) {
+    const epoch = notebookEpoch;
     notebookLoading = window.snorkleLoadNotebook().then(() => {
+      if (epoch !== notebookEpoch) return notebook;
       createNotebook();
       notebookPage = '';
       notebookTrack();
@@ -41,7 +46,9 @@ function ensureNotebook() {
 
 function setNotebook(open) {
   notebookOpen = open;
-  setPref('notebookOpen', open ? '1' : '0');
+  // Remembered for the session shown (research.js): a research session's
+  // notebook is open until closed there.
+  rememberNotebookOpen(open);
   if (open) ensureNotebook();
   if (open) {
     rightHidden = false;

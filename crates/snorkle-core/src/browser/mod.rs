@@ -39,6 +39,13 @@ mod items;
 mod navigation;
 mod events;
 mod visibility;
+mod spaces;
+mod groups;
+mod pins;
+
+pub use groups::{clean_group_name, TabGroup, MAX_GROUP_NAME_CHARS};
+pub use pins::{GESTURE_WINDOW_MS, MAX_DIVERTS};
+pub use spaces::{clean_research_name, valid_research_id, Research, ResearchView, MAX_RESEARCH};
 
 /// Work for the platform layer. Executed in order, on the main thread,
 /// without holding the `Browser` lock.
@@ -108,6 +115,16 @@ pub enum Effect {
     /// Only a tab's load progress changed (2026-11-23): the chrome is sent
     /// that number, not the whole state, about twenty times a page load.
     NotifyProgress(TabId),
+    /// Turns the pin guard on or off in the tab's page (2026-11-24): while
+    /// on, the page's watcher sends a real click on a link to another page
+    /// to the core (`Browser::on_pin_link`) instead of following it, and
+    /// reports other real clicks (`Browser::on_pin_gesture`). Sent after
+    /// each commit and finished load of a pin's tab, and when a tab stops
+    /// being one.
+    PinGuard {
+        tab: TabId,
+        on: bool,
+    },
 }
 
 /// Where a visible content view is placed within the content area.
@@ -241,6 +258,10 @@ pub struct TabView {
     pub emoji: Option<String>,
     /// Set while the tab shows a Save for Later archive.
     pub saved: Option<SavedView>,
+    /// The research session the tab belongs to (`None`: everyday).
+    pub space: Option<String>,
+    /// The tab group it is in.
+    pub group: Option<u64>,
 }
 
 /// A Save for Later archive in a tab, as the chrome shows it.
@@ -289,6 +310,13 @@ pub struct ChromeState {
     pub sheet: Option<TabId>,
     pub max_live_tabs: usize,
     pub adblock: AdblockStatus,
+    /// The research session shown (the active tab's; `None`: everyday
+    /// browsing, 2026-11-24).
+    pub space: Option<String>,
+    /// Every research session, oldest first.
+    pub research: Vec<ResearchView>,
+    /// Every tab group (of every session; tabs name theirs).
+    pub groups: Vec<TabGroup>,
 }
 
 const CRASH_WINDOW_MS: u64 = 60_000;
@@ -315,6 +343,14 @@ pub struct Browser {
     closed: Vec<Url>,
     /// The user's block list (Settings → Blocked).
     blocklist: BlockList,
+    /// The pins' stored URLs (2026-11-24): their tabs keep their page and
+    /// send the pages the user goes to into new tabs (`pins.rs`).
+    pins: BTreeSet<String>,
+    /// Tab groups (`groups.rs`), and the next group id.
+    groups: Vec<TabGroup>,
+    next_group: u64,
+    /// Research sessions (`spaces.rs`), oldest first.
+    research: Vec<Research>,
 }
 
 /// Most closed tabs remembered for ⌘⇧T.
@@ -399,6 +435,8 @@ fn tab_view(t: &Tab, adblock_allowed: &BTreeSet<String>) -> TabView {
             pages: c.pages.len(),
             picking: c.picking.as_ref().map(|p| p.iter().map(link_label).collect()),
         }),
+        space: t.space.clone(),
+        group: t.group,
     }
 }
 

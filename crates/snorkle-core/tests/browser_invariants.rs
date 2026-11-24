@@ -17,11 +17,11 @@ fn address_bar_ignores_provisional_and_cross_origin_url_changes() {
     assert_eq!(displayed(&b, t).unwrap(), "https://good.example/");
 
     // Same-origin pushState: accepted.
-    b.on_url_changed(t, u("https://good.example/inbox"));
+    b.on_url_changed(t, u("https://good.example/inbox"), 0);
     assert_eq!(displayed(&b, t).unwrap(), "https://good.example/inbox");
 
     // A KVO URL change to another origin outside a commit: ignored.
-    b.on_url_changed(t, u("https://evil.example/"));
+    b.on_url_changed(t, u("https://evil.example/"), 0);
     assert_eq!(displayed(&b, t).unwrap(), "https://good.example/inbox");
 
     // A provisional navigation to evil: not shown until it commits.
@@ -29,7 +29,7 @@ fn address_bar_ignores_provisional_and_cross_origin_url_changes() {
     let (v, _) = b.decide_navigation(t, &evil, Frame::Main, NavKind::LinkActivated, 0);
     assert_eq!(v, Verdict::Allow);
     b.on_provisional_start(t);
-    b.on_url_changed(t, evil.clone());
+    b.on_url_changed(t, evil.clone(), 0);
     assert_eq!(displayed(&b, t).unwrap(), "https://good.example/inbox");
 
     // If it fails, the bar still shows the page that is actually rendered.
@@ -230,7 +230,7 @@ fn private_tabs_never_reach_storage() {
     let mut all = b.navigate_input(p, "https://secret.example/", 0).unwrap();
     all.extend(webkit_load(&mut b, p, "https://secret.example/"));
     all.extend(b.on_title(p, "Secret"));
-    all.extend(b.on_url_changed(p, u("https://secret.example/2")));
+    all.extend(b.on_url_changed(p, u("https://secret.example/2"), 0));
     for e in &all {
         match e {
             Effect::RecordHistory { .. } => panic!("private history recorded"),
@@ -491,8 +491,10 @@ fn saved_zoom_is_snapped_to_a_level() {
             url_bar_attached: false,
             name: None,
             emoji: None,
+            ..Default::default()
         }],
         active: Some(0),
+        ..Default::default()
     };
     let mut b = browser(4);
     b.restore_session(&session, 0);

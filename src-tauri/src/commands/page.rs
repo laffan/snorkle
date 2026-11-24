@@ -27,9 +27,11 @@ pub async fn toggle_site_adblock(s: S<'_>, tab: u64) -> Result<bool, String> {
 }
 
 /// Bookmarks the tab's committed URL at `index` in the bookmarks bar
-/// (dragging a tab into the bar). Private tabs cannot be bookmarked.
+/// (dragging a tab into the bar), in bookmark group `group` if given (it
+/// was dropped among a group's bookmarks). Private tabs cannot be
+/// bookmarked.
 #[tauri::command]
-pub async fn bookmark_tab(s: S<'_>, tab: u64, index: usize) -> Result<bool, String> {
+pub async fn bookmark_tab(s: S<'_>, tab: u64, index: usize, group: Option<String>) -> Result<bool, String> {
     let (url, title) = {
         let b = s.browser();
         match b.tab(TabId(tab)) {
@@ -41,7 +43,7 @@ pub async fn bookmark_tab(s: S<'_>, tab: u64, index: usize) -> Result<bool, Stri
         }
     };
     let Some(store) = s.store.clone() else { return Err("Storage unavailable".into()) };
-    let added = store.insert_bookmark(&url, &title, index, wall_ms()).map_err(|e| e.to_string())?;
+    let added = store.insert_bookmark_in(&url, &title, index, group.as_deref(), wall_ms()).map_err(|e| e.to_string())?;
     if added {
         // The dragged tab becomes the bookmark's tab (moved, not duplicated).
         let (_, effects) = s.browser().bind_launcher(TabId(tab), &url);
@@ -50,11 +52,12 @@ pub async fn bookmark_tab(s: S<'_>, tab: u64, index: usize) -> Result<bool, Stri
     Ok(added)
 }
 
-/// Reorders the bookmarks bar.
+/// Reorders the bookmarks bar; the bookmark joins `group` (dropped among
+/// its bookmarks) or leaves its group (`None`; 2026-11-24).
 #[tauri::command]
-pub async fn move_bookmark(s: S<'_>, url: String, index: usize) -> Result<(), String> {
+pub async fn move_bookmark(s: S<'_>, url: String, index: usize, group: Option<String>) -> Result<(), String> {
     match s.store.clone() {
-        Some(store) => store.move_bookmark(&url, index).map_err(|e| e.to_string()),
+        Some(store) => store.place_bookmark(&url, index, group.as_deref()).map(|_| ()).map_err(|e| e.to_string()),
         None => Ok(()),
     }
 }
@@ -66,10 +69,11 @@ pub fn split_tabs(s: S<'_>, tab: u64, with: u64) {
 }
 
 /// Dragging a tab in the sidebar: moves it just before `before`, or to
-/// the end of the list.
+/// the end of the list, into tab group `group` (dropped next to one of its
+/// tabs) or out of any.
 #[tauri::command]
-pub fn move_tab(s: S<'_>, tab: u64, before: Option<u64>) {
-    with_browser(&s, |b| b.move_tab(TabId(tab), before.map(TabId)));
+pub fn move_tab(s: S<'_>, tab: u64, before: Option<u64>, group: Option<u64>) {
+    with_browser(&s, |b| b.move_tab(TabId(tab), before.map(TabId), group));
 }
 
 /// The Edit dialog for a tab: its own name (shown instead of the page's

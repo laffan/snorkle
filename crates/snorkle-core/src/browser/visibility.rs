@@ -88,9 +88,24 @@ impl Browser {
                     title: t.title.clone(),
                     name: t.name.clone(),
                     emoji: t.emoji.clone(),
+                    space: t.space.clone(),
+                    group: t.group,
                 })
                 .collect(),
             active,
+            // Groups with a saved tab; every research session (an empty one
+            // is kept: its notebook is still there).
+            groups: self
+                .groups
+                .iter()
+                .filter(|g| persistable.iter().any(|t| t.group == Some(g.id)))
+                .map(|g| crate::storage::SessionGroup { id: g.id, name: g.name.clone(), collapsed: g.collapsed })
+                .collect(),
+            research: self
+                .research
+                .iter()
+                .map(|r| crate::storage::SessionResearch { id: r.id.clone(), name: r.name.clone(), created_ms: r.created_ms })
+                .collect(),
         }
     }
 
@@ -138,6 +153,9 @@ impl Browser {
             sheet: self.front_sheet().map(|(s, _)| s),
             max_live_tabs: self.budget.max_live,
             adblock: self.adblock_status.clone(),
+            space: self.space().map(str::to_string),
+            research: self.research_views(),
+            groups: self.groups.clone(),
         }
     }
 }

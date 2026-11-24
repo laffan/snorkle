@@ -1,0 +1,81 @@
+/* The chrome's styles, part 4 (2026-11-24): research sessions, tab and
+   bookmark groups, chosen rows and the item menu's lower part. */
+
+/* ---- research sessions ---- */
+/* A session's sidebar has its own tabs only. */
+body.research #pins, body.research #bookmarks, body.research #side-scroll > .side-gap { display: none; }
+#research-head {
+  display: flex; align-items: center; gap: 2px; margin: 4px 0 8px; padding: 2px; border-radius: 10px;
+}
+#research-head[hidden] { display: none; }
+#research-head .rs-back { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 8px; }
+#research-head .rs-back svg, #research-head .rs-rename svg { width: 18px; height: 18px; }
+#research-head .rs-topic {
+  flex: 1; min-width: 0; padding: 6px 4px; text-align: left; font-size: 15px; font-weight: 700;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-radius: 8px;
+}
+/* Rename shows on hover (always on touch-only devices). */
+#research-head .rs-rename { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; color: var(--muted); opacity: 0; transition: opacity .1s; }
+#research-head:hover .rs-rename, #research-head:focus-within .rs-rename { opacity: 1; }
+@media (any-hover: none) { #research-head .rs-rename { opacity: 1; } }
+#research-head .rs-rename:hover, #research-head .rs-back:hover { color: var(--fg); background: var(--field); }
+#research-head .rs-field, .group-rename {
+  flex: 1; min-width: 0; font: inherit; color: var(--fg); background: var(--field);
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; outline: none;
+}
+#research-head .rs-field { font-size: 15px; font-weight: 700; }
+
+/* Every session, as tabs along the foot of the sidebar, above its buttons. */
+#research-list {
+  display: flex; flex-direction: column; gap: 2px; padding: 6px 8px 4px;
+  border-top: 1px solid var(--line); max-height: 30%; overflow-y: auto; background: var(--side);
+}
+#research-list[hidden] { display: none; }
+.rs-row { position: relative; display: flex; align-items: center; border-radius: 10px; }
+.rs-row.active { background: var(--tab-active); }
+.rs-row > .open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 8px; text-align: left; font-size: 13px;
+}
+.rs-row > .open svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); }
+.rs-row .t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rs-row.active .t { font-weight: 600; }
+.rs-row .rs-count { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rs-row:focus-within > .row-actions { opacity: 1; pointer-events: auto; }
+@media (any-hover: hover) { .rs-row:hover > .row-actions { opacity: 1; pointer-events: auto; } }
+
+/* ---- tab and bookmark groups ---- */
+.tgroup, .bgroup { display: flex; flex-direction: column; gap: 2px; border-radius: 12px; }
+.group-head { position: relative; display: flex; align-items: center; border-radius: 10px; }
+.group-toggle {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 6px 4px 6px 8px;
+  text-align: left; font-size: 13px; font-weight: 700;
+}
+.group-chev { width: 12px; flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.group-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.group-count {
+  flex: 0 0 auto; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); color: var(--muted);
+}
+.tgroup.collapsed .group-count, .bgroup.collapsed .group-count { background: var(--fg); color: var(--bar); border-color: var(--fg); }
+.tgroup.active.collapsed > .group-head { background: var(--tab-active); }
+:is(.tgroup, .bgroup) > :is(.tab, .bm, .tab-group).child { margin-left: 14px; }
+:is(.tgroup, .bgroup).collapsed > :is(.tab, .bm, .tab-group) { display: none; }
+/* A thin line down the side of a group's rows. */
+:is(.tgroup, .bgroup):not(.collapsed) { box-shadow: inset 2px 0 0 0 var(--line); }
+.group-head:focus-within > .row-actions { opacity: 1; pointer-events: auto; }
+@media (any-hover: hover) { .group-head:hover > .row-actions { opacity: 1; pointer-events: auto; } }
+@media (any-hover: none) { .group-head > .row-actions { opacity: 1; pointer-events: auto; } }
+.group-head.drag-src { opacity: .35; }
+
+/* ---- chosen rows (⌘- and ⇧-click) ---- */
+.tab.chosen, .bm.chosen { box-shadow: 0 0 0 2px var(--accent) inset; }
+.tab.chosen:not(.active), .bm.chosen:not(.active) { background: var(--field); }
+
+/* ---- the item menu's lower part ---- */
+#item-more { display: flex; flex-direction: column; }
+#item-more:empty { display: none; }
+.menu-label { font-size: 12px; color: var(--muted); padding: 6px 12px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.popup.pin-pop { max-height: calc(100% - 16px); overflow-y: auto; }
+.group-head .group-rename { margin: 3px 4px; padding: 4px 8px; font-size: 13px; font-weight: 700; }
+/* History replaces the sidebar's contents, the sessions' row included. */
+body.history-open #research-list { display: none; }

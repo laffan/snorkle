@@ -405,8 +405,16 @@ pub const DEFAULT_PROFILE_STORE_ID: [u8; 16] =
 /// Produces content-blocking rule-list JSON documents (runs off the main
 /// thread).
 pub type MakeRuleLists = Box<dyn FnOnce() -> Result<Vec<String>, String> + Send>;
-/// Completion of a favicon fetch: app-encoded PNG bytes, or `None`.
-pub type FaviconDone = Box<dyn FnOnce(Option<Vec<u8>>) + Send>;
+/// A favicon the app drew: PNG bytes, and (2026-11-24) a copy for the
+/// dark appearance when the icon is too dark to see there
+/// (`snorkle_core::favicon::needs_dark_variant`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FaviconPngs {
+    pub png: Vec<u8>,
+    pub dark: Option<Vec<u8>>,
+}
+/// Completion of a favicon fetch: the app-encoded icon, or `None`.
+pub type FaviconDone = Box<dyn FnOnce(Option<FaviconPngs>) + Send>;
 /// Completion of a rule-list install, with the number of lists installed.
 pub type RulesDone = Box<dyn FnOnce(Result<usize, String>) + Send>;
 

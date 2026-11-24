@@ -11,7 +11,7 @@
 (() => {
   const NOTEBOOK = ['base', 'ink', 'markdown', 'chips', 'lasso', 'texts', 'search', 'surface', 'minimap', 'notebook'];
   const CHROME = [
-    'core', 'render', 'later', 'downloads', 'history', 'items', 'drag', 'sidebar', 'settings', 'layout', 'modes',
+    'core', 'render', 'later', 'downloads', 'history', 'items', 'groups', 'research', 'drag', 'sidebar', 'settings', 'layout', 'modes',
     'ai', 'archive', 'notebook-dock', 'console', 'palette', 'shortcuts', 'find', 'keys', 'selection', 'wiring',
   ];
   const add = (src) => {

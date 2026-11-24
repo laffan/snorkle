@@ -209,6 +209,19 @@ pub struct Tab {
     /// this for its whole life (links that leave the archive open in a new
     /// ordinary tab), so ordinary tabs never show a saved copy.
     pub saved: Option<SavedCopy>,
+    /// The research session the tab belongs to (2026-11-24; `None`:
+    /// everyday browsing). Saved with the session.
+    pub space: Option<String>,
+    /// The tab group it is in (2026-11-24), always one of the same
+    /// session and profile; a group's tabs are next to each other in the
+    /// list. Saved with the session.
+    pub group: Option<u64>,
+    /// A pin's tab (2026-11-24): when the page last reported a real click
+    /// or key press (Unix ms of the core's clock), so a route change right
+    /// after one is the user leaving the pin's page, not the page's own.
+    pub gesture_ms: Option<u64>,
+    /// A pin's tab: when it last sent pages to new tabs (rate limit).
+    pub diverted_ms: Vec<u64>,
 }
 
 /// A Save for Later archive shown in a tab (2026-11-09): which saved item,
@@ -310,6 +323,10 @@ impl Tab {
             name: None,
             emoji: None,
             saved: None,
+            space: None,
+            group: None,
+            gesture_ms: None,
+            diverted_ms: Vec::new(),
         }
     }
 

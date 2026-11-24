@@ -107,6 +107,12 @@ impl ContentHost {
                     }
                 }
                 Effect::OpenExternal(url) => open_external(url),
+                // A pin's tab keeps its page (C25): constant code, one boolean.
+                Effect::PinGuard { tab, on } => {
+                    if let Some(v) = self.views.get(tab) {
+                        crate::webkit::injection::run_now(self.mtm, &v.web, &snorkle_core::pinguard::set_js(*on));
+                    }
+                }
                 // Handled by the app layer, not the content host.
                 Effect::RecordHistory { .. }
                 | Effect::PersistSession(_)

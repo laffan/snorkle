@@ -10,8 +10,12 @@ function render() {
   barAttached = !!(tab && tab.url_bar_attached);
   document.body.classList.toggle('bar-attached', barAttached);
   renderAttachBar();
+  const wasDark = chromeDark();
   document.body.classList.toggle('private', !!(tab && tab.private));
+  // Private chrome is always dark: icons switch to their dark copies.
+  if (chromeDark() !== wasDark) iconsThemeChanged();
   renderOs();
+  renderResearch();
   renderTabs();
   renderLauncherSelection();
   renderLaterSelection();
@@ -67,10 +71,34 @@ function siteOf(t) {
   return t.url ? t.url.registrable : '';
 }
 
-// Tabs that can join a same-site group: listed, and not in a split pair.
-function groupable(t) {
-  return t.sheet_over === null && t.launcher === null && !t.saved && !pairOf(t.id);
+// Tabs listed in the sidebar now: not popup sheets, pins' or bookmarks'
+// tabs or saved copies, and of the session shown (everyday or research).
+function listedHere(t) {
+  return t.sheet_over === null && t.launcher === null && !t.saved && (t.space || null) === (state.space || null);
 }
+
+// Tabs that can join a same-site group: listed, not in a split pair or
+// in a tab group of the user's.
+function groupable(t) {
+  return listedHere(t) && !pairOf(t.id) && (t.group === null || t.group === undefined);
+}
+
+// Whether the chrome is dark (Settings → Appearance, the system's, or a
+// private tab's chrome): favicons too dark to see there show their light
+// copy (2026-11-24, made when the icon was fetched).
+function chromeDark() {
+  if (document.body && document.body.classList.contains('private')) return true;
+  const theme = document.documentElement.dataset.theme;
+  if (theme) return theme === 'dark';
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function iconsThemeChanged() {
+  tabsKey = '';
+  if (state) renderTabs();
+  renderBookmarks();
+  renderPins();
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', iconsThemeChanged);
 
 // The split pair holding a tab, if any.
 function pairOf(id) {
@@ -81,7 +109,7 @@ function pairOf(id) {
 // on and sends icons this chrome has not seen yet (`tab_icons`), fetching
 // missing ones for non-private tabs; `icons` events say one arrived.
 // Cached here by host for the session.
-const tabIcons = { hosts: new Map(), bookmarks: new Map(), icons: new Map(), version: 0 };
+const tabIcons = { hosts: new Map(), bookmarks: new Map(), icons: new Map(), dark: new Map(), version: 0 };
 let tabIconsKey = '';
 let tabIconsTimer = 0;
 function refreshTabIcons(force) {
@@ -96,6 +124,9 @@ function refreshTabIcons(force) {
       const bmBefore = bookmarkIconsKey();
       for (const [h, url] of Object.entries(r.icons)) {
         if (typeof url === 'string' && url.startsWith('data:image/png;base64,')) tabIcons.icons.set(h, url);
+      }
+      for (const [h, url] of Object.entries(r.dark || {})) {
+        if (typeof url === 'string' && url.startsWith('data:image/png;base64,')) tabIcons.dark.set(h, url);
       }
       tabIcons.version++;
       if (state) renderTabs();
@@ -113,7 +144,7 @@ function bookmarkIconsKey() {
 // a new tab). `display` is the row's DisplayUrl, `url` its address.
 function rowIcon(url, display, host) {
   const prefab = url && prefabIcon(url);
-  const fav = host && tabIcons.icons.get(host);
+  const fav = host && ((chromeDark() && tabIcons.dark.get(host)) || tabIcons.icons.get(host));
   const fallback = () => {
     if (!display) return el('span', 'tab-icon');
     const l = letterTile(display);
@@ -158,9 +189,12 @@ function renderTabSelection() {
 function renderTabs() {
   refreshTabIcons(false);
   const key = JSON.stringify([
-    state.tabs.map((t) => [t.id, !!t.saved, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, !!t.url && conversationSite(t), t.sheet_over, t.launcher, tabIcons.hosts.get(t.id)]),
+    state.tabs.map((t) => [t.id, !!t.saved, t.title, t.name, t.emoji, t.private, t.live, t.url && t.url.registrable, !!t.url && conversationSite(t), t.sheet_over, t.launcher, tabIcons.hosts.get(t.id), t.space, t.group]),
     state.splits,
+    state.groups,
+    state.space,
     tabIcons.version,
+    chromeDark(),
   ]);
   if (key === tabsKey) { renderTabSelection(); return; }
   tabsKey = key;
@@ -175,9 +209,16 @@ function renderTabs() {
     // Pop-up sheets are not tabs (their opener is shown as selected),
     // tabs that belong to a pin or bookmark are shown as that item, and a
     // saved copy's tab only as its card in Save for Later.
-    if (placed.has(t.id) || t.sheet_over !== null || t.launcher !== null || t.saved) continue;
+    if (placed.has(t.id) || !listedHere(t)) continue;
     const pair = pairOf(t.id);
     const list = t.private ? priv : normal;
+    // The user's tab groups (2026-11-24): a heading and their tabs.
+    const g = t.group !== null && t.group !== undefined && (state.groups || []).find((x) => x.id === t.group);
+    if (g) {
+      const members = state.tabs.filter((o) => o.group === g.id && listedHere(o));
+      list.appendChild(tabGroupNode(g, members, byId, placed));
+      continue;
+    }
     if (pair && byId.has(pair.left) && byId.has(pair.right)) {
       // A split pair is one row, at the position of whichever tab comes
       // first, left pane on the left.
@@ -240,6 +281,7 @@ function renderTabs() {
   $('private-head').hidden = !priv.childElementCount;
   const act = $('sidebar').querySelector('.tab.active');
   if (act && !dragState) act.scrollIntoView({ block: 'nearest' });
+  afterRender();
 }
 
 // The tab shown as selected in the sidebar: the active tab, or the tab
@@ -260,8 +302,11 @@ function tabNode(t, pair) {
   const open = el('button', 'open');
   open.appendChild(el('span', 't', t.name || t.title || (t.url ? t.url.registrable : t.private ? 'Private Tab' : 'New Tab')));
   if (t.url) open.title = t.url.registrable;
-  open.addEventListener('click', () => {
+  open.addEventListener('click', (ev) => {
     if (suppressClick) return;
+    // ⌘- and ⇧-click choose tabs (2026-11-24), for the menu's group,
+    // Remove and Send to.
+    if (chooseClick(ev, node)) return;
     invoke('activate_tab', { tab: t.id });
     if (narrow) setSidebar(false);
   });
@@ -284,11 +329,15 @@ function tabNode(t, pair) {
   acts.appendChild(close);
   node.appendChild(acts);
   node.addEventListener('pointerdown', (ev) => armDrag(ev, node, { kind: 'tab', id: t.id, private: t.private, paired: !!pair }));
-  // Right-click: the item menu (Copy URL, Edit…).
+  // Right-click: the item menu (Copy URL, Edit…; groups, Remove, Send to),
+  // for every chosen tab when this is one of them.
   node.addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
     cancelPending();
+    const keys = menuTargets('tab', t.id);
     openPinPop({ url: t.url ? t.url.full : '', id: t.id }, node, 'tab');
+    fillItemMore('tab', keys);
+    placePinPop(node);
   });
   return node;
 }
@@ -301,7 +350,10 @@ function renderToolbar(tab) {
   reload.setAttribute('aria-label', 'Reload');
   $('bookmark').disabled = !(tab && tab.url && !tab.private);
   const marked = !!(tab && ((tab.launcher && bookmarks.some((b) => b.url === tab.launcher)) || (tab.url && bookmarks.some((b) => b.url === tab.url.full))));
-  $('bookmark').querySelector('.label').textContent = marked ? 'Remove Bookmark' : 'Bookmark';
+  // A pin's tab: ⌘D bookmarks the pin; a bookmark made from it is not
+  // removed from there.
+  const pinTab = !!(tab && tab.launcher && pins.some((p) => p.url === tab.launcher));
+  $('bookmark').querySelector('.label').textContent = pinTab ? (marked ? 'Pin Bookmarked' : 'Bookmark Pin') : marked ? 'Remove Bookmark' : 'Bookmark';
   $('bookmark').querySelector('.state').textContent = marked ? '\u2605' : '\u2606';
   $('block-site').disabled = !(tab && tab.url && tab.adblock);
   $('open-in-app').disabled = !(tab && tab.url);

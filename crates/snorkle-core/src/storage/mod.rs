@@ -30,9 +30,12 @@ use crate::userscripts::{self, UserScript, UserScriptError};
 use crate::ai::Provider;
 
 mod files;
+mod groups;
 mod history;
 mod items;
 mod settings;
+
+pub use groups::{valid_bookmark_group_id, BookmarkGroup};
 
 pub use files::{data_url, favicon_host, png_data_url, png_summary};
 pub(crate) use files::{atomic_write, load_or_reset};
@@ -61,15 +64,42 @@ pub struct Bookmark {
     pub url: String,
     pub title: String,
     pub created_ms: u64,
+    /// The bookmark group it is in (`BookmarkGroup::id`; 2026-11-24).
+    /// Always `None` for pins (the pinned grid has no groups).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Session {
     pub tabs: Vec<SessionTab>,
     pub active: Option<usize>,
+    /// Tab groups (2026-11-24) that have saved tabs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<SessionGroup>,
+    /// Research sessions (2026-11-24), kept while they have no saved tabs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub research: Vec<SessionResearch>,
 }
 
+/// A tab group as saved (its tabs name it by `id`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionGroup {
+    pub id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
+/// A research session as saved (its tabs name it by `id`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionResearch {
+    pub id: String,
+    pub name: String,
+    pub created_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SessionTab {
     pub url: String,
     pub title: String,
@@ -90,6 +120,12 @@ pub struct SessionTab {
     /// The emoji shown instead of the tab's favicon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emoji: Option<String>,
+    /// The research session the tab belongs to (`SessionResearch::id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
+    /// The tab group it is in (`SessionGroup::id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<u64>,
 }
 
 /// Returns the normalised URL string if `s` is an http(s) URL.
@@ -121,6 +157,8 @@ struct Data {
     user_scripts: Vec<UserScript>,
     ai_usage: Vec<AiUsageEvent>,
     pins: Vec<Bookmark>,
+    /// Groups of bookmarks (2026-11-24).
+    bookmark_groups: Vec<BookmarkGroup>,
     chats: Vec<ChatRecord>,
     launch_modes: crate::viewmodes::LaunchModes,
     /// Settings → Blocked (patterns as stored; compiled by the caller).
@@ -418,9 +456,13 @@ pub fn clean_emoji(s: &str) -> Option<String> {
 /// Versioned: older caches are deleted and icons fetched again (v1: raw
 /// snapshot encoding the chrome could fail to display; v2: icons offset
 /// by the snapshot view's desktop layout; v3: root-only lookup and blank snapshots).
-const ICONS_DIR: &str = "icons-v4";
-const OLD_ICONS_DIRS: &[&str] = &["icons", "icons-v2", "icons-v3"];
+/// v4: one copy per icon; v5 (2026-11-24) adds a dark-appearance copy of
+/// icons too dark to see there, so icons are fetched once more.
+const ICONS_DIR: &str = "icons-v5";
+const OLD_ICONS_DIRS: &[&str] = &["icons", "icons-v2", "icons-v3", "icons-v4"];
 
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod groups_tests;
