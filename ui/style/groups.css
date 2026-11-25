@@ -5,7 +5,7 @@
 /* A session's sidebar has its own tabs only. */
 body.research #pins, body.research #bookmarks, body.research #side-scroll > .side-gap { display: none; }
 #research-head {
-  display: flex; align-items: center; gap: 2px; margin: 4px 0 8px; padding: 2px; border-radius: 10px;
+  display: flex; align-items: center; gap: 2px; margin: 8px 0 8px; padding: 2px; border-radius: 10px;
 }
 #research-head[hidden] { display: none; }
 #research-head .rs-back { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 8px; }
@@ -96,9 +96,9 @@ body.history-open #research-list { display: none; }
 .rs-row.active > .row-actions { --close-bg: var(--tab-active); }
 @media (any-hover: none) { .rs-row > .row-actions { opacity: 1; pointer-events: auto; } }
 
-/* iPadOS: the window's top 30 pt belongs to the system's window drag
-   (core.js, IPAD_TOP_STRIP): the sidebar's rows start below it. */
-html.ipados #side-scroll, html.ipados #history-view { padding-top: 30px; }
+/* iPadOS: the sidebar's rows no longer start below the window's top
+   30 pt (core.js, IPAD_TOP_STRIP): owner request 2026-11-24, no gap above
+   the pins. */
 
 /* The research sessions' rows fade with the foot's buttons (owner request
    2026-11-24): hidden unless the sidebar is pointed at, has the focus,

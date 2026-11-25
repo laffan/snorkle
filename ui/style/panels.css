@@ -103,20 +103,20 @@ label.option-title { display: block; }
 /* ---- start page (a new tab) and its palette ------------------------------ */
 /* The start page fills its pane (the surface: the content area, or the
    focused half of a split), in the sidebar's own background (2026-11-24),
-   with no URL bar. The input's middle sits at 40% of the pane's height, a
-   little above centre; it is a field rounded alike at all four corners
+   with no URL bar. The input's middle sits at the pane's middle (2026-11-24;
+   40% before); it is a field rounded alike at all four corners
    (2026-11-24), and once something is typed the rows open in a card under
    it, scrolling inside the card rather than pushing the input up. */
 #surface > #start { position: absolute; inset: 0; max-width: none; margin: 0; overflow: hidden; background: var(--side); }
 body.start-page #toolbar { display: none; }
 #start .palette {
-  position: absolute; left: 50%; top: 40%; transform: translate(-50%, -31px);
-  width: min(640px, calc(100% - 48px)); max-height: calc(60% - 57px);
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -26px);
+  width: min(600px, calc(100% - 48px)); max-height: calc(50% + 2px);
   display: flex; flex-direction: column; gap: 8px;
 }
 #palette-input {
-  flex: none; width: 100%; height: 62px; border: 1px solid var(--line); border-radius: 16px; outline: none; background: var(--bar);
-  padding: 0 20px; font-size: 20px;
+  flex: none; width: 100%; height: 52px; border: 1px solid var(--line); border-radius: 14px; outline: none; background: var(--bar);
+  padding: 0 18px; font-size: 18px;
 }
 .palette-list {
   list-style: none; margin: 0; padding: 6px; flex: 1 1 auto; min-height: 0; overflow-y: auto;
@@ -133,8 +133,8 @@ body.start-page #toolbar { display: none; }
 /* Define: the definition sits above the input (the input stays where it
    is), scrolling inside its card when long. */
 .define-card {
-  position: absolute; left: 50%; bottom: calc(60% + 43px); transform: translateX(-50%);
-  width: min(640px, calc(100% - 48px)); max-height: calc(40% - 55px);
+  position: absolute; left: 50%; bottom: calc(50% + 38px); transform: translateX(-50%);
+  width: min(600px, calc(100% - 48px)); max-height: calc(50% - 62px);
   display: flex; flex-direction: column; gap: 10px; padding: 14px 18px;
   background: var(--bar); border: 1px solid var(--line); border-radius: 16px;
   overflow: hidden;

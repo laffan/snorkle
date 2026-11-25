@@ -175,7 +175,9 @@ body.resizing #sidebar { transition: none; }
    drags the window (double-click zooms). The window's buttons show only
    while the pointer is in the window's top-left corner (host,
    2026-11-23; before, they sat in a 40 pt strip here). */
-#titlebar { display: none; flex: none; height: 12px; }
+/* Over the top of the sidebar, not above its contents (2026-11-24: the
+   pins start as far from the top as from the left). */
+#titlebar { display: none; position: absolute; top: 0; left: 0; right: 0; height: 8px; z-index: 1; }
 html.macos #titlebar { display: block; }
 html.macos body.sb-flyout #titlebar { display: none; }
 #side-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px 12px; }
@@ -184,7 +186,9 @@ body.dragging #side-scroll { overflow-y: hidden; }
    bookmarks and the tabs. */
 .side-gap { height: 0; margin: 8px 4px; }
 .side-gap.side-rule { height: 1px; margin: 10px 4px; background: var(--line); }
-#pins { margin-top: 10px; }
+/* The first row as far from the top as from the left (8 pt of the
+   scroll area's padding, 2 of the grid's; 2026-11-24). */
+#pins { margin-top: 8px; }
 .side-section { margin: 14px 4px 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .tablist, .droplist { display: flex; flex-direction: column; gap: 2px; }
 .droplist { min-height: 44px; border-radius: 10px; padding: 2px 0; }
