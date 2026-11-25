@@ -52,9 +52,6 @@ let chatOpen = false;
 // The Notebook (ui/notebook/; remembered): docked with the right panels.
 let notebookOpen = false;
 let notebook = null;
-// ⌘⇧\ hides the right panels without closing them (the summary view
-// and the chat stay on, and come back with the next ⌘⇧\).
-let rightHidden = false;
 // The sidebar shown as a pop-over from the left-edge tab (sidebar closed).
 let findOpen = false; // ⌘F bar
 let confirmAction = null; // { tab, run } while a confirmation is shown

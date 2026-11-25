@@ -363,7 +363,7 @@
         const r = c && c.getBoundingClientRect();
         return r && cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
       });
-      if (fixed) env.goTo(fixed.target);
+      if (fixed) env.goTo(linkChips.linkAt(fixed, chips.get(fixed.id), cx, cy) || fixed.target);
       else texts.bareTap(cx, cy);
       return undefined;
     }

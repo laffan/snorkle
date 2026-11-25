@@ -43,7 +43,7 @@ function summaryFor(t) {
 // The AI panel is shown: docked right of the page, or (narrow windows)
 // over it.
 function summaryShown() {
-  return !!state && !scriptsOpen && !rightHidden && summaryOn();
+  return !!state && !scriptsOpen && summaryOn();
 }
 
 // The AI sidebar: the summary of the page above the chat about it.

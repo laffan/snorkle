@@ -97,15 +97,20 @@ pub async fn save_notebook(s: S<'_>, notebook: String, space: Option<String>) ->
 /// search; stored with the clip, not shown). `words`: the number to ask
 /// [`notebook_clip_words`] for the words text recognition reads in it,
 /// which come later (2026-11-16: the clip is not held back for them).
+/// `links`: the links laid out in it, shown under it; `at`: its box in the
+/// page's document, to go back to ([`notebook_clip_back`]; 2026-11-25).
 #[derive(serde::Serialize)]
 pub struct Clip {
     image: String,
     text: String,
     words: u64,
+    links: Vec<notebook::ClipLink>,
+    at: Option<[f64; 4]>,
 }
 
-/// The text shown in a region of `tab`'s page (C23 read-back), or "".
-fn region_text(tab: TabId, rect: (f64, f64, f64, f64)) -> String {
+/// What a region of `tab`'s page holds (C23 read-back: its text, its
+/// links, its box in the document), or nothing.
+fn region_text(tab: TabId, rect: (f64, f64, f64, f64)) -> notebook::Region {
     let js = notebook::region_text_js(rect.0, rect.1, rect.2, rect.3);
     let (tx, rx) = mpsc::channel();
     snorkle_content::dispatch_main(move || {
@@ -119,7 +124,7 @@ fn region_text(tab: TabId, rect: (f64, f64, f64, f64)) -> String {
             let _ = tx2.send(None);
         }
     });
-    wait(rx, REGION_TEXT_LIMIT).flatten().and_then(|t| notebook::parse_region_text(&t)).unwrap_or_default()
+    wait(rx, REGION_TEXT_LIMIT).flatten().and_then(|t| notebook::parse_region(&t)).unwrap_or_default()
 }
 
 /// The page's text in the region, then the lines on-device recognition
@@ -193,8 +198,9 @@ pub async fn notebook_clip(s: S<'_>, tab: u64, x: f64, y: f64, w: f64, h: f64, v
     // not arrive can be traced.
     shared.log(Level::Debug, Some(tab), &format!("notebook clip: {w:.0}x{h:.0} at {x:.0},{y:.0} (view {vw:.0})"));
     tauri::async_runtime::spawn_blocking(move || {
-        let page = region_text(tab, (x, y, w, h));
-        shared.log(Level::Debug, Some(tab), &format!("notebook clip: page text {} chars", page.chars().count()));
+        let notebook::Region { text: page, links, at } = region_text(tab, (x, y, w, h));
+        let msg = format!("notebook clip: page text {} chars, {} links", page.chars().count(), links.len());
+        shared.log(Level::Debug, Some(tab), &msg);
         snorkle_content::dispatch_main(move || with_host(|h| h.plain_page(tab, true)));
         std::thread::sleep(Duration::from_millis(PLAIN_MS));
         let (tx, rx) = mpsc::channel();
@@ -226,7 +232,7 @@ pub async fn notebook_clip(s: S<'_>, tab: u64, x: f64, y: f64, w: f64, h: f64, v
             let extra = q.len().saturating_sub(WORDS_KEPT);
             q.drain(..extra);
         }
-        Ok(Clip { image, text, words })
+        Ok(Clip { image, text, words, links, at })
     })
     .await
     .map_err(|_| "This part of the page can't be clipped.".to_string())?
@@ -266,6 +272,19 @@ pub async fn notebook_link_title(s: S<'_>, tab: u64, url: String) -> Result<Opti
         .await
         .map_err(|_| "Couldn't load the page.".to_string())?;
     Ok(head.flatten().and_then(|h| notebook::page_title(&h)))
+}
+
+/// Going back to a clip (2026-11-25): `tab`'s page, the clip's page, is
+/// scrolled to the clip's box in its document (`notebook::back_js`, four
+/// numbers) and the box is outlined there for a moment. From a live,
+/// non-private tab only.
+#[tauri::command]
+pub fn notebook_clip_back(s: S<'_>, tab: u64, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+    let tab = TabId(tab);
+    capturable(&s, tab)?;
+    let js = notebook::back_js(x, y, w, h);
+    snorkle_content::dispatch_main(move || with_host(|h| h.notebook_run(tab, &js)));
+    Ok(())
 }
 
 /// The notebook's scissors: clip mode on or off in `tab`'s page (a drag

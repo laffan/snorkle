@@ -1,13 +1,18 @@
 /* The Notebook (ui/notebook/): zotero-helper's notepad (notepad.css,
    notepad-clips.css, notepad-texts.css), on Snorkle's colours. One
-   continuous surface in the panel's colour: a slim bar of tools over the
-   canvas, which the pen writes on in the theme's ink (or red) and a finger
-   pans. Docked right of the page, with the other right panels. */
+   continuous surface in the sidebar's colour (2026-11-25): a slim capsule
+   of tools over the canvas, which the pen writes on in the theme's ink (or
+   red) and a finger pans. Docked right of the page, with the other right
+   panels. */
 .notepad {
   --notepad-ink: var(--fg);
   --nb-text: var(--fg);
   --nb-dim: var(--muted);
-  --nb-panel: var(--bar);
+  /* The panel: the left sidebar's colour (owner request 2026-11-25).
+     What floats on it (the capsule of tools, menus, the clear question)
+     is raised in the bar's colour, as the URL bar is. */
+  --nb-panel: var(--side);
+  --nb-raised: var(--bar);
   --nb-border: var(--line);
   --nb-select: var(--field);
   --nb-accent: #2f6fdb;
@@ -27,21 +32,28 @@
 .notepad-bar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 6px 6px 4px;
+  padding: 8px 8px 4px;
   -webkit-user-select: none;
   user-select: none;
 }
+/* The tools in one capsule, drawn as the URL bar is (bar.css,
+   #toolbar.urlpill): the bar's colour, a hairline border, round ends
+   (2026-11-25; before, a line under the bar and an orange pill for the
+   quote button and the scissors). */
+.notepad-capsule {
+  display: flex; flex: 1; min-width: 0; align-items: center; gap: 2px;
+  padding: 3px 6px; border-radius: 19px; background: var(--nb-raised); border: 1px solid var(--nb-border);
+}
+@media (min-resolution: 2dppx) { .notepad-capsule { border-width: .5px; } }
 .notepad-bar-grab { flex: 1; align-self: stretch; min-width: 8px; }
 .notepad-tool {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 28px; padding: 0; border: none; border-radius: 6px;
+  width: 30px; height: 28px; padding: 0; border: none; border-radius: 14px;
   background: transparent; color: var(--nb-dim);
 }
 .notepad-tool:hover:not(:disabled) { background: var(--nb-select); color: var(--nb-text); }
 .notepad-tool.active { background: var(--nb-select); color: var(--nb-text); }
 .notepad-tool:disabled { opacity: 0.35; }
-.notepad-close { min-width: 28px; height: 28px; border-radius: 14px; font-size: 20px; margin-left: 2px; }
 /* What the pen does: one switch of four parts — ink, red, the eraser, the
    lasso — the part in force filled. */
 .notepad-modes {
@@ -54,23 +66,16 @@
   background: transparent; color: var(--nb-dim); cursor: pointer;
 }
 .notepad-mode svg { width: 14px; height: 14px; }
-.notepad-mode.on { background: var(--nb-panel); color: var(--nb-text); }
+.notepad-mode.on { background: var(--nb-raised); color: var(--nb-text); }
 .notepad-mode-dot {
   width: 10px; height: 10px; border-radius: 50%; background: var(--swatch, var(--notepad-ink));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--nb-dim) 45%, transparent);
 }
-/* The quote button and the scissors: one orange pill split in two, their
-   glyphs in the panel's colour; a half is darker while its tool works. */
-.notepad-from-pages {
-  display: inline-flex; flex-shrink: 0; margin: 0 6px 0 2px; border-radius: 13px; overflow: hidden; background: #f19837;
-}
-.notepad-quote-btn, .notepad-clip-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 26px; padding: 0; border: none; border-radius: 0;
-  background: transparent; color: var(--nb-panel);
-  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
-}
-.notepad-quote-btn { padding-left: 2px; cursor: grab; touch-action: none; }
+/* The quote button and the scissors: tools like the others, side by side
+   (2026-11-25: no orange pill); filled as the others are while at work. */
+.notepad-from-pages { display: inline-flex; flex-shrink: 0; gap: 2px; margin-right: 4px; }
+.notepad-quote-btn, .notepad-clip-btn { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.notepad-quote-btn { cursor: grab; touch-action: none; }
 /* While the page shown loads (2026-11-24): its sentences still move. */
 .notepad-quote-btn.waiting { opacity: 0.35; cursor: progress; }
 /* iPadOS: a drag begun in the window's top ~30 pt moves the window (or
@@ -78,14 +83,11 @@
    keeps its buttons below that strip; the strip is the notebook's own
    background (2026-11-24; core.js, IPAD_TOP_STRIP). */
 html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
-.notepad-clip-btn { padding-right: 2px; box-shadow: inset 1px 0 0 color-mix(in srgb, var(--nb-panel) 55%, transparent); }
-.notepad-quote-btn svg, .notepad-clip-btn svg { width: 13px; height: 13px; }
-.notepad-quote-btn:hover, .notepad-clip-btn:hover { background: rgb(0 0 0 / 0.08); }
-.notepad-quote-btn.on, .notepad-clip-btn.on { background: rgb(0 0 0 / 0.22); }
+.notepad-quote-btn svg, .notepad-clip-btn svg { width: 15px; height: 15px; }
 .notepad-undo { color: var(--nb-text); opacity: 0.8; }
 /* Under the bar: the minimap (when shown) and the canvas, side by side;
    the trash can at the canvas's lower left. */
-.notepad-main { position: relative; flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--nb-border); }
+.notepad-main { position: relative; flex: 1; min-height: 0; display: flex; }
 /* A very faint dot grid, moving with the canvas as it pans. A hand: a
    mouse or trackpad pans it (only a pencil draws). */
 .notepad-canvas {
@@ -137,7 +139,7 @@ html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
   background: color-mix(in srgb, var(--nb-accent) 6%, transparent); pointer-events: none;
 }
 .notepad-selection-menu, .notepad-link-menu {
-  padding: 3px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-panel);
+  padding: 3px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-raised);
 }
 .notepad-selection-menu { position: absolute; bottom: calc(100% + 6px); left: 0; pointer-events: auto; }
 .notepad-link-menu { position: absolute; z-index: 4; }
@@ -164,7 +166,7 @@ html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
 .notepad-trash:hover { opacity: 1; background: var(--nb-select); }
 .notepad-confirm {
   position: absolute; z-index: 4; left: 6px; bottom: 42px; display: flex; align-items: center; gap: 6px;
-  padding: 6px 6px 6px 10px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-panel);
+  padding: 6px 6px 6px 10px; border: 1px solid var(--nb-border); border-radius: 8px; background: var(--nb-raised);
   font-size: 12px; white-space: nowrap;
 }
 .notepad-main.with-map .notepad-confirm { left: 66px; }
@@ -209,6 +211,17 @@ html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
 :root[data-theme="dark"] .notepad-clip.fixed.has-dark .notepad-clip-img.light { display: none; }
 :root[data-theme="dark"] .notepad-clip.fixed .notepad-clip-img.dark { display: block; }
 :root[data-theme="dark"] .notepad-clip.fixed:not(.has-dark) .notepad-clip-img.light { filter: invert(1) hue-rotate(180deg); }
+/* The links laid out in a clip (2026-11-25): under its picture, above its
+   page, one a line as link chips show them (the icon, the words, the site). */
+.notepad-clip-links { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.notepad-clip-link {
+  display: flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 4px 2px 3px; border-radius: 4px;
+  font-size: 12px; line-height: 1.35; cursor: pointer;
+}
+.notepad-clip-link > svg { flex-shrink: 0; color: #ff5f57; }
+.notepad-clip-link:hover { background: var(--nb-select); }
+.notepad-clip-link-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notepad-clip-link .notepad-link-page { flex-shrink: 0; font-size: 11px; }
 .notepad-clip-foot { display: flex; align-items: center; gap: 6px; padding: 0 2px; font-size: 11px; line-height: 1.3; min-width: 0; }
 .notepad-clip-foot .notepad-link-page { opacity: 0.55; overflow: hidden; text-overflow: ellipsis; }
 
@@ -303,7 +316,7 @@ html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
 .notepad-clip-text { touch-action: none; cursor: grab; }
 .notepad-quote-ghost {
   position: fixed; z-index: 1000; max-width: 260px; padding: 4px 8px; pointer-events: none;
-  border: 1px dashed #ffd400; border-radius: 6px; background: var(--nb-panel); color: var(--nb-text);
+  border: 1px dashed #ffd400; border-radius: 6px; background: var(--nb-raised); color: var(--nb-text);
   font-size: 12px; line-height: 1.3; box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
 }
 /* The size grip holds the clip's bottom-right corner: the foot's buttons

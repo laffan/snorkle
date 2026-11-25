@@ -115,6 +115,7 @@ pub const COMMANDS: &[&str] = &[
     "save_notebook",
     "notebook_clip",
     "notebook_clip_words",
+    "notebook_clip_back",
     "notebook_clip_mode",
     "notebook_link_hover",
     "notebook_link_drop",

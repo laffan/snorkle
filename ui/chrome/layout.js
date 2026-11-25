@@ -308,7 +308,7 @@ function sidebarHoles() {
 // open; otherwise the summary, the chat and the notebook (in that order
 // from the top).
 function rightPanels() {
-  if (narrow || rightHidden) return [];
+  if (narrow) return [];
   if (scriptsOpen) return [$('scripts-pop')];
   const out = [];
   if (summaryShown()) out.push($('summary'));
@@ -317,11 +317,11 @@ function rightPanels() {
 }
 
 function chatShown() {
-  return chatOpen && !rightHidden;
+  return chatOpen;
 }
 
 function notebookShown() {
-  return notebookOpen && !rightHidden && !scriptsOpen;
+  return notebookOpen && !scriptsOpen;
 }
 
 // ---- ad blocking ------------------------------------------------------

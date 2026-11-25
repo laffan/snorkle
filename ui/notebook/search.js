@@ -13,14 +13,16 @@
     //
     // What can be found: a typed note's words, a quote's words, and for
     // every item (handwritten notes included) the title and address of the
-    // page it came from. Handwriting itself is not read. Every word of the
+    // page it came from, and a clip's links (2026-11-25). Handwriting itself
+    // is not read. Every word of the
     // query must appear (case and accents ignored). Matches are outlined,
     // everything else faded; stepping goes through them top to bottom and
     // glides the pad to each.
     let search = null; // { terms, hits, at, frames }
     const fold = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     const where = (url) => String(url || '').replace(/^[a-z]+:\/\/(www\.)?/i, '');
-    const linkWords = (l) => fold([l.text, l.target.text, l.target.title, where(l.target.url)].filter(Boolean).join(' '));
+    const clipLinks = (l) => (Array.isArray(l.target.links) ? l.target.links : []).flatMap((k) => [k && k.title, k && where(k.url)]);
+    const linkWords = (l) => fold([l.text, l.target.text, l.target.title, where(l.target.url), ...clipLinks(l)].filter(Boolean).join(' '));
     const noteWords = (n) => fold([n.title, where(n.url)].filter(Boolean).join(' '));
 
     function noteBox(id) {

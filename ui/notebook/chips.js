@@ -115,6 +115,7 @@
       image(l.image || '', 'light');
       if (l.imageDark) image(l.imageDark, 'dark');
       e.classList.toggle('has-dark', Boolean(l.imageDark));
+      clipLinks(l, e);
       const foot = el('span', 'notepad-clip-foot');
       foot.append(
         pin(l),
@@ -123,6 +124,44 @@
         copyButton(COPY_IMAGE_ICON(), 'Copy this clip as a picture', () => copyClipImage(l)),
       );
       e.appendChild(foot);
+    }
+
+    // The links laid out in a clip (owner request 2026-11-25): under its
+    // picture, above its page, one a line, as link chips show them (the
+    // icon, the link's words, its site). A press on one goes to its page;
+    // the clip is not moved or followed.
+    const clipLinkList = (l) => (Array.isArray(l.target.links) ? l.target.links : []).filter((k) => k && typeof k.url === 'string');
+    function clipLinks(l, e) {
+      const links = clipLinkList(l);
+      if (!links.length) return;
+      const list = el('span', 'notepad-clip-links');
+      links.forEach((k, i) => {
+        const site = siteOf(k.url);
+        const words = String(k.title || '').trim();
+        const row = el('span', 'notepad-clip-link');
+        row.setAttribute('role', 'link');
+        row.dataset.i = String(i);
+        row.title = `Go to ${words ? `${words} (${site || k.url})` : k.url}`;
+        row.append(ICONS.link(), el('span', 'notepad-clip-link-text', words || site || k.url));
+        if (words && site) row.appendChild(el('span', 'notepad-link-page', site));
+        onPress(row, () => env.goTo(clipLinkTarget(l, i)));
+        list.appendChild(row);
+      });
+      e.appendChild(list);
+    }
+    function clipLinkTarget(l, i) {
+      const k = clipLinkList(l)[i];
+      return k ? { kind: 'page', url: k.url, title: k.title || '' } : null;
+    }
+    // A press on a fixed clip (handled by the canvas): the link under it,
+    // if any.
+    function linkAt(l, chipEl, cx, cy) {
+      if (!chipEl) return null;
+      for (const row of chipEl.querySelectorAll('.notepad-clip-link')) {
+        const r = row.getBoundingClientRect();
+        if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) return clipLinkTarget(l, Number(row.dataset.i));
+      }
+      return null;
     }
 
     // Copy buttons on a clip (owner request 2026-11-24). A press on one is
@@ -253,7 +292,7 @@
       } else e.appendChild(ICONS.link());
       if (!l.image) chipText(l, e, quote);
       const where = l.target.title || siteOf(l.target.url) || 'the page';
-      e.title = l.image ? `Go to the clip's page: ${where}` : quote ? `Go to the quote on ${where}` : `Go to ${where}`;
+      e.title = l.image ? `Go back to where this was clipped: ${where}` : quote ? `Go to the quote on ${where}` : `Go to ${where}`;
       handlePresses(l, e);
       return e;
     }
@@ -311,7 +350,7 @@
       });
     }
 
-    return { chip, closeMenu };
+    return { chip, closeMenu, linkAt };
   }
 
   Object.assign(NB, { HOLD_MS, CHIP_TAP_PX, MIN_W, MAX_W, MIN_H, createLinkChips });

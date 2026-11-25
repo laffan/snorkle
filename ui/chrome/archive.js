@@ -69,7 +69,6 @@ function setChat(open) {
   chatOpen = open;
   // Remembered for the session shown (research.js).
   rememberAiOpen(open);
-  if (open) rightHidden = false;
   if (!open) { archiveOpen = false; setModelMenu(false); }
   applyChat();
   applyNotebook();

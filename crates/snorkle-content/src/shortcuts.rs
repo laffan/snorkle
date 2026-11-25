@@ -15,8 +15,9 @@ pub enum Shortcut {
     ReopenTab,
     /// Show or hide the tab sidebar.
     ToggleSidebar,
-    /// Show or hide the right panel (headers, chat).
-    ToggleRightPanel,
+    /// Show or hide the notebook (⌘⇧\; owner request 2026-11-25: until
+    /// then the key hid and showed all the right panels).
+    ToggleNotebook,
     /// Bookmark the current page, or un-bookmark a bookmark's tab.
     Bookmark,
     /// Show or hide images and video.
@@ -128,7 +129,7 @@ pub const SHORTCUTS: &[ShortcutDef] = &[
     def("find_next", ShortcutMenu::Find, "Find Next", "g", 0, Shortcut::FindNext),
     def("find_prev", ShortcutMenu::Find, "Find Previous", "g", MOD_SHIFT, Shortcut::FindPrevious),
     def("toggle_sidebar", ShortcutMenu::View, "Show or Hide Sidebar", "\\", 0, Shortcut::ToggleSidebar),
-    def("toggle_right", ShortcutMenu::View, "Toggle Right Panel", "\\", MOD_SHIFT, Shortcut::ToggleRightPanel),
+    def("toggle_notebook", ShortcutMenu::View, "Show or Hide Notebook", "\\", MOD_SHIFT, Shortcut::ToggleNotebook),
     def("toggle_images", ShortcutMenu::View, "Show or Hide Images", "i", 0, Shortcut::ToggleImages),
     def("item_1", ShortcutMenu::Tabs, "Go to Item 1", "1", 0, Shortcut::Item(1)),
     def("item_2", ShortcutMenu::Tabs, "Go to Item 2", "2", 0, Shortcut::Item(2)),
@@ -184,7 +185,7 @@ impl Shortcut {
             Shortcut::CloseTab => "close_tab".into(),
             Shortcut::ReopenTab => "reopen_tab".into(),
             Shortcut::ToggleSidebar => "toggle_sidebar".into(),
-            Shortcut::ToggleRightPanel => "toggle_right".into(),
+            Shortcut::ToggleNotebook => "toggle_notebook".into(),
             Shortcut::Bookmark => "bookmark".into(),
             Shortcut::ToggleImages => "toggle_images".into(),
             Shortcut::Find => "find".into(),

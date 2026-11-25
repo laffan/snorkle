@@ -21,7 +21,6 @@ function createNotebook() {
     setClipMode,
     dragLink,
     drop: dropOnNotebook,
-    close: () => setNotebook(false),
   });
   return notebook;
 }
@@ -180,6 +179,7 @@ T.event.listen('progress', (e) => {
   t.progress = Number(p.progress) || 0;
   if (t.id === state.active) renderProgress(t);
   if (t.id === state.active && notebook) notebook.setPageLoading(t.loading);
+  clipBackStep();
 });
 T.event.listen('toast', (e) => toast(String(e.payload)));
 T.event.listen('shortcut', (e) => runShortcut(String(e.payload)));

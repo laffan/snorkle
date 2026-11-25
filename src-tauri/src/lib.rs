@@ -147,6 +147,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         notebook::save_notebook,
         notebook::notebook_clip,
         notebook::notebook_clip_words,
+        notebook::notebook_clip_back,
         notebook::notebook_clip_mode,
         notebook::notebook_link_hover,
         notebook::notebook_link_drop,

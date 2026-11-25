@@ -1498,3 +1498,27 @@ The live sites were not reachable or not signed in from this environment.
 - **[verify] Pins at the top on iPad.** The sidebar no longer leaves the window's top 30 pt empty
   (owner request 2026-11-24), so the first row of pins is back in the strip iPadOS 26 drags windows
   by; a long-press drag of a pin begun there may move the window instead.
+
+## Notebook: ⌘⇧\, the sidebar's colour, one capsule, clip links, back to a clip (2026-11-25)
+
+- **[decide] ⌘⇧\ is the Notebook's.** It shows or hides the Notebook as its button does (the
+  shortcut's id is now `toggle_notebook`, title "Show or Hide Notebook"). Nothing hides all the
+  right panels any more, and the AI panel has no shortcut; the state that kept them hidden is gone.
+  A custom binding saved for the old "Toggle Right Panel" no longer applies (its id changed): ⌘⇧\
+  is back as the default.
+- **[decide] No close button in the notebook.** Its button in the URL bar and ⌘⇧\ close it. On an
+  empty tab the URL bar (with that button) is hidden, so on an iPad without a keyboard the notebook
+  cannot be closed there until a page loads (before, its × could). Options: show the Notebook button
+  on the start page, or keep a close button only there.
+- **[decide] The sidebar's colour.** The notebook is drawn in `--side`, its capsule and menus in
+  `--bar`. Chips keep `--bg`, so in the light theme they now sit #f2f2f2 on #eaeaea (they were on
+  white): lighter contrast than before.
+- **[verify] Links in clips.** A clip keeps the http(s) links whose boxes meet its region, as the
+  page lays them out when it is clipped (an image inside a link brings that link). Links within the
+  page itself (`#…`, or the page's own address) are left out. Clips made before this have none.
+- **[verify] Back to a clip.** A tap on a clip opens its page and scrolls it to where the clip was
+  taken, then outlines that box for 2 s. The box is in the window's document coordinates: a page
+  that scrolls an inner element instead of the window opens without scrolling, and a page whose
+  layout changed since (lazy images, another window width, new content) lands nearby rather than
+  exactly. `window.scrollTo` is called from the client world; confirm on WebKit that it scrolls the
+  page. A page opened in a new tab is scrolled once it has loaded; the try is dropped after 30 s.

@@ -56,13 +56,21 @@ use crate::selection::{SelectionRect, HANDLER_NAME};
 use crate::text::sanitize_page_text;
 
 mod export;
+mod region;
 pub use export::{add_page, export_html};
+use region::{clip_box, clip_links};
+pub use region::{back_js, parse_region, region_text_js, ClipLink, Region};
 
 /// Largest report accepted, in bytes (a link report carries its address).
 pub const MAX_REPORT: usize = 5000;
-/// Largest region text read back ([`region_text_js`]), and kept.
-pub const MAX_REGION_BYTES: usize = 32 * 1024;
+/// Largest region read back ([`region_text_js`]: its text and links), and
+/// the most of its text kept.
+pub const MAX_REGION_BYTES: usize = 128 * 1024;
 pub const MAX_REGION_CHARS: usize = 4000;
+/// The most links kept with a clip (2026-11-25), and the most of each
+/// link's text.
+pub const MAX_CLIP_LINKS: usize = 20;
+pub const MAX_LINK_TITLE_CHARS: usize = 200;
 /// Largest notebook accepted (it holds its clips' images).
 pub const MAX_NOTEBOOK_BYTES: usize = 64 * 1024 * 1024;
 /// Largest clip image (a data URL), and the most kept.
@@ -108,7 +116,7 @@ pub enum Report {
 /// Watches for ⌥-click, ⌥-drag and clip mode (see the module docs).
 /// Constant code, main frame, document end. `window.__snorkleNb` (client
 /// world only) also holds the functions [`clip_mode_js`], [`hover_js`],
-/// [`drop_js`], [`LEAVE_JS`] and [`region_text_js`] call.
+/// [`drop_js`], [`LEAVE_JS`], [`region_text_js`] and [`back_js`] call.
 ///
 /// While ⌥ is held over the page (seen on key events and on the modifier
 /// state of pointer moves), and in clip mode, a cover lies over the page:
@@ -243,14 +251,20 @@ if(stage&&stage.bar&&e.key==='Enter'){e.preventDefault();e.stopPropagation();con
 document.addEventListener('keyup',function(e){if(!ok(e))return;if(e.key==='Alt')setAlt(false);else if(e.key==='Shift'&&optKey(e))setAlt(true);},true);
 window.addEventListener('blur',function(){setAlt(false);});
 nb.setClip=function(on){nb.clip=!!on;if(!on){clearStage();drag=null;}sync();};
-nb.regionText=function(x,y,wd,ht){var o=vp();x+=o[0];y+=o[1];var x1=x+wd,y1=y+ht,out=[],n=0,len=0,last=null,rg=document.createRange();
+nb.regionText=function(x,y,wd,ht){var o=vp();x+=o[0];y+=o[1];var x1=x+wd,y1=y+ht,out=[],n=0,len=0,last=null,rg=document.createRange(),links=[],seen={},here=location.href.split('#')[0];
 function hit(q){return q.width>0&&q.height>0&&q.right>x&&q.left<x1&&q.bottom>y&&q.top<y1;}
+function hits(e){var l=e.getClientRects();for(var i=0;i<l.length;i++)if(hit(l[i]))return true;return false;}
+function link(a){var u=String(a.href||'');if(!/^https?:/i.test(u)||u.length>2048||u.split('#')[0]===here||seen[u]||!hits(a))return;seen[u]=1;
+var lt=(a.textContent||'').replace(/\s+/g,' ').trim(),im;if(!lt){im=a.querySelector('img[alt]');lt=im?im.alt:(a.getAttribute('aria-label')||a.title||'');}links.push([u,String(lt).slice(0,200)]);}
 var tw=document.createTreeWalker(document.body||document.documentElement,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{acceptNode:function(e){return e.nodeType===1&&/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(e.tagName)?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;}}),t;
-while((t=tw.nextNode())&&n<40000&&len<4000){n++;
-if(t.nodeType===1){if(t.tagName==='IMG'&&t.alt&&hit(t.getBoundingClientRect())){out.push('\n'+t.alt);len+=t.alt.length;}continue;}
-var v=t.nodeValue;if(!v||!v.trim())continue;rg.selectNodeContents(t);var rs=rg.getClientRects(),on=false;for(var i=0;i<rs.length;i++)if(hit(rs[i])){on=true;break;}
+while((t=tw.nextNode())&&n<40000&&(len<4000||links.length<20)){n++;
+if(t.nodeType===1){if(t.tagName==='A'&&links.length<20)link(t);if(len<4000&&t.tagName==='IMG'&&t.alt&&hit(t.getBoundingClientRect())){out.push('\n'+t.alt);len+=t.alt.length;}continue;}
+if(len>=4000)continue;var v=t.nodeValue;if(!v||!v.trim())continue;rg.selectNodeContents(t);var rs=rg.getClientRects(),on=false;for(var i=0;i<rs.length;i++)if(hit(rs[i])){on=true;break;}
 if(!on)continue;var bk=blockOf(t);out.push((last&&bk!==last?'\n':'')+v);last=bk;len+=v.length;}
-return JSON.stringify({t:out.join(' ').replace(/[ \t]+/g,' ').replace(/ *\n */g,'\n').slice(0,4000)});};
+return JSON.stringify({t:out.join(' ').replace(/[ \t]+/g,' ').replace(/ *\n */g,'\n').slice(0,4000),l:links,at:[Math.round(x+scrollX),Math.round(y+scrollY),Math.round(wd),Math.round(ht)]});};
+nb.back=function(x,y,wd,ht){var top=Math.max(0,y-Math.max(16,(innerHeight-ht)/3)),left=x<scrollX||x+wd>scrollX+innerWidth?Math.max(0,x-16):scrollX;window.scrollTo(left,top);
+var f=el({position:'absolute',left:x+'px',top:y+'px',width:wd+'px',height:ht+'px','z-index':Z,'pointer-events':'none',margin:'0',padding:'0',border:'2px dashed #ff3b30','box-sizing':'border-box','border-radius':'3px',background:'rgba(255,59,48,.06)',opacity:'1',transition:'opacity .6s'});
+setTimeout(function(){at(f,'opacity','0');},1400);setTimeout(function(){f.remove();},2100);};
 document.addEventListener('dragstart',function(e){if(!ok(e))return;var t=e.target&&e.target.nodeType===1?e.target:(e.target&&e.target.parentElement),s=window.getSelection(),
 txt=s&&s.rangeCount&&!s.isCollapsed&&String(s).trim(),img=t&&t.closest?t.closest('img,picture,video,canvas'):null;
 if(selPress)selPress.dragged=true;
@@ -297,32 +311,6 @@ pub fn hover_js(fx: f64, fy: f64, from_y: f64) -> String {
 /// `{"t": text}` (read back, [`parse_drop`]).
 pub fn drop_js(fx: f64, fy: f64) -> String {
     format!("(function(){{var n=window.__snorkleNb;return n?n.drop({:.5},{:.5}):'';}})()", frac(fx), frac(fy))
-}
-
-/// The text shown in a region of the page (visual-viewport CSS pixels,
-/// as the clip's report gave it), for the notebook's search: text nodes
-/// laid out in the region and images' `alt`, as `{"t": text}` (read back,
-/// [`parse_region_text`]).
-pub fn region_text_js(x: f64, y: f64, w: f64, h: f64) -> String {
-    let n = |v: f64| if v.is_finite() { v.clamp(-100_000.0, 100_000.0) } else { 0.0 };
-    format!(
-        "(function(){{var n=window.__snorkleNb;return n&&n.regionText?n.regionText({:.1},{:.1},{:.1},{:.1}):'';}})()",
-        n(x),
-        n(y),
-        n(w).max(0.0),
-        n(h).max(0.0)
-    )
-}
-
-/// [`region_text_js`]'s answer: cleaned and capped; `None` if empty or
-/// malformed.
-pub fn parse_region_text(text: &str) -> Option<String> {
-    if text.len() > MAX_REGION_BYTES {
-        return None;
-    }
-    let v: Value = serde_json::from_str(text).ok()?;
-    let t = crate::ai::clean_multiline(v.get("t")?.as_str()?, MAX_REGION_CHARS);
-    (!t.is_empty()).then_some(t)
 }
 
 /// A page's title from the start of its HTML (the first `<title>`, else
@@ -571,6 +559,16 @@ fn link(v: &Value) -> Option<Value> {
         let q = crate::ai::clean_multiline(q, MAX_QUOTE_CHARS);
         if !q.is_empty() {
             target.insert("text".into(), Value::String(q));
+        }
+    }
+    // A clip's links and its box in its page (2026-11-25).
+    if kind == "clip" {
+        let links = clip_links(t.get("links"));
+        if !links.is_empty() {
+            target.insert("links".into(), serde_json::to_value(links).ok()?);
+        }
+        if let Some(b) = clip_box(t.get("at")) {
+            target.insert("at".into(), serde_json::json!(b));
         }
     }
     // A clip has its picture; a quote its words.

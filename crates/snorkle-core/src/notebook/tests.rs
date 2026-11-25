@@ -83,9 +83,41 @@ fn titles_and_region_text() {
     assert_eq!(page_title("<title>\x07bell &#7; \u{202e}rtl</title>".as_bytes()).as_deref(), Some("bell rtl"));
     assert_eq!(decode_entities("a &bogus; b &#x41; &"), "a &bogus; b A &");
     assert!(region_text_js(1.0, 2.0, f64::NAN, -5.0).contains("regionText(1.0,2.0,0.0,0.0)"));
-    assert_eq!(parse_region_text(r#"{"t":" Line one\n\n\n\nLine two "}"#).as_deref(), Some("Line one\n\nLine two"));
-    assert_eq!(parse_region_text(r#"{"t":""}"#), None);
-    assert!(parse_region_text(&format!(r#"{{"t":"{}"}}"#, "a".repeat(MAX_REGION_BYTES))).is_none());
+    let text = |s: &str| parse_region(s).map(|r| r.text);
+    assert_eq!(text(r#"{"t":" Line one\n\n\n\nLine two "}"#).as_deref(), Some("Line one\n\nLine two"));
+    assert_eq!(text(r#"{"t":""}"#).as_deref(), Some(""));
+    assert_eq!(parse_region(r#"{"t":"x"}"#), Some(Region { text: "x".into(), links: vec![], at: None }));
+    assert!(parse_region(&format!(r#"{{"t":"{}"}}"#, "a".repeat(MAX_REGION_BYTES))).is_none());
+    assert!(parse_region(r#"{"l":[]}"#).is_none() && parse_region("[]").is_none());
+}
+
+#[test]
+fn clip_links_and_box() {
+    // 2026-11-25: the links laid out in a clip's region, checked; its box.
+    let r = parse_region(
+        r#"{"t":"Hi","l":[["https://a.example/x","Read \u202emore\n now"],["javascript:alert(1)","x"],
+        ["https://user:pw@b.example/","y"],["https://a.example/x","again"],["http://c.example","" ],[1,2],"https://d.example/"],
+        "at":[10.4,-3,500,1e9]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        r.links,
+        vec![
+            ClipLink { url: "https://a.example/x".into(), title: "Read more now".into() },
+            ClipLink { url: "http://c.example/".into(), title: String::new() },
+        ]
+    );
+    assert_eq!(r.at, Some([10.0, 0.0, 500.0, 100_000.0]));
+    let many: Vec<Value> = (0..40).map(|i| serde_json::json!([format!("https://e.example/{i}"), "t"])).collect();
+    let r = parse_region(&serde_json::json!({ "t": "", "l": many, "at": [1, 2, 3] }).to_string()).unwrap();
+    assert_eq!(r.links.len(), MAX_CLIP_LINKS);
+    assert_eq!(r.at, None, "four numbers or none");
+    assert_eq!(parse_region(r#"{"t":"","at":[1,2,"3",4]}"#).unwrap().at, None);
+    // Going back: constant code with four clamped numbers.
+    assert_eq!(back_js(12.6, f64::NAN, -4.0, 2e6), "window.__snorkleNb&&window.__snorkleNb.back(13,0,0,100000);");
+    let w = watch_js();
+    assert!(w.contains("nb.back=function(x,y,wd,ht){"));
+    assert!(w.contains("u.split('#')[0]===here"), "links within the page itself are left out");
 }
 
 #[test]
@@ -112,6 +144,11 @@ fn notebook_is_rebuilt() {
             { "id": "l-5", "x": 1, "y": 2, "target": { "kind": "script" } },
             { "id": "l-6", "x": f64::MAX, "y": 2, "target": { "kind": "page" } },
             { "id": "l-7", "x": 1, "y": 2, "target": { "kind": "quote", "text": "  " } },
+            { "id": "l-8", "x": 1, "y": 2, "image": jpeg, "target": { "kind": "clip", "url": "https://e.com/",
+              "links": [{ "url": "https://f.example/a", "title": "F\u{202e}" }, { "url": "data:text/html,x", "title": "no" }, ["https://g.example/", "G"]],
+              "at": [1, 2, 3, 4] } },
+            { "id": "l-9", "x": 1, "y": 2, "target": { "kind": "quote", "url": "https://e.com/", "text": "Q",
+              "links": [{ "url": "https://f.example/a" }], "at": [1, 2, 3, 4] } },
         ],
         "pan": { "x": 10, "y": "no" },
         "extra": "dropped",
@@ -127,11 +164,20 @@ fn notebook_is_rebuilt() {
     assert_eq!(notes[2]["url"], "https://example.com/a#:~:text=x");
     let links = out["links"].as_array().unwrap();
     let ids: Vec<&str> = links.iter().map(|l| l["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["l-1", "l-2", "l-4"]);
+    assert_eq!(ids, ["l-1", "l-2", "l-4", "l-8", "l-9"]);
     assert_eq!(links[1]["image"], jpeg);
     assert!(links[1].get("imageDark").is_none(), "only jpeg and png");
     assert_eq!(links[2]["text"], "# Note\nline");
     assert_eq!(links[2]["fixed"], true);
+    // A clip's links (http(s) only, either form) and box are kept; nothing
+    // else has them (2026-11-25).
+    assert_eq!(
+        links[3]["target"]["links"],
+        serde_json::json!([{ "url": "https://f.example/a", "title": "F" }, { "url": "https://g.example/", "title": "G" }])
+    );
+    assert_eq!(links[3]["target"]["at"], serde_json::json!([1.0, 2.0, 3.0, 4.0]));
+    assert!(links[1]["target"].get("links").is_none() && links[1]["target"].get("at").is_none());
+    assert!(links[4]["target"].get("links").is_none() && links[4]["target"].get("at").is_none());
     assert_eq!(out["pan"], serde_json::json!({ "x": 10.0, "y": 0.0 }));
     assert!(out.get("extra").is_none());
     assert!(clean("[]").is_none() && clean("nope").is_none());

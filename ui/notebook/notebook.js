@@ -16,7 +16,7 @@
   //   place() → { url, title } of the page shown (null: none, or private);
   //   goTo(target) — open a link's page; openLink(href) — a typed link;
   //   setClipMode(on) → Promise<boolean>; dragLink(phase, x, y, fromX, fromY)
-  //   → Promise<target|null> on 'end'; close().
+  //   → Promise<target|null> on 'end'.
   function create(root, env) {
     let pad = emptyPad();
     let loaded = false;
@@ -49,18 +49,21 @@
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { if (surface) surface.commitText(); flush(); } });
     window.addEventListener('pagehide', flush);
 
-    // --- the bar
+    // --- the bar: its tools in one capsule, as the URL bar's (owner
+    // request 2026-11-25: no line under the bar, no close button — the
+    // notebook's own button and ⌘⇧\ close it).
     root.classList.add('notepad');
     const bar = el('div', 'notepad-bar');
+    const capsule = el('div', 'notepad-capsule');
     const fromPages = el('div', 'notepad-from-pages');
     fromPages.setAttribute('role', 'group');
     fromPages.setAttribute('aria-label', 'Bring in from pages');
-    const quoteBtn = el('button', 'notepad-quote-btn');
+    const quoteBtn = el('button', 'notepad-tool notepad-quote-btn');
     quoteBtn.type = 'button';
     quoteBtn.title = 'Quote — drag onto a page to link to the sentence there';
     quoteBtn.setAttribute('aria-label', 'Link to a sentence on a page');
     quoteBtn.appendChild(ICONS.quote());
-    const clipBtn = el('button', 'notepad-clip-btn');
+    const clipBtn = el('button', 'notepad-tool notepad-clip-btn');
     clipBtn.type = 'button';
     clipBtn.title = 'Clip — drag over the page to put that part of it in the notebook (⌥-drag works any time)';
     clipBtn.setAttribute('aria-label', 'Clip part of the page');
@@ -101,11 +104,8 @@
     const undoBtn = toolBtn(ICONS.undo(), 'Undo (⌘Z)', 'Undo');
     undoBtn.classList.add('notepad-undo');
     undoBtn.disabled = true;
-    const closeBtn = el('button', 'icon notepad-close', '×');
-    closeBtn.type = 'button';
-    closeBtn.title = 'Close the notebook';
-    closeBtn.setAttribute('aria-label', 'Close the notebook');
-    bar.append(fromPages, mapBtn, followBtn, searchBtn, grab, modes, undoBtn, closeBtn);
+    capsule.append(fromPages, mapBtn, followBtn, searchBtn, grab, modes, undoBtn);
+    bar.appendChild(capsule);
 
     // Search (2026-11-16): a field under the bar; ↩ / ⇧↩ (or the arrows)
     // step through the matches, Escape closes it.
@@ -169,7 +169,7 @@
       mapBtn.setAttribute('aria-pressed', String(map));
       followBtn.classList.toggle('active', followOn);
       followBtn.setAttribute('aria-pressed', String(followOn));
-      clipBtn.classList.toggle('on', clipping);
+      clipBtn.classList.toggle('active', clipping);
       clipBtn.setAttribute('aria-pressed', String(clipping));
       undoBtn.disabled = !(surface && surface.canUndo());
     }
@@ -208,7 +208,6 @@
       const p = env.place();
       if (followOn && surface && p) surface.follow(p.url);
     });
-    closeBtn.addEventListener('click', () => env.close());
 
     function showCount(r) {
       const q = searchInput.value.trim();
@@ -290,7 +289,7 @@
       const y0 = e.clientY;
       let moved = false;
       capture(quoteBtn, e.pointerId);
-      quoteBtn.classList.add('on');
+      quoteBtn.classList.add('active');
       const move = (ev) => {
         moved ||= Math.hypot(ev.clientX - x0, ev.clientY - y0) > 4;
         if (!moved) return;
@@ -305,7 +304,7 @@
         quoteBtn.removeEventListener('pointermove', move);
         quoteBtn.removeEventListener('pointerup', up);
         quoteBtn.removeEventListener('pointercancel', up);
-        quoteBtn.classList.remove('on');
+        quoteBtn.classList.remove('active');
         lineSvg.remove();
         if (!moved || ev.type === 'pointercancel') { env.dragLink('cancel', 0, 0, 0, 0); return; }
         env.dragLink('end', ev.clientX, ev.clientY, x1, y1).then((target) => {

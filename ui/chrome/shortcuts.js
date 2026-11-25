@@ -1,4 +1,4 @@
-// Browser chrome (see core.js): Keyboard shortcuts, confirmations, bookmarks, right panels.
+// Browser chrome (see core.js): Keyboard shortcuts, confirmations, bookmarks.
 'use strict';
 
 // ---- keyboard shortcuts -------------------------------------------------
@@ -65,8 +65,10 @@ function runShortcut(name, via = 'native') {
       .catch((e) => toast(String(e)));
   } else if (name === 'toggle_sidebar') {
     toggleSidebar();
-  } else if (name === 'toggle_right') {
-    toggleRight();
+  } else if (name === 'toggle_notebook') {
+    // ⌘⇧\ (2026-11-25): as the notebook's button. Until then it hid and
+    // showed all the right panels.
+    setNotebook(!notebookShown());
   } else if (name === 'bookmark') {
     bookmarkShortcut();
   } else if ((name === 'find' || name === 'find_next' || name === 'find_prev') && notebook && notebookShown() && notebook.hasFocus()) {
@@ -254,17 +256,3 @@ function toggleBookmark(t) {
     .catch((e) => toast(String(e)));
 }
 function bookmarkShortcut() { toggleBookmark(activeTab()); }
-
-// ⌘⇧\: hide the right panels (keeping them on), or show them again; with
-// none on, open the chat.
-function toggleRight() {
-  const anyOn = scriptsOpen || chatOpen || notebookOpen;
-  if (!anyOn) { setChat(true); return; }
-  if (!rightHidden && scriptsOpen) { setScripts(false); if (!chatOpen && !notebookOpen) return; }
-  rightHidden = !rightHidden;
-  applyChat();
-  applyNotebook();
-  renderSummary();
-  renderViewMode();
-  reportLayout();
-}

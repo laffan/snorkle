@@ -74,6 +74,27 @@ fn source_link(t: &Map<String, Value>) -> String {
     format!("<a href=\"{}\">{}</a>", esc(&url), esc(&label))
 }
 
+/// A clip's links (2026-11-25), under its picture: each its words (or its
+/// address), linked, and its site.
+fn clip_links(t: &Map<String, Value>) -> String {
+    let mut out = String::new();
+    for k in t.get("links").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_object) {
+        let Some(url) = s(k, "url").and_then(web_url) else { continue };
+        let words = s(k, "title").map(str::to_string).unwrap_or_else(|| url.clone());
+        out.push_str(&format!(
+            "<li><a href=\"{}\">{}</a> <span>{}</span></li>",
+            esc(&url),
+            esc(&words),
+            esc(&site(&url))
+        ));
+    }
+    if out.is_empty() {
+        out
+    } else {
+        format!("<ul class=\"links\">{out}</ul>")
+    }
+}
+
 /// The notebook (`json`, as stored) as one HTML page titled `title`, with
 /// `date` under the title. Its canvas is drawn as it is in the app: the
 /// ink as an SVG over the chips (quotes, clips, typed notes and links)
@@ -137,7 +158,7 @@ pub fn export_html(json: &str, title: &str, date: &str) -> Option<String> {
         let source = source_link(t);
         let inner = if let Some(img) = s(o, "image") {
             let cap = if source.is_empty() { String::new() } else { format!("<figcaption>{source}</figcaption>") };
-            format!("<figure><img alt=\"\" src=\"{}\">{cap}</figure>", esc(img))
+            format!("<figure><img alt=\"\" src=\"{}\">{}{cap}</figure>", esc(img), clip_links(t))
         } else if let Some(text) = s(o, "text") {
             let from = if source.is_empty() { String::new() } else { format!("<div class=\"from\">{source}</div>") };
             format!("<div class=\"note\">{}</div>{from}", esc(text))
@@ -190,7 +211,8 @@ header{padding:24px 24px 8px}h1{margin:0;font-size:22px}header p{margin:4px 0 0;
 .chip{position:absolute;z-index:2;max-width:420px;min-width:120px;box-sizing:border-box;padding:8px 10px;border-radius:10px;background:var(--chip);border:1px solid var(--line)}\
 .chip.fixed{z-index:0}.note{white-space:pre-wrap}blockquote{margin:0;padding-left:10px;border-left:3px solid #ffd400}\
 figure{margin:0}img{display:block;max-width:100%;border-radius:6px}figcaption,.from{margin-top:4px;font-size:12px;color:var(--muted)}\
-a{color:inherit}.page{font-weight:600}.empty{padding:0 24px;color:var(--muted)}";
+a{color:inherit}.page{font-weight:600}.empty{padding:0 24px;color:var(--muted)}\
+.links{margin:6px 0 0;padding:0;list-style:none;font-size:13px}.links li{margin:2px 0}.links span{color:var(--muted);font-size:12px}";
 
 /// Adds a page (`url`, http(s)) titled `title` to a stored notebook
 /// (`None`: a new one) as a link, at the left, below everything in it.
@@ -238,7 +260,7 @@ mod tests {
       "notes":[{"id":"n-1","createdMs":1,"url":"https://a.example/x","title":"A"}],
       "links":[{"id":"l-1","x":100,"y":200,"target":{"kind":"quote","url":"https://a.example/x#:~:text=hi","title":"A <b>page</b>","text":"Said \"so\" & <i>more</i>"}},
         {"id":"l-2","x":40,"y":300,"text":"# My note\n<script>alert(1)</script>","target":{"kind":"page"}},
-        {"id":"l-3","x":400,"y":20,"fixed":true,"w":160,"image":"data:image/jpeg;base64,AAAA","target":{"kind":"clip","url":"https://b.example/","title":"B"}},
+        {"id":"l-3","x":400,"y":20,"fixed":true,"w":160,"image":"data:image/jpeg;base64,AAAA","target":{"kind":"clip","url":"https://b.example/","title":"B","links":[{"url":"https://b.example/more","title":"Read <more>"},{"url":"https://z.example/q?a=1&b=2","title":""}]}},
         {"id":"l-4","x":300,"y":400,"target":{"kind":"page","url":"https://c.example/p","title":"C page"}}],
       "pan":{"x":0,"y":0}}"##;
 
@@ -252,6 +274,9 @@ mod tests {
         assert!(html.contains("Said &quot;so&quot; &amp; &lt;i&gt;more&lt;/i&gt;"));
         assert!(html.contains("href=\"https://c.example/p\">C page</a>"));
         assert!(html.contains("src=\"data:image/jpeg;base64,AAAA\"") && html.contains("chip fixed"));
+        // A clip's links, under its picture, escaped (2026-11-25).
+        assert!(html.contains("<li><a href=\"https://b.example/more\">Read &lt;more&gt;</a> <span>b.example</span></li>"), "{html}");
+        assert!(html.contains("<a href=\"https://z.example/q?a=1&amp;b=2\">https://z.example/q?a=1&amp;b=2</a>"));
         assert_eq!(html.matches("<path ").count(), 2);
         assert!(html.contains("stroke=\"#e5484d\"") && html.contains("stroke=\"var(--ink)\""));
         // Moved so the leftmost and topmost points are 24 px in (x 5, y 10):

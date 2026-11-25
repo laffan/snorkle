@@ -404,7 +404,8 @@ hiding the page that had keyboard focus left nothing first responder, and key co
 not delivered until a tap, so the next ⌘W did nothing; since 2026-11-24 the host gives focus to
 the page in front, or the chrome, once the effects are applied: `ios/effects.rs` `refocus_soon`), ⌘⇧R night vision and ⌘⇧H History (2026-11-23), ⌘Q quit (macOS only, 2026-11-23:
 neither offered nor reserved on iPadOS, `ShortcutDef::available`), ⌘F find, ⌘G /
-⌘⇧G next / previous match, ⌘\ sidebar, ⌘⇧\ right panels, ⌘S / ⌘⇧S split side by side / top
+⌘⇧G next / previous match, ⌘\ sidebar, ⌘⇧\ notebook (2026-11-25; until then it hid and showed all
+the right panels), ⌘S / ⌘⇧S split side by side / top
 and bottom, ⌘D bookmark (on a bookmark's tab: un-bookmark; ⌥⌘D from 2026-11-03 to 2026-11-04,
 when ⌘D split the view), ⌘I images,
 ⌘1–5 sidebar items, ⌘← / ⌘→ back / forward and ⌘↑ / ⌘↓ detach / attach the URL bar (2026-11-15;
@@ -674,8 +675,9 @@ the right, full height; otherwise the AI panel (the summary with the page chat i
 and the Notebook (§5i) do, in that order from the top, sharing the height when both are open (in
 narrow windows site scripts and the AI panel overlay and hide the page). Each session (everyday
 browsing and each research session, §5l) has its own: whether the AI panel and the Notebook are open
-(remembered across launches) and whether ⌘⇧\ hid them. The right panels' width is dragged at their left edge (260–640 pt, at most 60% of the
-area, remembered); ⌘⇧\ hides them without turning them off and shows them again. The console
+(remembered across launches). The right panels' width is dragged at their left edge (260–640 pt, at most 60% of the
+area, remembered). ⌘⇧\ shows or hides the Notebook, as its button does (2026-11-25; until then it hid
+all the right panels without turning them off, and showed them again). The console
 docks at the bottom. A ring around the `{ }` row in the ⋯ popup marks pages an enabled site script
 applies to (until 2026-11-24 also a ring on the ⋯ button, which read as a stray white circle in the
 dark appearance). When the content area grows (a panel closes), the
@@ -809,7 +811,7 @@ script navigations and redirects out of the archive go nowhere. "+" opens the sa
 a bar above the pill: each link tapped on the page (same host, at most 30 pages) is chosen or
 unchosen in the core instead of navigating; Add loads each chosen page live in that tab, captures
 it the same way into the same archive (resources shared), and shows the saved copy again.
-Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto the middle of another pairs them in split view, onto the top or bottom 30% of a row (or below the last) moves it there (2026-11-09, `Browser::move_tab`; the session keeps the order), and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input; its placeholder is "search / url" (2026-11-24). Since 2026-11-24 the start page has no URL bar, its input (52 pt tall, 600 pt wide at most) sits at the middle of the pane (the pill and its AI and Notebook buttons are hidden while an empty tab is shown; ⌘⇧\ still toggles the right panels), lists nothing until something is typed (before, open tabs, pins, bookmarks and recent history were listed at once), is drawn in the sidebar's own background, and its input is a field rounded alike at all four corners, with the rows in a separate card under it. There is at most one empty New Tab (2026-11-24): ⌘T or the menu in an empty tab of the same profile only focuses its input, and an empty tab left for another (never loaded, not half of a split, no pin's or bookmark's) closes (`Browser::new_tab`, `abandoned_blank`). **Define** (single words only, `ai::clean_word`) shows the chat's model's dictionary-style definition in a card above the input (2026-11-09; before, it opened the chat panel), after asking which word was meant if the model thinks it is misspelt (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, Turn On/Off Night Vision, History, Downloads, Console, Settings), New Research Session (a book), dark pages, colour, and show images and video; with a pointer its buttons show only while the sidebar is pointed at or has focus (2026-11-23). Pins are bare icons (a dot under the one whose tab is shown); empty pins and bookmarks take no room and show no explainer text, and open up as dashed drop targets while a row is dragged (2026-11-23). The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
+Tabs and bookmarks are listed in a resizable sidebar along the left edge (200–420 pt, at most half the window). Dragging a tab into the bookmarks bar bookmarks it there, bookmarks reorder by dragging, dragging one tab onto the middle of another pairs them in split view, onto the top or bottom 30% of a row (or below the last) moves it there (2026-11-09, `Browser::move_tab`; the session keeps the order), and dragging a tab out of its pair unsplits it. A tab's close button appears on hover (on the active tab on touch-only devices); so does a pin's unpin button. Each pin and bookmark has its own tab (`Tab::launcher`, saved in the session): opening it returns to that tab, which is not listed with the other tabs, and the pin or bookmark is shown as selected; removing the pin or bookmark lists the tab again. New Tab (⌘T, or the menu; since 2026-11-08) is a real tab: an empty tab shows the start page on the chrome's surface (no web view exists until it navigates), with the new-tab input a little above the middle of its pane (its middle at 40% of the pane's height; in split view, the focused half) and Arc-style rows under it: typing fuzzy-matches open tabs, pins, bookmarks and then history (the latest 500 visits, one row per page, loaded when the start page opens), and the first rows go to, search for, or, for a single word, define what was typed. Go to, Search and history rows load in that tab; choosing another tab, pin or bookmark switches to it and closes the empty tab (unless it is half of a split), as Chrome's omnibox does. Escape clears the input; its placeholder is "search / url" (2026-11-24). Since 2026-11-24 the start page has no URL bar, its input (52 pt tall, 600 pt wide at most) sits at the middle of the pane (the pill and its AI and Notebook buttons are hidden while an empty tab is shown; ⌘⇧\ still shows or hides the Notebook), lists nothing until something is typed (before, open tabs, pins, bookmarks and recent history were listed at once), is drawn in the sidebar's own background, and its input is a field rounded alike at all four corners, with the rows in a separate card under it. There is at most one empty New Tab (2026-11-24): ⌘T or the menu in an empty tab of the same profile only focuses its input, and an empty tab left for another (never loaded, not half of a split, no pin's or bookmark's) closes (`Browser::new_tab`, `abandoned_blank`). **Define** (single words only, `ai::clean_word`) shows the chat's model's dictionary-style definition in a card above the input (2026-11-09; before, it opened the chat panel), after asking which word was meant if the model thinks it is misspelt (§5g). **Each launch** restores the saved tabs unloaded and greets the user with a new start-page tab after the saved active tab (`Browser::restore_session_with_start_tab`); returning from the background is not a launch and adds nothing, and a cold launch from a link in another app shows that link instead. Empty tabs are never saved, so launches do not pile them up. (Until 2026-11-08 New Tab opened a palette over the hidden content area and no tab existed until a row was chosen.) The bottom bar holds the menu (New Tab, New Private Tab, Turn On/Off Night Vision, History, Downloads, Console, Settings), New Research Session (a book), dark pages, colour, and show images and video; with a pointer its buttons show only while the sidebar is pointed at or has focus (2026-11-23). Pins are bare icons (a dot under the one whose tab is shown); empty pins and bookmarks take no room and show no explainer text, and open up as dashed drop targets while a row is dragged (2026-11-23). The chrome itself is black and white (grey palette, plus `filter: grayscale(1)` on its root for favicons and emoji). Settings deletes cache, cookies, site data, or logins (cookies and site data) from every profile's store. In windows at least 700 pt wide the sidebar is
 docked: the chrome reports `left = sidebar width` and the native content container starts to its
 right. In narrower windows it slides over the content area, and the content view is hidden
 while it is open (`overlay`), so a page can never draw over the sidebar or the toolbar. Both
@@ -826,9 +828,11 @@ One notebook for every page, not bound to a tab: the notepad of laffan/zotero-he
 (`src/notepad/`, `NotepadBody.tsx`) ported to the chrome as plain DOM (`ui/notebook/`,
 `ui/notebook.css`). The toggle sits between the menu and Save for Later at the sidebar's foot; the
 notebook docks right of the page with the other right panels (remembered open or closed; ⌘⇧\
-hides it with them). As in zotero-helper: a bar (the quote button and the scissors in one orange
-pill, the minimap, the scroll link, a switch of ink / red / eraser / lasso, undo, close) over a
-canvas with a faint dot grid. The pen or the mouse writes (one canvas the size of the view; a
+shows or hides it, 2026-11-25). Since 2026-11-25 it is drawn in the sidebar's colour, and its bar is
+one capsule drawn as the URL bar is (the bar's colour, a hairline border, round ends) with no line
+under it: the quote button and the scissors (plain tools, no longer an orange pill), the minimap,
+the scroll link, search, a switch of ink / red / eraser / lasso, and undo; there is no close button
+(the Notebook button and ⌘⇧\ close it). Under it, a canvas with a faint dot grid. The pen or the mouse writes (one canvas the size of the view; a
 stroke costs the same on a full pad), a finger or a wheel pans, a press held still draws a lasso
 (framed selection, Delete, drag to move, ⌫, Escape), two taps type a note in Markdown (headings,
 bold, italic, links, highlights, quotes, tasks, lists), links are chips (dragged, tapped to go,
@@ -886,6 +890,18 @@ Bringing things in (C23): a constant watcher in every page's client world report
   chrome's window (`dragDropEnabled: false`), since it swallows every drag into the chrome; the
   chrome cancels any drop it does not take (outside text fields), so nothing dropped navigates it.
 
+A clip keeps the links laid out in its region (2026-11-25): the region read-back that gives its
+text also gives the page's http(s) links whose boxes meet the region (at most 20, in page order,
+links within the page itself left out), each with its words (or an image's `alt`, or its
+`aria-label`). They are listed under the clip's picture and above its page line, one a line as link
+chips show them (the icon, the words, the site); a press on one opens that page (a pinned clip: a
+tap on the row). The read-back also gives the region's box in the page's document; a tap on the
+clip opens its page as before (the tab showing it, or a new one) and, once that page is loaded
+there, scrolls it to the box and outlines it for 2 s with the clip stage's dashed border
+(`notebook_clip_back`, constant code with four numbers; given up after 30 s or if the tab goes to
+another page). Before, a tap on a clip whose page was the one shown did nothing visible. Search
+finds a clip by its links' words and sites; the export lists them under its picture.
+
 A clip in the notebook has two copy buttons at the end of its foot (2026-11-24; shown while it is
 pointed at, always on touch-only devices): Copy Text puts the text kept with it for search (the
 page's text in its region and what text recognition read in its picture) on the clipboard, or says
@@ -923,7 +939,7 @@ under it the model, effort and cost line with New Chat (+) and Earlier Chats (an
 takes the panel's place while open), and one close button (until then the chat was a second
 panel under the summary's). The summary is no longer per tab: it follows the tab shown.
 Pressing the AI button on a page that has no summary yet asks for one at once (opened another way,
-Ask AI on a selection, a definition's follow-up or ⌘⇧\, or on another tab, it asks "Summarize
+Ask AI on a selection or a definition's follow-up, or on another tab, it asks "Summarize
 “title”?" first); the panel then shows the summary as bullet points, the model and an estimate of
 the cost, and a circular-arrow button to summarize again. When the tab moves to another page (its address without the fragment changes),
 the summary is dropped and the panel asks "Summarize “title”?" with a Summarize button; a reply

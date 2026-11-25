@@ -51,7 +51,6 @@ function setNotebook(open) {
   rememberNotebookOpen(open);
   if (open) ensureNotebook();
   if (open) {
-    rightHidden = false;
     if (scriptsOpen) setScripts(false);
   } else if (notebook && notebook.clipping()) {
     endClipMode();
@@ -80,21 +79,52 @@ function textFragmentUrl(url, text) {
   return frag ? `${base}#:~:text=${frag}` : base;
 }
 
-// Opens a notebook link's page: the tab already showing it (moved to the
-// quote, if there is one), or a new tab. Through the navigation policy.
+// Opens a notebook link's page: the tab already showing it (the one shown,
+// if it does; moved to the quote, if there is one), or a new tab. Through
+// the navigation policy. A clip goes back to where it was taken in its
+// page (2026-11-25; see clipBackStep).
 function openTarget(target) {
   const url = target && target.url;
   if (!url || !/^https?:/i.test(url)) { toast('This note has no page to go to.'); return; }
   const page = url.split('#')[0];
-  const open = state && state.tabs.find((t) => !t.private && t.sheet_over === null && t.url && t.url.full.split('#')[0] === page);
+  const at = target.kind === 'clip' && Array.isArray(target.at) && target.at.length === 4 ? target.at : null;
+  const shows = (t) => !!t && !t.private && t.sheet_over === null && !!t.url && t.url.full.split('#')[0] === page;
+  const active = activeTab();
+  const open = shows(active) ? active : state && state.tabs.find(shows);
+  const back = (tab, fresh) => ({ tab, page, at, fresh, loaded: false, busy: false, until: performance.now() + 30000 });
   if (open) {
     invoke('activate_tab', { tab: open.id });
     if (url !== open.url.full && url.includes('#')) invoke('navigate', { tab: open.id, input: url });
+    if (at) { clipBack = back(open.id, !open.live); clipBackStep(); }
     return;
   }
   T.core.invoke('new_tab', { private: false })
-    .then((id) => invoke('navigate', { tab: id, input: url }))
+    .then((id) => {
+      if (at) clipBack = back(id, true);
+      return invoke('navigate', { tab: id, input: url });
+    })
     .catch((e) => toast(String(e)));
+}
+
+// Going back to a clip (2026-11-25): once its page is shown, loaded, in
+// the tab, the page scrolls to the clip's box and outlines it for a
+// moment (`notebook_clip_back`). A tab that had to load the page (a new
+// one, or one that was asleep) waits for that load; it is given up after
+// 30 s, or when the tab is on another page. Run on every render and load
+// progress.
+let clipBack = null; // { tab, page, at, fresh, loaded, busy, until }
+function clipBackStep() {
+  const b = clipBack;
+  if (!b || b.busy) return;
+  const t = state && state.tabs.find((x) => x.id === b.tab);
+  if (!t || performance.now() > b.until) { clipBack = null; return; }
+  if (t.loading) { b.loaded = true; return; }
+  if (!t.url || !t.live || (b.fresh && !b.loaded)) return;
+  if (t.url.full.split('#')[0] !== b.page) { clipBack = null; return; }
+  b.busy = true;
+  T.core.invoke('notebook_clip_back', { tab: b.tab, x: b.at[0], y: b.at[1], w: b.at[2], h: b.at[3] })
+    .then(() => { if (clipBack === b) clipBack = null; })
+    .catch(() => { b.busy = false; });
 }
 
 // A link typed in a note: a web address (or a bare host) opens in a new
@@ -200,6 +230,14 @@ function endClipMode() {
   if (notebook) notebook.clipEnded();
 }
 
+// What a clip carries besides its picture and text (2026-11-25): the links
+// laid out in it (shown under it) and its box in its page (to go back to).
+function clipExtras(target, clip) {
+  if (Array.isArray(clip.links) && clip.links.length) target.links = clip.links;
+  if (Array.isArray(clip.at) && clip.at.length === 4) target.at = clip.at;
+  return target;
+}
+
 // Draws a clip of a page's region (the app's own picture of its view)
 // and puts it in the notebook.
 function clipToNotebook(t, r) {
@@ -210,7 +248,7 @@ function clipToNotebook(t, r) {
     .then((clip) => {
       // The clip's text (the page's, then the words recognition reads
       // in the picture) goes with it for search; it is not shown.
-      const target = { kind: 'clip', url: t.url.full, title: t.title || '' };
+      const target = clipExtras({ kind: 'clip', url: t.url.full, title: t.title || '' }, clip);
       if (clip.text) target.text = clip.text;
       ensureNotebook().then((nb) => {
         nb.addClip(clip.image, target);
@@ -312,7 +350,7 @@ function dropOnNotebook({ text, files }) {
     if (d.kind === 'dimg') {
       return T.core.invoke('notebook_clip', { tab: t.id, x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h, vw: d.rect.vw })
         .then((clip) => {
-          const target = { kind: 'clip', ...source, ...(clip.text ? { text: clip.text } : {}) };
+          const target = clipExtras({ kind: 'clip', ...source, ...(clip.text ? { text: clip.text } : {}) }, clip);
           clipWords(clip, target);
           return { kind: 'clip', image: clip.image, target };
         })

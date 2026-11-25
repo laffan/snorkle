@@ -117,6 +117,8 @@ fn night_vision_history_and_quit_shortcuts() {
         ("history", "h", MOD_SHIFT, "history"),
         ("new_private_tab", "n", MOD_SHIFT, "new_private_tab"),
         ("notebook_page", "d", MOD_SHIFT, "notebook_page"),
+        // ⌘⇧\ shows or hides the notebook (2026-11-25).
+        ("toggle_notebook", "\\", MOD_SHIFT, "toggle_notebook"),
         ("quit", "q", 0, "quit"),
     ] {
         let i = shortcut_index(id).unwrap();
