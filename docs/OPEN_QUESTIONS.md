@@ -1529,3 +1529,39 @@ The live sites were not reachable or not signed in from this environment.
 - **[verify] Pages added to a closed research session's notebook** (a tab dropped on its row,
   `notebook::add_page` in Rust) still count a clip as 200 pt tall when placing the link under
   everything, so that link can overlap a tall clip's foot. Not changed in this round.
+
+## Share extensions: "Snorkle" in the share sheet (2026-11-25)
+
+Nothing here has been compiled or run: the Swift sources (`src-tauri/share/`) need Xcode, and
+this repository is developed on Linux. The Rust side type-checks for both platforms.
+
+- **[verify] Build, iPad.** `npm run tauri ios init` (from the repository root, on a fresh
+  `src-tauri/gen/apple`) renders `src-tauri/ios/project.yml` (Tauri 2.12.4's template plus the
+  `SnorkleShare` target), then `npm run ios:build`. Check: the target builds and is embedded in
+  `Snorkle.app/PlugIns`; automatic signing with a free account registers `com.laffan.snorkle.share`
+  and `group.com.laffan.snorkle`; the signed app and extension both carry the group
+  (`codesign -d --entitlements - …`). The template path is read relative to where `ios init` runs.
+- **[verify] Build, Mac.** `npm run tauri build` runs `scripts/macos-share-extension.sh` (swiftc,
+  `-e _NSExtensionMain`, sandbox entitlements, ad hoc or `APPLE_SIGNING_IDENTITY`) and the bundle has
+  `Contents/PlugIns/SnorkleShare.appex`; `codesign --verify --deep --strict` passes on the app;
+  `pluginkit -m -i com.laffan.snorkle.share` lists it after the app is opened once; it appears under
+  System Settings → Login Items & Extensions → Sharing. Whether an ad-hoc-signed extension inside an
+  unsigned app is loaded is assumed, not checked.
+- **[verify] iPad flow.** From Safari, Notes (text with a link) and a link's share button: Snorkle
+  is listed; choosing it says "Sent to Snorkle"; Done, then switching to Snorkle opens the link in
+  a new tab once; Open Snorkle switches to Snorkle with the link in a new tab (and not twice). The
+  responder-chain open was reported working on iOS 26 and 27 in a developer-forum sample
+  (Sept 2026, thread 848791); if it fails, the sheet says so and the link waits.
+- **[verify] Mac flow.** Share → Snorkle from Safari and Notes: the link opens in a new tab while
+  the other app stays in front (also with Snorkle not running: it launches in the background);
+  Open Snorkle brings it forward. `NSWorkspace.open(_:withApplicationAt:)` from the sandboxed
+  extension is assumed allowed; it falls back to opening the link by its scheme.
+- **[decide] App Review.** Apple says there is no supported way for a share extension to open its
+  app (only Today and widget extensions); other browsers use the same responder-chain call. If App
+  Review objects, removing Open Snorkle on iPad leaves the supported part: the link waits for the
+  next switch to Snorkle.
+- **[decide] Shared text.** The extensions are offered for any shared text as well as links (so
+  apps that share a link inside text work); for text without a link the sheet says so.
+- **[decide] Mac sends at once** (choosing Snorkle in the Share menu opens the tab, without a
+  confirm step); the iPad queues at once. Both offer Open Snorkle afterwards.
+

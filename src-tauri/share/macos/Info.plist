@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Snorkle's macOS share extension (src-tauri/share/macos). A template:
+  scripts/macos-share-extension.sh fills in __VERSION__ and __IDENTIFIER__
+  from tauri.conf.json. Offered for a shared web link, or for shared text
+  (it takes the first web link in it).
+  SECURITY-REVIEW: docs/SECURITY_REVIEW.md, "Share extensions".
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>Snorkle</string>
+  <key>CFBundleExecutable</key>
+  <string>SnorkleShare</string>
+  <key>CFBundleIdentifier</key>
+  <string>__IDENTIFIER__.share</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>SnorkleShare</string>
+  <key>CFBundlePackageType</key>
+  <string>XPC!</string>
+  <key>CFBundleShortVersionString</key>
+  <string>__VERSION__</string>
+  <key>CFBundleVersion</key>
+  <string>__VERSION__</string>
+  <key>CFBundleSupportedPlatforms</key>
+  <array>
+    <string>MacOSX</string>
+  </array>
+  <key>LSMinimumSystemVersion</key>
+  <string>15.0</string>
+  <key>NSExtension</key>
+  <dict>
+    <key>NSExtensionAttributes</key>
+    <dict>
+      <key>NSExtensionActivationRule</key>
+      <dict>
+        <key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+        <integer>1</integer>
+        <key>NSExtensionActivationSupportsText</key>
+        <true/>
+      </dict>
+    </dict>
+    <key>NSExtensionPointIdentifier</key>
+    <string>com.apple.share-services</string>
+    <key>NSExtensionPrincipalClass</key>
+    <string>SnorkleShare.ShareViewController</string>
+  </dict>
+</dict>
+</plist>

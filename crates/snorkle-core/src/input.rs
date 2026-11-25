@@ -185,6 +185,39 @@ pub fn from_app_link(link: &Url) -> Option<Url> {
     plain.then_some(target)
 }
 
+/// The App Group Snorkle's share extension (iPadOS; owner request
+/// 2026-11-25) leaves links in, and the key they wait under in its user
+/// defaults: a list of strings. The extension's Swift source
+/// (`src-tauri/ios/ShareExtension/ShareViewController.swift`) names the same
+/// two values.
+pub const SHARE_APP_GROUP: &str = "group.com.laffan.snorkle";
+pub const SHARED_LINKS_KEY: &str = "sharedLinks";
+/// The most links taken from the share extension's queue at once.
+pub const MAX_SHARED_LINKS: usize = 20;
+
+/// The links the share extension queued, checked: each an http(s) URL with
+/// a host and no credentials, at most [`MAX_INPUT_LEN`] long, each once; at
+/// most [`MAX_SHARED_LINKS`] (the newest). Anything else is dropped. They
+/// still go through the navigation policy like any link from another app.
+pub fn shared_links(raw: &[String]) -> Vec<Url> {
+    let mut out: Vec<Url> = Vec::new();
+    let start = raw.len().saturating_sub(MAX_SHARED_LINKS);
+    for s in &raw[start..] {
+        if s.len() > MAX_INPUT_LEN {
+            continue;
+        }
+        let Ok(u) = Url::parse(s.trim()) else { continue };
+        let plain = matches!(u.scheme(), "http" | "https")
+            && u.host_str().is_some_and(|h| !h.is_empty())
+            && u.username().is_empty()
+            && u.password().is_none();
+        if plain && !out.contains(&u) {
+            out.push(u);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +305,29 @@ mod tests {
         for s in APP_SCHEMES {
             assert!(crate::policy::INTERNAL_SCHEMES.contains(s), "pages cannot navigate to {s}");
         }
+    }
+
+    #[test]
+    fn shared_links_are_checked() {
+        let raw: Vec<String> = [
+            "https://example.com/a",
+            " http://example.org/b?x=1 ",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "https://user:pw@example.com/",
+            "snorkle://open-url?url=https%3A%2F%2Fx.example",
+            "not a url",
+            "https://example.com/a",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .chain(std::iter::once(format!("https://example.com/{}", "a".repeat(MAX_INPUT_LEN))))
+        .collect();
+        let got: Vec<String> = shared_links(&raw).iter().map(|u| u.to_string()).collect();
+        assert_eq!(got, ["https://example.com/a", "http://example.org/b?x=1"]);
+        let many: Vec<String> = (0..30).map(|i| format!("https://e.example/{i}")).collect();
+        let got = shared_links(&many);
+        assert_eq!(got.len(), MAX_SHARED_LINKS);
+        assert_eq!(got[0].as_str(), "https://e.example/10", "the newest are kept");
     }
 }

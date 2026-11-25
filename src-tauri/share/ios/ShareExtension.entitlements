@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements of Snorkle's iPadOS share extension: the App Group it leaves
+  links in for the app (the app's own entitlements, src-tauri/ios/Entitlements.plist,
+  name the same group). Free (Personal Team) accounts can use App Groups.
+  SECURITY-REVIEW: every key here needs human sign-off.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.application-groups</key>
+  <array>
+    <string>group.com.laffan.snorkle</string>
+  </array>
+</dict>
+</plist>

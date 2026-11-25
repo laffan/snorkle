@@ -25,7 +25,7 @@ objc2-foundation = { version = "=0.3.2", features = [
   "NSArray", "NSDate", "NSDictionary", "NSError", "NSKeyValueObserving", "NSNotification",
   "NSObject", "NSOperation", "NSProcessInfo", "NSSet", "NSString", "NSURL", "NSURLRequest",
   "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLSession", "NSURLRequest", "NSURLResponse", "NSUUID", "NSValue", "NSData",
-  "NSProgress", "NSTimer", "NSFileManager",
+  "NSProgress", "NSTimer", "NSFileManager", "NSUserDefaults",
 ] }
 # Cutting the floating URL pill out of content views (layer mask).
 objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "CALayer", "CAShapeLayer", "CATransaction", "CAMediaTimingFunction", "CAAnimation", "CABase", "CAMediaTiming"] }

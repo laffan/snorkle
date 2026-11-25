@@ -26,7 +26,8 @@ type-checks for `aarch64-apple-darwin` and has not been built or run on a Mac ei
 crates/snorkle-core     platform-independent core (#![forbid(unsafe_code)])
 crates/snorkle-content  content WKWebView hosts (objc2): src/ios (UIKit), src/macos (AppKit),
                         src/webkit (WebKit code both share), stub elsewhere
-src-tauri               Tauri app: chrome window, commands, capabilities, plist/entitlements
+src-tauri               Tauri app: chrome window, commands, capabilities, plist/entitlements;
+                        share/ (the share extensions, Swift), ios/project.yml (XcodeGen template)
 ui                      chrome UI (HTML/CSS/JS, no build step, no packages): index.html,
                         load.js (adds the scripts in order), chrome/, notebook/, style/
 fuzz                    cargo-fuzz targets (separate workspace, nightly)
@@ -88,7 +89,10 @@ Xcode's command-line tools and Rust 1.90+; Safari 26 or later (Safari 27 runs on
   `docs/ARCHITECTURE.md` §5d.
 - `npm run tauri ios dev`: the real browser, in the iPad Simulator or on a device. First run:
   1. Xcode with the iPadOS 26/27 SDK; `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`.
-  2. `npm run tauri icon src-tauri/icons/icon.png && npm run tauri ios init`
+  2. `npm run tauri icon src-tauri/icons/icon.png && npm run tauri ios init`, from the repository
+     root (it reads the Xcode project template `src-tauri/ios/project.yml` from there, which adds
+     the share extension). Projects generated before 2026-11-25 lack the extension: delete
+     `src-tauri/gen/apple` and run `ios init` again (then step 3).
   3. `sh scripts/ios-entitlements.sh` copies the keys from `src-tauri/ios/Entitlements.plist`
      into `src-tauri/gen/apple/snorkle_iOS/snorkle_iOS.entitlements` (Tauri never does; `ios init`
      leaves it empty). Until Apple grants `com.apple.developer.web-browser`, add
@@ -140,6 +144,25 @@ Snorkle with its own URL schemes (the same forms Edge, Chrome and Firefox use):
 Each opens a new tab through the same navigation policy as links from other apps; anything that
 is not a plain http(s) page (no credentials) is refused. Pages inside Snorkle cannot use these
 schemes.
+
+**Share sheet** (2026-11-25): Snorkle is listed in the share sheet of other apps (a shared web
+link, or text with one in it). Choosing it sends the link to Snorkle, where it opens in a new tab,
+and shows a small sheet with **Open Snorkle** to switch to it now. Both work with a free (Personal
+Team) developer account. Neither has been built or run yet (no Mac here); see `docs/OPEN_QUESTIONS.md`.
+
+- **iPad:** the link waits in an App Group (`group.com.laffan.snorkle`) and opens the next time
+  Snorkle comes to the front. Open Snorkle uses a workaround Apple does not document (share
+  extensions have no supported way to open their app); if it fails, the link still waits.
+  Needs the Xcode project generated with the share extension (Run on iPadOS, step 2) and the
+  entitlements step (3), which now adds the App Group; Xcode registers the extension's identifier
+  (`com.laffan.snorkle.share`) and the group with automatic signing. The extension is signed with
+  the development team the project was generated with: set it before `ios init`.
+- **Mac:** the link is sent at once in the background (the app's own `snorkle://open-url` link), so
+  the app it came from stays in front. Only bundled builds have the extension (`npm run tauri
+  build` builds and signs it with `scripts/macos-share-extension.sh`, which needs Xcode's
+  command-line tools; `tauri dev` has none). Signed with `APPLE_SIGNING_IDENTITY` when set (the
+  same identity as the app), else ad hoc. After installing, turn it on once in System Settings →
+  General → Login Items & Extensions → Sharing (or the Share menu's Edit Extensions).
 
 ### Passkeys (both platforms)
 

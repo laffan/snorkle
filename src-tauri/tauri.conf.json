@@ -56,7 +56,8 @@
       "icons/icon.png"
     ],
     "iOS": {
-      "minimumSystemVersion": "26.0"
+      "minimumSystemVersion": "26.0",
+      "template": "src-tauri/ios/project.yml"
     },
     "macOS": {
       "minimumSystemVersion": "15.0",

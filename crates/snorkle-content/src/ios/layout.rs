@@ -40,11 +40,14 @@ impl ContentHost {
         // that case (a page or the chrome that still has it keeps it).
         let chrome: Rc<RefCell<Option<Retained<UIView>>>> = Rc::default();
         let (ev, ch, r) = (events.clone(), chrome.clone(), root.clone());
+        // Links shared to Snorkle from other apps wait for this too
+        // (`ContentEvents::app_active`, 2026-11-25).
         let active = RcBlock::new(move |_n: NonNull<NSNotification>| {
             let Some(mtm) = MainThreadMarker::new() else { return };
             let note = menu::ensure_responder(mtm, ch.borrow().as_deref());
             ev.note(note);
             hide_status_bar(&r);
+            ev.app_active();
         });
         observers.push(center.addObserverForName_object_queue_usingBlock(
             Some(UIApplicationDidBecomeActiveNotification),

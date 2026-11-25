@@ -31,6 +31,7 @@ mod menu;
 mod effects;
 mod layout;
 mod pages;
+mod share;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -449,6 +450,7 @@ unsafe fn open_external(mtm: MainThreadMarker, url: &Url) {
 }
 
 pub use crate::webkit::{dispatch_main, os_version, physical_memory};
+pub use self::share::take_shared_links;
 
 
 /// Version of the system web engine, as Safari's version (sites read it

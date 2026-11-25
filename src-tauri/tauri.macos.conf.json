@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBundleCommand": "sh scripts/macos-share-extension.sh"
+  },
+  "bundle": {
+    "macOS": {
+      "files": {
+        "PlugIns/SnorkleShare.appex": "gen/share-extension/SnorkleShare.appex"
+      }
+    }
+  }
+}

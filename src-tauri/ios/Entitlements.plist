@@ -20,5 +20,15 @@
   <!-- All app files (history, bookmarks, session) unreadable while locked. -->
   <key>com.apple.developer.default-data-protection</key>
   <string>NSFileProtectionComplete</string>
+  <!--
+    The App Group the share extension leaves links in (src-tauri/share/ios;
+    snorkle_core::input::SHARE_APP_GROUP), read when the app becomes active.
+    Free (Personal Team) accounts can use App Groups; Xcode registers the
+    group with automatic signing. 2026-11-25.
+  -->
+  <key>com.apple.security.application-groups</key>
+  <array>
+    <string>group.com.laffan.snorkle</string>
+  </array>
 </dict>
 </plist>

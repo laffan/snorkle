@@ -335,6 +335,9 @@ impl ContentEvents for Events {
         shared.log(console::Level::Info, None, &format!("download {id} {}: {}", item.state, item.name));
         shared.emit_downloads();
     }
+    fn app_active(&self) {
+        crate::open_shared_links(&self.shared);
+    }
     fn memory_warning(&self) {
         self.apply(|b| b.on_memory_warning());
     }

@@ -59,6 +59,21 @@ pub use stub::{
 mod shortcuts;
 pub use shortcuts::*;
 
+/// Links Snorkle's share extension queued for the app (iPadOS, owner
+/// request 2026-11-25; `ios/share.rs`), taken from the queue, unchecked:
+/// `snorkle_core::input::shared_links` checks them. Empty elsewhere (the
+/// macOS extension sends links with the app's URL scheme instead).
+pub fn take_shared_links() -> Vec<String> {
+    #[cfg(target_os = "ios")]
+    {
+        ios::take_shared_links()
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        Vec::new()
+    }
+}
+
 /// The person's permission for the app to use their passkeys in web pages
 /// (AuthenticationServices' authorization state for browsers;
 /// `passkeys::permission`).
@@ -331,6 +346,9 @@ pub trait ContentEvents: 'static {
     fn download_finished(&self, _id: u64, _error: Option<String>) {}
     /// A note for the in-app console (native diagnostics, no page data).
     fn note(&self, _text: &str) {}
+    /// The app became active (iPadOS: back from another app, or launched):
+    /// links the share extension queued are waiting (`take_shared_links`).
+    fn app_active(&self) {}
     /// The shortcut editor's recording: the ⌘ combination pressed (key,
     /// `MOD_*` bits), or `None` for Escape.
     fn key_recorded(&self, _key: Option<(String, u8)>) {}

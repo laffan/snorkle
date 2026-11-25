@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements of Snorkle's macOS share extension. macOS loads app extensions
+  only when they are sandboxed; it needs nothing more (it reads what it is
+  shared and opens Snorkle with NSWorkspace).
+  SECURITY-REVIEW: every key here needs human sign-off.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+</dict>
+</plist>

@@ -609,6 +609,26 @@ Firefox's) and `snorkle://host/path` (https). They arrive like links from other 
 (http/https, a host, no credentials, ≤ 8 KB) or refuses them, and `open_from_other_app` applies the
 navigation policy. They are in `policy::INTERNAL_SCHEMES`, so pages inside Snorkle cannot use them.
 
+**Share extensions** (2026-11-25): "Snorkle" in other apps' share sheets, an app extension on each
+platform (`src-tauri/share/`, Swift; `common/Links.swift` is built into both). Each takes a shared
+web link, or the first web link in shared text (http(s), a host, no credentials, ≤ 8 KB), and
+nothing else (no page content). Its sheet says the link was sent and offers Open Snorkle.
+- iPadOS: the extension adds the link to a list in the App Group's user defaults
+  (`group.com.laffan.snorkle`, key `sharedLinks`, the newest 20). The app takes the list when it
+  becomes active (`UIApplicationDidBecomeActiveNotification`, `ContentEvents::app_active`) and at
+  launch (`snorkle_content::take_shared_links`), checks each with `input::shared_links` (http(s), a
+  host, no credentials, ≤ 8 KB, each once, at most 20) and opens them as links from other apps
+  (`open_links`). Open Snorkle removes the link from the list and opens `snorkle://open-url?url=…`:
+  `NSExtensionContext.open` first (documented for Today and widget extensions; false here), then the
+  application object reached through the responder chain (`openURL:options:completionHandler:`); if
+  both fail the link goes back on the list. The extension target comes from the XcodeGen template
+  `src-tauri/ios/project.yml` (Tauri's own, plus the target; `bundle.iOS.template`).
+- macOS: the extension opens `snorkle://open-url?url=…` with its own app at once, without
+  activating it (`NSWorkspace`, `activates = false`), so the link opens in a new tab through the
+  same path as the URL schemes above; Open Snorkle brings the app forward. No App Group. Built,
+  sandboxed and signed by `scripts/macos-share-extension.sh` before bundling and copied into
+  `Contents/PlugIns` (`tauri.macos.conf.json`); Tauri signs the app around it without re-signing it.
+
 **Links to apps** (2026-11-09, iPadOS): WebKit hands a cross-site main-frame navigation to an
 installed app that claims the address (universal links) when the navigation delegate answers plain
 `Allow`, which is why Google Docs and Sheets jumped to their apps. By default every allowed

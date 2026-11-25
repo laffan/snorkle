@@ -248,6 +248,21 @@ fn open_links(shared: &Arc<Shared>, urls: Vec<snorkle_core::Url>) {
     }
 }
 
+/// Links Snorkle's share extension queued for the app (iPadOS, owner request
+/// 2026-11-25; `snorkle_content::take_shared_links`): checked
+/// (`input::shared_links`) and opened as links from other apps are. Run at
+/// launch and whenever the app becomes active; nothing elsewhere.
+pub(crate) fn open_shared_links(shared: &Arc<Shared>) {
+    let raw = snorkle_content::take_shared_links();
+    if raw.is_empty() {
+        return;
+    }
+    let urls = snorkle_core::input::shared_links(&raw);
+    let msg = format!("share extension: {} links waiting, {} usable", raw.len(), urls.len());
+    shared.log(snorkle_core::console::Level::Info, None, &msg);
+    open_links(shared, urls);
+}
+
 fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
     // iPadOS and macOS have a content host; other desktop builds run the
     // chrome alone. On macOS the web engine's version is Safari's.
@@ -396,6 +411,7 @@ fn setup<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::
     scripts::apply(&shared, false);
     shared.run(effects);
     open_links(&shared, pending);
+    open_shared_links(&shared);
 
     // Passkeys (2026-11-23): a macOS build signed with Apple's passkey
     // entitlement for browsers asks once, at the first launch, whether

@@ -10,3 +10,4 @@
 /node_modules
 /src-tauri/gen/passkeys
 /src-tauri/macos/*.provisionprofile
+/src-tauri/gen/share-extension
