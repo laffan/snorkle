@@ -235,6 +235,41 @@
       tell('content');
     }
 
+    // Where something from a page goes when it was not dropped somewhere
+    // (owner request 2026-11-25: clips made one after another stack, a gap
+    // apart, instead of piling up): under everything on the pad, in line
+    // with the lowest chip (so a run of clips is one column), else at the
+    // left of the view. Chips are measured even while the pad is hidden.
+    const STACK_GAP = 24;
+    function stackSpot(pad) {
+      let bottom = -Infinity;
+      for (const s of pad.strokes) bottom = Math.max(bottom, strokeBox(s)[3]);
+      const size = linkChips.sizes(pad.links.map((l) => [l, chips.get(l.id)]));
+      let lowest = null;
+      for (const l of pad.links) {
+        const b = l.y + (size.get(l.id) || [0, 40])[1];
+        bottom = Math.max(bottom, b);
+        if (!lowest || b > lowest.b) lowest = { x: l.x, b };
+      }
+      const x = lowest ? lowest.x : Math.max(20, 24 - pan.x);
+      return [Math.round(x), Math.round(bottom === -Infinity ? 40 - pan.y : bottom + STACK_GAP)];
+    }
+    // The pad panned so a stacked item shows: glided to it while the pad
+    // is shown (only if it is not in view already), set for next time
+    // while it is not.
+    function showStacked(link, shown, vw, vh) {
+      const [w, h] = linkChips.sizes([[link, chips.get(link.id)]]).get(link.id) || [120, 40];
+      const to = { ...pan };
+      if (link.x + to.x < 8 || link.x + Math.min(w, vw - 16) + to.x > vw - 8) to.x = Math.round(20 - link.x);
+      if (link.y + h + to.y > vh - 16) to.y = Math.round(vh - 16 - h - link.y);
+      if (link.y + to.y < 16) to.y = Math.round(Math.max(16, vh * 0.35 - h / 2) - link.y);
+      if (to.x === pan.x && to.y === pan.y) return;
+      if (shown) { glideTo(to); return; }
+      pan = to;
+      env.pad().pan = { ...pan };
+      showPan();
+    }
+
     function render() {
       lasso.clear();
       pan = { ...env.pad().pan };
@@ -475,9 +510,9 @@
         return true;
       },
       // A link (or, with `clip`, a clip `w` wide) from a page: where it was
-      // dropped (`at`, a client point), else at the middle of the view
-      // while the pad is shown; while it is not, under everything on the
-      // pad, and the pad panned to it for next time.
+      // dropped (`at`, a client point), else stacked under everything on
+      // the pad (stackSpot) and the pad panned to it: at once while it is
+      // shown, for next time while it is not.
       addLink(target, clip, at) {
         const pad = env.pad();
         const shown = host.clientWidth > 0 && host.clientHeight > 0;
@@ -486,28 +521,17 @@
         const half = clip ? Math.max(80, Math.min(clip.w, vw * 0.7)) / 2 : 90;
         const link = { id: newId('link'), x: 0, y: 0, target };
         if (clip) { link.image = clip.image; if (clip.imageDark) link.imageDark = clip.imageDark; link.w = Math.round(half * 2); }
-        if (shown && at) {
+        const dropped = shown && at;
+        if (dropped) {
           const [x, y] = toCanvas(at.x, at.y);
           link.x = Math.round(x - (clip ? half : 12));
           link.y = Math.round(y - 12);
-        } else if (shown) {
-          const nudge = (pad.links.length % 5) * 14;
-          link.x = Math.round(vw / 2 - pan.x - half + nudge);
-          link.y = Math.round(vh / 2 - pan.y - (clip ? 60 : 12) + nudge);
-        } else {
-          let bottom = -Infinity;
-          for (const s of pad.strokes) bottom = Math.max(bottom, strokeBox(s)[3]);
-          for (const l of pad.links) { const c = chips.get(l.id); bottom = Math.max(bottom, l.y + (c && c.offsetHeight ? c.offsetHeight : l.h || (l.image ? 200 : 40))); }
-          link.x = Math.round(Math.max(20, 24 - pan.x));
-          link.y = Math.round(bottom === -Infinity ? 40 - pan.y : bottom + 28);
-          pan = { x: pan.x, y: Math.round(Math.min(pan.y, vh * 0.35 - link.y)) };
-          pad.pan = { ...pan };
-          showPan();
-        }
+        } else [link.x, link.y] = stackSpot(pad);
         pad.links.push(link);
         history.push({ kind: 'link', id: link.id });
         drawLabels();
-        settle(link, vw, !at);
+        if (dropped) settle(link, vw, false);
+        else showStacked(link, shown, vw, vh);
         env.changed();
         return link;
       },

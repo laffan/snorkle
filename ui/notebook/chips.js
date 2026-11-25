@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const NB = window.SnorkleNb;
-  const { ICONS, capture, el, icon, linkLabel, onPress, renderText, siteOf } = NB;
+  const { ICONS, capture, el, icon, linkLabel, onPress, pictureSize, renderText, siteOf } = NB;
 
   // A clip's copy buttons (2026-11-24): its text, and its picture.
   const COPY_TEXT_ICON = () => icon([['rect', { x: '5', y: '5', width: '8.5', height: '9', rx: '1.5' }], ['path', { d: 'M10.5 5V3a1 1 0 0 0-1-1H3.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1H5' }], ['path', { d: 'M7 8h4.5M7 10.5h3' }]], 12);
@@ -104,12 +104,19 @@
 
     // A clip: both its pictures — as the page showed it, and white on
     // black — and the theme and the pin decide which shows (notebook.css).
-    function clipBody(l, e) {
+    // Each has its picture's proportions before it is decoded (2026-11-25),
+    // so the chip is as tall as it will be from the start. `bare`: for
+    // measuring only, boxes in the pictures' place.
+    function clipBody(l, e, bare) {
+      const size = pictureSize(l.image);
       const image = (src, cls) => {
-        const img = el('img', `notepad-clip-img ${cls}`);
-        img.src = src;
-        img.alt = `Clip from ${siteOf(l.target.url) || 'a page'}`;
-        img.draggable = false;
+        const img = el(bare ? 'span' : 'img', `notepad-clip-img ${cls}`);
+        if (size) img.style.aspectRatio = `${size.w} / ${size.h}`;
+        if (!bare) {
+          img.src = src;
+          img.alt = `Clip from ${siteOf(l.target.url) || 'a page'}`;
+          img.draggable = false;
+        }
         e.appendChild(img);
       };
       image(l.image || '', 'light');
@@ -273,7 +280,25 @@
       return e;
     }
 
-    function chip(l) {
+    // Chips' sizes, [width, height] by id (owner report 2026-11-25: clips
+    // made while the notebook was hidden piled up, as hidden chips measure
+    // nothing): as laid out, else laid out apart, off screen, in one pass
+    // (clips with boxes in their pictures' place: nothing is decoded).
+    function sizes(items) {
+      const out = new Map();
+      const apart = el('div', 'notepad notepad-measure');
+      for (const [l, c] of items) {
+        if (c && c.offsetHeight) out.set(l.id, [c.offsetWidth, c.offsetHeight]);
+        else apart.appendChild(chip(l, true));
+      }
+      if (!apart.childElementCount) return out;
+      document.body.appendChild(apart);
+      for (const c of apart.children) out.set(c.dataset.link, [c.offsetWidth, c.offsetHeight]);
+      apart.remove();
+      return out;
+    }
+
+    function chip(l, bare = false) {
       if (l.text !== undefined) return textChip(l);
       const quote = l.target.kind === 'quote';
       const e = el('button', `notepad-link${quote ? ' notepad-link-quote' : ''}${l.image ? ' notepad-clip' : ''}${l.fixed ? ' fixed' : ''}`);
@@ -282,7 +307,7 @@
       e.style.left = `${l.x}px`;
       e.style.top = `${l.y}px`;
       if (l.image) {
-        clipBody(l, e);
+        clipBody(l, e, bare);
         e.appendChild(sizeGrip(l, e));
         applySize(l, e);
       } else if (quote) {
@@ -350,7 +375,7 @@
       });
     }
 
-    return { chip, closeMenu, linkAt };
+    return { chip, closeMenu, linkAt, sizes };
   }
 
   Object.assign(NB, { HOLD_MS, CHIP_TAP_PX, MIN_W, MAX_W, MIN_H, createLinkChips });

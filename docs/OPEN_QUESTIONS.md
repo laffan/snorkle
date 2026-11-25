@@ -1522,3 +1522,10 @@ The live sites were not reachable or not signed in from this environment.
   layout changed since (lazy images, another window width, new content) lands nearby rather than
   exactly. `window.scrollTo` is called from the client world; confirm on WebKit that it scrolls the
   page. A page opened in a new tab is scrolled once it has loaded; the try is dropped after 30 s.
+- **[decide] Things from pages stack.** Anything that arrives without a drop point (clips, quotes,
+  links, Send Page to Notebook) goes under everything on the pad, in a column, 24 pt apart, and the
+  pad glides to it; before, while the notebook was shown, it went to the middle of the view. Clips
+  that already overlap in a notebook stay where they are (the lasso or a drag moves them).
+- **[verify] Pages added to a closed research session's notebook** (a tab dropped on its row,
+  `notebook::add_page` in Rust) still count a clip as 200 pt tall when placing the link under
+  everything, so that link can overlap a tall clip's foot. Not changed in this round.

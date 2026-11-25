@@ -293,6 +293,11 @@ html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
 }
 .nb-note-hit.nb-current { border-color: #f19837; background: color-mix(in srgb, #f19837 8%, transparent); }
 
+/* Chips laid out apart to be measured while the notebook is hidden
+   (notebook/chips.js `sizes`): never seen. */
+.notepad-measure { position: fixed; left: -100000px; top: 0; width: 4000px; height: 10px; visibility: hidden; pointer-events: none; }
+.notepad-measure > * { left: 0 !important; top: 0 !important; }
+
 /* A paste is caught here (notebook/notebook.js): never seen. */
 .notepad-paste-catcher { position: fixed; left: -1000px; top: 0; width: 10px; height: 10px; opacity: 0; pointer-events: none; }
 

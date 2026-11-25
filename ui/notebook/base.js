@@ -225,6 +225,30 @@
     return gone;
   }
 
+  /** A clip picture's size in pixels (`data:image/jpeg` or `png`), read
+   *  from its header, so its chip has its height before the picture is
+   *  decoded, and can be measured while the notebook is hidden; null when
+   *  it cannot be read. */
+  function pictureSize(src) {
+    const m = /^data:image\/(jpeg|png);base64,/.exec(String(src || ''));
+    if (!m) return null;
+    let bytes = '';
+    try { bytes = atob(src.slice(m[0].length, m[0].length + 65536)); } catch (e) { return null; }
+    const b = (i) => bytes.charCodeAt(i);
+    const u16 = (i) => (b(i) << 8) | b(i + 1);
+    const size = (w, h) => (w > 0 && h > 0 ? { w, h } : null);
+    if (m[1] === 'png') return bytes.length >= 24 ? size(u16(16) * 65536 + u16(18), u16(20) * 65536 + u16(22)) : null;
+    // JPEG: the segments after the start, up to a start-of-frame marker.
+    for (let i = 2; i + 9 < bytes.length;) {
+      if (b(i) !== 0xff) return null;
+      const mark = b(i + 1);
+      if (mark === 0xff) { i++; continue; }
+      if (mark >= 0xc0 && mark <= 0xcf && mark !== 0xc4 && mark !== 0xc8 && mark !== 0xcc) return size(u16(i + 7), u16(i + 5));
+      i += 2 + u16(i + 2);
+    }
+    return null;
+  }
+
   function takeBack(pad, step) {
     if (step.kind === 'link') pad.links = pad.links.filter((l) => l.id !== step.id);
     else if (step.kind === 'move') shiftItems(pad, step.strokes, step.links, -step.dx, -step.dy);
@@ -247,5 +271,5 @@
     }
   }
 
-  Object.assign(NB, { SVG_NS, el, icon, ICONS, capture, onPress, pref, setPref, WRITING_PAUSE_MS, pens, penHeardAt, penDown, penUp, penHeard, penRestedMs, penRested, emptyPad, newId, siteOf, pageOf, linkLabel, pathD, bounds, distanceTo, touches, inPolygon, shiftItems, dropEmpty, takeBack });
+  Object.assign(NB, { SVG_NS, el, icon, ICONS, capture, onPress, pref, setPref, WRITING_PAUSE_MS, pens, penHeardAt, penDown, penUp, penHeard, penRestedMs, penRested, emptyPad, newId, siteOf, pageOf, linkLabel, pathD, bounds, distanceTo, touches, inPolygon, shiftItems, dropEmpty, takeBack, pictureSize });
 })();

@@ -902,6 +902,17 @@ there, scrolls it to the box and outlines it for 2 s with the clip stage's dashe
 another page). Before, a tap on a clip whose page was the one shown did nothing visible. Search
 finds a clip by its links' words and sites; the export lists them under its picture.
 
+Where things from pages land (2026-11-25): where they were dropped on the canvas; otherwise
+(⌥-click, a clip drawn on the page, the quote button, Send Page to Notebook) under everything on
+the pad, 24 pt below the lowest item and in line with the lowest chip, so clips made one after
+another form one column. The pad then pans to the new item: it glides there while the notebook is
+shown (unless the item is in view already), and is left there for next time while it is hidden.
+Chips are measured even while the notebook is hidden (laid out apart, off screen), and a clip's
+picture has its proportions (read from its JPEG or PNG header) before it is decoded, so a chip's
+height is known when the next item is placed. Until then, items arriving while the notebook was
+shown went to the middle of the view, and clips made while it was hidden were counted 200 pt tall
+(hidden chips measured nothing) and overlapped.
+
 A clip in the notebook has two copy buttons at the end of its foot (2026-11-24; shown while it is
 pointed at, always on touch-only devices): Copy Text puts the text kept with it for search (the
 page's text in its region and what text recognition read in its picture) on the clipboard, or says
