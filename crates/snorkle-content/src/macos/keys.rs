@@ -240,14 +240,18 @@ pub fn install(
         monitors.push(m);
     }
 
-    // ⌥ pressed or let go (only its changes are reported; the hardware's
-    // modifier state, nothing a page can set).
+    // ⌥ alone pressed or let go (only its changes are reported; the
+    // hardware's modifier state, nothing a page can set). ⌥ with ⇧, ⌘ or ⌃
+    // is not the notebook's (⌥⇧ arrows select word by word), so it counts
+    // as let go (2026-11-25; before, ⌥ with anything counted).
     let ev = events.clone();
     let option = Cell::new(false);
     let flags = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let e = unsafe { event.as_ref() };
         if in_window(e) {
-            let down = e.modifierFlags().contains(NSEventModifierFlags::Option);
+            let f = e.modifierFlags();
+            let others = NSEventModifierFlags::Shift | NSEventModifierFlags::Command | NSEventModifierFlags::Control;
+            let down = f.contains(NSEventModifierFlags::Option) && !f.intersects(others);
             if option.replace(down) != down {
                 ev.option_key(down);
             }

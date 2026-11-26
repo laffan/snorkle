@@ -199,3 +199,19 @@ fn preview_rect_stays_in_the_window() {
     assert_eq!(preview_rect((10.0, 10.0, 30.0, 300.0), 1200.0, 800.0), None);
     assert_eq!(preview_rect((1190.0, 10.0, 300.0, 300.0), 1200.0, 800.0), None);
 }
+
+#[test]
+fn clips_fall_back_to_lower_qualities() {
+    // A JPEG whose size shrinks with quality: the first that fits is kept.
+    let size = |q: f64| (q * 2.4 * CLIP_MAX_BYTES as f64) as usize;
+    let mut tried = Vec::new();
+    let got = clip_jpeg(|q| {
+        tried.push(q);
+        Some(vec![0; size(q)])
+    });
+    assert_eq!(got.map(|d| d.len()), Some(size(0.4)));
+    assert_eq!(tried, [CLIP_QUALITY, 0.6, 0.4]);
+    assert_eq!(clip_jpeg(|_| Some(vec![0; CLIP_MAX_BYTES + 1])), None);
+    assert_eq!(clip_jpeg(|_| None), None);
+    assert_eq!(clip_jpeg(|q| Some(vec![1; (q * 10.0) as usize])).map(|d| d.len()), Some(8), "the best quality that fits");
+}

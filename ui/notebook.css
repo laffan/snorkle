@@ -301,10 +301,6 @@ html.ipados #notebook.dock-first .notepad-bar { padding-top: 30px; }
 /* A paste is caught here (notebook/notebook.js): never seen. */
 .notepad-paste-catcher { position: fixed; left: -1000px; top: 0; width: 10px; height: 10px; opacity: 0; pointer-events: none; }
 
-/* ---- around the notebook: its toggle and the page's "Send to Notebook" ---- */
-/* ⌥-click on a page: one button above what was picked (a hole, like the
-   selection menu). */
-#nb-pop .nb-send { font-weight: 600; }
 /* A clip's copy buttons (text, picture), at the end of its foot: shown
    while the clip is pointed at (always on touch-only devices). */
 .notepad-clip-copy {

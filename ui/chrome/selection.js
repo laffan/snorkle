@@ -63,10 +63,8 @@ T.event.listen('selection', (e) => {
   const shown = state && (tab === state.active || (state.split && (tab === state.split.left || tab === state.split.right)));
   if (!rect || !shown || modalOpen || panel) {
     hideSelection();
-    if (!rect && nbPick && nbPick.tab === tab && nbPick.kind === 'text') hideNbPop();
     return;
   }
-  if (nbPick && nbPick.tab === tab) return; // "Send to Notebook" is up for it
   T.core.invoke('read_selection', { tab }).then((text) => {
     if (generation !== selectionGeneration) return;
     if (!text || !text.trim()) { hideSelection(); return; }

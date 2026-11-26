@@ -89,10 +89,7 @@ impl ContentHost {
             cfg.setRect(objc2_foundation::NSRect::new(objc2_foundation::NSPoint::new(x, y), objc2_foundation::NSSize::new(w, h)));
             cfg.setSnapshotWidth(Some(&objc2_foundation::NSNumber::new_f64(w.min(crate::CLIP_MAX_WIDTH))));
             let block = block2::RcBlock::new(move |image: *mut NSImage, _err: *mut NSError| {
-                let jpeg = image
-                    .as_ref()
-                    .and_then(|i| jpeg_data(i, crate::CLIP_QUALITY))
-                    .filter(|d| d.len() <= crate::CLIP_MAX_BYTES);
+                let jpeg = image.as_ref().and_then(|i| crate::clip_jpeg(|q| jpeg_data(i, q)));
                 if let Some(f) = done.borrow_mut().take() {
                     f(jpeg);
                 }

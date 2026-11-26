@@ -117,6 +117,17 @@ fn clip_links_and_box() {
     assert_eq!(back_js(12.6, f64::NAN, -4.0, 2e6), "window.__snorkleNb&&window.__snorkleNb.back(13,0,0,100000);");
     let w = watch_js();
     assert!(w.contains("nb.back=function(x,y,wd,ht){"));
+    // ⌥-click (2026-11-25): straight to a clip of the element, never a link
+    // or sentence pick to confirm; an ⌥ press the page was not told of
+    // still counts; the app can tell the page ⌥ is held; scrolling grows
+    // the outline; a picked element's own text and links are read back.
+    assert!(!w.contains("k:'link'") && !w.contains("linkAt"));
+    assert!(w.contains("if(ok(e)&&optKey(e)&&!ov&&!nb.clip&&!stage&&!drag&&e.pointerType!=='touch'&&e.button===0)"));
+    assert!(w.contains("nb.setAlt=function(v){if(!drag&&!selPress)setAlt(!!v);};"));
+    assert!(w.contains("ov.addEventListener('wheel',wheel,{passive:false})"));
+    assert!(w.contains("nb.pick={e:p.e,r:m.r}") && w.contains("createTreeWalker(root||document.body"));
+    assert_eq!(alt_js(true), "window.__snorkleNb&&window.__snorkleNb.setAlt(true);");
+    assert_eq!(alt_js(false), "window.__snorkleNb&&window.__snorkleNb.setAlt(false);");
     assert!(w.contains("u.split('#')[0]===here"), "links within the page itself are left out");
 }
 

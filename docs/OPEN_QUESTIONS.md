@@ -1565,3 +1565,30 @@ this repository is developed on Linux. The Rust side type-checks for both platfo
 - **[decide] Mac sends at once** (choosing Snorkle in the Share menu opens the tab, without a
   confirm step); the iPad queues at once. Both offer Open Snorkle afterwards.
 
+## ⌥-click straight to the notebook (2026-11-25)
+
+Cause of "most ⌥-clicks add nothing", found by running the watcher in Chromium on kottke.org and
+Substack pages: the page heard of ⌥ only from its own key events (which need keyboard focus) or a
+pointer move with ⌥ down. An ⌥-click without either was swallowed, and so was a second ⌥-click
+without letting ⌥ go; ⌥-click on a link or on text gave a "Send to Notebook" button instead of a
+clip. All three are fixed in the watcher and checked there (all three ways of pressing, live on
+kottke.org and Substack, and on a local page shaped like nytimes.com's markup, since nytimes.com
+refuses automated browsers).
+
+- **[verify] On a Mac and an iPad:** ⌥-click clips at once on kottke.org, a Substack post list and
+  nytimes.com, with the page focused and after clicking in the chrome or the notebook first; a
+  second ⌥-click while still holding ⌥; the outline shows as soon as ⌥ goes down (macOS: told by the
+  app); the clip's links appear under it. WebKit is assumed to give pointer events ⌥ from the
+  hardware's state (Chromium does) and to let a pointer capture move to the watcher's cover.
+- **[verify] Scrolling with ⌥ held** grows the outline (up) and shrinks it (down), with a mouse
+  wheel and a trackpad; the page does not scroll meanwhile. Steps are 40 px of scrolling each.
+- **[decide] What ⌥-click takes by default:** the innermost block under the pointer, widened to a
+  link that wraps it (NYT story cards come whole); a Substack post's title alone is its own block,
+  so the whole preview takes two scroll steps. A different default (e.g. always the nearest card)
+  is a rule in `pickAt`.
+- **[decide] `notebook_link_title`** (native command, fetches a linked page's title) has no caller
+  now that ⌥-click no longer adds bare links; removing it (and `Report::Link`) removes native attack
+  surface.
+- **[verify] Large clips:** a JPEG over 2 MB is encoded again at 0.6 and 0.4 quality; nothing
+  measured on a Retina screen yet.
+

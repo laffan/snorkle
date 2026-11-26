@@ -257,7 +257,7 @@ function floatingHoles() {
     if (f && pill) f.h = Math.max(1, pill.y - f.y);
     if (f) out.push(f);
   }
-  for (const id of ['actions-pop', 'confirm-pop', 'pick-bar', 'capture-bar', 'sel-pop', 'img-pop', 'nb-pop', 'toast', 'os-banner']) {
+  for (const id of ['actions-pop', 'confirm-pop', 'pick-bar', 'capture-bar', 'sel-pop', 'img-pop', 'toast', 'os-banner']) {
     const e = $(id);
     if (e.hidden) continue;
     const h = hole(e, 15);

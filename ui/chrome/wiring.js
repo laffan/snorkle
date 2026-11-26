@@ -98,7 +98,6 @@ document.addEventListener('pointerdown', (ev) => {
   if (!$('vm-pop').hidden && !$('vm-pop').contains(ev.target)) closeVmPop();
   if (!$('pin-pop').hidden && !$('pin-pop').contains(ev.target)) closePinPop();
   if (!$('img-pop').hidden && !$('img-pop').contains(ev.target)) hideImageMenu();
-  if (!$('nb-pop').hidden && !$('nb-pop').contains(ev.target)) hideNbPop();
   if (!$('actions-pop').hidden && !$('actions').contains(ev.target)) setActions(false);
   // Taps outside close the overlaid sidebar (narrow) and the flyout.
   if ((narrow || flyoutMode()) && sidebarShown && !$('sidebar').contains(ev.target)) setSidebar(false);
@@ -117,7 +116,6 @@ document.addEventListener('keydown', (ev) => {
   else if (!$('actions-pop').hidden) setActions(false);
   else if (!$('pin-pop').hidden) closePinPop();
   else if (!$('img-pop').hidden) hideImageMenu();
-  else if (!$('nb-pop').hidden) hideNbPop();
   else if (menuOpen) closeMenu();
   else if (modalOpen) setModal(false);
   else if (scriptsOpen) setScripts(false);

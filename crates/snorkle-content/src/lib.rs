@@ -233,6 +233,18 @@ pub const THUMB_QUALITY: f64 = 0.6;
 pub const CLIP_MAX_WIDTH: f64 = 900.0;
 pub const CLIP_QUALITY: f64 = 0.82;
 pub const CLIP_MAX_BYTES: usize = 2 * 1024 * 1024;
+/// A clip over `CLIP_MAX_BYTES` at `CLIP_QUALITY` is encoded again at these
+/// (2026-11-25: a large, detailed region failed outright before).
+pub const CLIP_FALLBACK_QUALITIES: [f64; 2] = [0.6, 0.4];
+
+/// The first of `encode`'s JPEGs, at `CLIP_QUALITY` then each fallback
+/// quality, that is within `CLIP_MAX_BYTES`; `None` if none is.
+pub fn clip_jpeg(encode: impl FnMut(f64) -> Option<Vec<u8>>) -> Option<Vec<u8>> {
+    std::iter::once(CLIP_QUALITY)
+        .chain(CLIP_FALLBACK_QUALITIES)
+        .filter_map(encode)
+        .find(|d| !d.is_empty() && d.len() <= CLIP_MAX_BYTES)
+}
 
 /// A region a page reported (`notebook` C23: visual-viewport CSS pixels,
 /// `vw` that viewport's width) in its web view's coordinates (`size`, its

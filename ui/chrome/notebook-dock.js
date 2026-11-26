@@ -267,59 +267,25 @@ function clipWords(clip, target) {
     .catch(() => {});
 }
 
-// ⌥-click on text or an image: "Send to Notebook" above it.
-let nbPick = null; // { tab, kind, rect }
-function hideNbPop() {
-  if (!nbPick && $('nb-pop').hidden) return;
-  nbPick = null;
-  $('nb-pop').hidden = true;
-  reportLayout();
-}
+// ⌥-click in a page goes straight to the notebook (owner request
+// 2026-11-25; until then a link, an image or text got a "Send to Notebook"
+// button first): the element clicked is clipped, with its text and links;
+// on selected text, the selection is quoted.
 T.event.listen('notebook_pick', (e) => {
   const { tab, kind, rect } = e.payload || {};
   if (kind === 'end') { if (tab === clipTab) { clipTab = null; if (notebook) notebook.clipEnded(); } return; }
   // A drag began in a page (selected text, or an image), or ended.
   if (kind === 'dtext' || kind === 'dimg') { if (rect) pageDrag = { tab, kind, rect, at: performance.now(), ended: 0 }; return; }
   if (kind === 'dend') { if (pageDrag && pageDrag.tab === tab) pageDrag.ended = performance.now(); return; }
-  if (kind === 'hide') { if (nbPick && nbPick.tab === tab) hideNbPop(); return; }
+  if (kind === 'hide' || kind === 'link') return;
   const shown = shownPanes().some((p) => p.tab === tab);
-  if (kind === 'clip') chromeLog('info', `notebook: clip from tab ${tab}${!rect || !shown || modalOpen || panel ? ' (ignored: page not shown, or a sheet open)' : ''}`);
+  chromeLog('info', `notebook: ${kind} from tab ${tab}${!rect || !shown || modalOpen || panel ? ' (ignored: page not shown, or a sheet open)' : ''}`);
   if (!rect || !shown || modalOpen || panel) return;
+  if (kind === 'clip' && tab === clipTab) { clipTab = null; if (notebook) notebook.clipEnded(); }
   const t = captureTab(tab);
-  if (kind === 'clip') {
-    if (tab === clipTab) { clipTab = null; if (notebook) notebook.clipEnded(); }
-    if (t) clipToNotebook(t, rect);
-    return;
-  }
   if (!t) return;
-  hideSelection();
-  hideImageMenu();
-  nbPick = { tab, kind, rect, url: kind === 'link' ? String(e.payload.url || '') : '' };
-  placeOverPage($('nb-pop'), tab, rect);
-});
-$('nb-send').addEventListener('click', () => {
-  const pick = nbPick;
-  hideNbPop();
-  const t = pick && captureTab(pick.tab);
-  if (!t) return;
-  if (pick.kind === 'img') { clipToNotebook(t, pick.rect); return; }
-  if (pick.kind === 'link') {
-    // The linked page's own title, read from the start of that page.
-    const url = pick.url;
-    if (!/^https?:/i.test(url)) return;
-    toast('Adding the link…');
-    T.core.invoke('notebook_link_title', { tab: t.id, url })
-      .catch(() => null)
-      .then((title) => {
-        let host = '';
-        try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (err) { host = url; }
-        ensureNotebook().then((nb) => {
-          nb.addQuote({ kind: 'page', url, title: title || host });
-          toast(notebookShown() ? 'Link added.' : 'Link sent to the notebook.');
-        });
-      });
-    return;
-  }
+  if (kind === 'clip' || kind === 'img') { clipToNotebook(t, rect); return; }
+  if (kind !== 'text') return;
   T.core.invoke('read_selection', { tab: t.id }).then((text) => {
     if (!text) { toast('Nothing selected to send.'); return; }
     ensureNotebook().then((nb) => {
@@ -386,7 +352,6 @@ function notebookTrack() {
   if (key === notebookPage) return;
   notebookPage = key;
   if (clipTab !== null && (!t || t.id !== clipTab)) endClipMode();
-  if (nbPick && !shownPanes().some((p) => p.tab === nbPick.tab)) hideNbPop();
   notebook.pageChanged(t && t.url && !t.private ? t.url.full : '');
 }
 

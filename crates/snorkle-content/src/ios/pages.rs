@@ -101,9 +101,7 @@ impl ContentHost {
             let block = RcBlock::new(move |image: *mut UIImage, _err: *mut NSError| {
                 let jpeg = image
                     .as_ref()
-                    .and_then(|i| i.jpeg_representation(crate::CLIP_QUALITY))
-                    .map(|d| d.to_vec())
-                    .filter(|d| d.len() <= crate::CLIP_MAX_BYTES);
+                    .and_then(|i| crate::clip_jpeg(|q| i.jpeg_representation(q).map(|d| d.to_vec())));
                 if let Some(f) = done.borrow_mut().take() {
                     f(jpeg);
                 }

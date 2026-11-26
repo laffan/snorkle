@@ -877,14 +877,24 @@ address as a link). The paste is caught in a hidden field so the system's own pa
 text; no clipboard permission is asked.
 
 Bringing things in (C23): a constant watcher in every page's client world reports
-- ⌥ held (2026-11-24): the element under the pointer is outlined with the clip stage's dashed
-  border: an image, video or canvas, else a link, else the innermost element laid out as a block (at
-  least 16 × 12 pt, no larger than the view; nothing is outlined over a larger one). ⌥-click clips
-  it at once (the clip's report, as a drawn stage's), or sends the link (below);
-- ⌥-click on a selection: "Send to Notebook" appears above it (a hole); pressed, the text is read
-  as the selection menu reads it (C20) and becomes a quote linking back with a text fragment
-  (`#:~:text=`). Over text with no outlined element, ⌥-click selects the sentence the same way
-  (`Intl.Segmenter`); until 2026-11-24 it always did, and an image got "Send to Notebook" too;
+- ⌥ held (2026-11-24; reworked 2026-11-25): the element under the pointer is outlined with the clip
+  stage's dashed border: an image, video or canvas, else the innermost element laid out as a block
+  (at least 16 × 12 pt; one larger than the view in both directions is not taken), widened to a
+  link that wraps it whole (a story card, as on nytimes.com, where the headline and summary are
+  inside one link). Scrolling up while ⌥ is held grows the outline to the next larger element
+  around it, scrolling down shrinks it back (the page does not scroll meanwhile). ⌥-click clips the
+  outlined element at once, with no confirmation (2026-11-25; until then a link, a sentence or a
+  selection got a "Send to Notebook" button first, and ⌥-click on a link added a link instead): its
+  report is the element's box cut to the view, and the region read back for it is that element's own
+  text and links (below). ⌥-click works whether or not the page heard ⌥ go down: a page hears key
+  events only while it has keyboard focus, and before, an ⌥-click without a key event or pointer move
+  in between was swallowed and did nothing (and so was a second ⌥-click without letting ⌥ go). The
+  press's own modifier state now counts, and on macOS the app tells the pages on screen when ⌥ alone
+  goes down or up (`notebook::alt_js`, from the window's modifier monitor), so the outline shows
+  without focus. After a clip the outline hides until the pointer moves on;
+- ⌥-click on a selection: the selection is quoted at once (read as the selection menu reads it,
+  C20; a quote linking back with a text fragment, `#:~:text=`); until 2026-11-25 behind "Send to
+  Notebook";
 - ⌥-drag, or a drag while the scissors are on (clip mode, which then ends): while ⌥ is held over
   a page (key events, or the modifier state of pointer moves), and in clip mode, a cover lies over
   the page: a crosshair, and every press goes to it, so no text is selected and nothing is
@@ -895,11 +905,16 @@ Bringing things in (C23): a constant watcher in every page's client world report
   zotero-helper's clip mode: its corners size it, a press inside moves it, a press outside draws
   another; Clip (or ↩) makes the clip, × (or Escape) drops it. Every handler takes only real input
   (`isTrusted`). A clip carries the text it shows, for search, not shown: the page's text laid out
-  in the region (and images' `alt`), read before the picture, and the lines Apple's on-device text
-  recognition (Vision, `webkit/ocr.rs`) reads in the picture that the page's text lacks;
-- ⌥-click on a link (2026-11-16): "Send to Notebook" adds a link titled with the linked page's own
-  `<title>` (or `og:title`), read from the start of that page fetched without cookies (≤ 512 KB of
-  an HTML reply, 10 s; `http::fetch_page_head`, `notebook::page_title`); its host if it has none;
+  in the region (and images' `alt`; for an ⌥-clicked element, only the element's own, 2026-11-25),
+  read before the picture, and the lines Apple's on-device text recognition (Vision,
+  `webkit/ocr.rs`) reads in the picture that the page's text lacks. Its links are the element's
+  links laid out in the region and the link the element is inside, if any; for a drawn box, the
+  links laid out in it. A link's words are its first line of text (else its image's `alt`, its
+  `aria-label` or title). A clip JPEG over 2 MB is encoded again at quality 0.6, then 0.4, before
+  the clip fails (2026-11-25);
+- (until 2026-11-25) ⌥-click on a link: "Send to Notebook" added a link titled with the linked
+  page's own `<title>`, read with `notebook_link_title`; the watcher no longer reports links, and
+  the chrome no longer calls that command;
 
 - dragging selected text or an image out of a page (2026-11-16): the watcher reports where the
   drag began (the selection, or the image's box) and when it ends; let go on the notebook's

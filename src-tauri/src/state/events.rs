@@ -163,6 +163,24 @@ impl ContentEvents for Events {
     }
     fn option_key(&self, down: bool) {
         (self.shared.emit)(ChromeEvent::OptionKey(down));
+        // The pages on screen learn it too (2026-11-25): a page hears of ⌥
+        // only from its own key events (when it has keyboard focus) or the
+        // next pointer move, so its outline was often missing.
+        let tabs: Vec<TabId> = {
+            let b = self.shared.browser();
+            match b.split_view() {
+                Some(s) => vec![s.left, s.right],
+                None => b.active().into_iter().collect(),
+            }
+        };
+        let js = snorkle_core::notebook::alt_js(down);
+        snorkle_content::dispatch_main(move || {
+            with_host(|h| {
+                for tab in tabs {
+                    h.notebook_run(tab, &js);
+                }
+            })
+        });
     }
     fn note(&self, text: &str) {
         self.shared.log(console::Level::Info, None, text);
